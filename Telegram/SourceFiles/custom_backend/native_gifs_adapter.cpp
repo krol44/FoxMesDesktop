@@ -8,6 +8,7 @@ This file is part of FoxMes Desktop.
 #include "custom_backend/api_client.h"
 #include "custom_backend/native_bridge.h"
 #include "custom_backend/native_runtime.h"
+#include "custom_backend/native_streaming_loader.h"
 #include "data/data_document.h"
 #include "data/data_document_media.h"
 #include "data/data_file_origin.h"
@@ -124,6 +125,7 @@ base::flat_map<not_null<Main::Session*>, State> &States() {
 	// under the bridge and leaves the cell loading for good.
 	const auto data = session->data().document(mediaId);
 	data->setContentUrl(url);
+	Streaming::RememberSource(data, url);
 	const auto poster = item.value("poster_url").toString().trimmed();
 	if (!poster.isEmpty()) {
 		data->updateThumbnails(

@@ -2,7 +2,7 @@
 #define MyAppShortName "FoxMes"
 #define MyAppPublisher "Foxtail"
 #define MyAppURL "https://fxl.ru"
-#define MyAppVersion "1.4.1"
+#define MyAppVersion "1.4.2"
 #define MyAppExeName "FoxMes.exe"
 #define MyAppId "F65B4EBE-8E1B-58C8-AED1-B3E8E207EA5C"
 
@@ -26,7 +26,7 @@ DefaultDirName={localappdata}\FoxMes
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir={#OutputPath}
-OutputBaseFilename=FoxMes-1.4.1-windows-x64-setup
+OutputBaseFilename=FoxMes-1.4.2-windows-x64-setup
 SetupIconFile={#SourcePath}\..\..\Resources\art\icon256.ico
 UninstallDisplayName={#MyAppName}
 UninstallDisplayIcon={app}\{#MyAppExeName}

@@ -87,6 +87,16 @@ void ApplyDownloadAuth(QNetworkRequest &request, const DownloadAuth &auth);
 // dev build, where certificates are verified as usual.
 bool AllowDownloadTls(QNetworkReply *reply, const DownloadAuth &auth);
 
+// Releases a network owner while QCoreApplication is still alive.
+//
+// QNetworkAccessManager runs its own worker thread and joins it from its
+// destructor through the Qt event system. One that is still alive when the
+// static destructors run - after ~QCoreApplication - waits on a thread nothing
+// can tell to quit any more, so exit() never returns and the process hangs
+// with its dock icon left behind. Anything that keeps a manager past the end
+// of a scope registers its teardown here, and it runs on aboutToQuit instead.
+void ReleaseOnQuit(std::function<void()> release);
+
 // Client() is the unaffiliated login/register client used by Intro.
 [[nodiscard]] ApiClient &Client();
 // Every authenticated Main::Session has its own REST token context.

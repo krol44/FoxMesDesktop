@@ -9,6 +9,7 @@
 #include "custom_backend/native_reactions_adapter.h"
 #include "custom_backend/native_runtime.h"
 #include "custom_backend/native_scheduled_adapter.h"
+#include "custom_backend/native_streaming_loader.h"
 #include "data/components/scheduled_messages.h"
 
 #include "api/api_common.h"
@@ -415,6 +416,9 @@ void ApplyAttachmentSource(
     const auto url = attachment.value("url").toString().trimmed();
     if (!url.isEmpty()) {
         document->setContentUrl(url);
+        // The streaming loader needs the same url, and DocumentData hands out
+        // no getter for it.
+        Streaming::RememberSource(document, url);
     }
     const auto poster = attachment.value("poster_url").toString().trimmed();
     if (poster.isEmpty()) {
@@ -522,8 +526,10 @@ MTPMessageMedia MediaFromAttachment(
         using Flag = MTPDdocumentAttributeVideo::Flag;
         auto flags = Flag::f_supports_streaming | Flag();
         if (kind == u"video_note"_q) {
-            // A round message is square by definition and is never streamed.
-            flags = Flag::f_round_message | Flag();
+            // Square by definition, and streamed like any other video: the
+            // flag is what DocumentData::supportsStreaming() reads, and
+            // without it a round message can only be played after a download.
+            flags = Flag::f_round_message | Flag::f_supports_streaming;
         }
         attributes.push_back(MTP_documentAttributeVideo(
             MTP_flags(flags),
@@ -724,24 +730,18 @@ std::optional<MTPMessageMedia> MediaFromWebPage(
         // still lay out the frame around it.
         return std::nullopt;
     }
-    // Large picture by default. Upstream's computeDefaultSmallMedia() shrinks
-    // any card that has a site name, a title and a description - which is
-    // every ordinary article - and a thumbnail is not what a card is for here.
-    // The default is moved by declaring the page a photo one, not by forcing
-    // the media size on the message: the composer's settings box reads
-    // computeDefaultSmallMedia() as well, so a flag forced on the message
-    // alone left the box offering "Enlarge photo" for a card that was already
-    // going out large. Types upstream renders large anyway are left as they
-    // are.
-    const auto largeByType = (type == u"video"_q)
-        || (type == u"gif"_q)
-        || (type == u"document"_q);
-    const auto renderedType = (!imageUrl.isEmpty() && !largeByType)
-        ? u"photo"_q
-        : type;
+    // Shrunk picture by default: the page type is passed through as the server
+    // read it, so upstream's computeDefaultSmallMedia() decides the size the
+    // same way it does for a Telegram card. It shrinks any page carrying a
+    // site name, a title and a description - every ordinary article - and
+    // leaves a photo or video page large. The default is left to that function
+    // rather than forced with force_small_media on the message, because the
+    // composer's settings box reads computeDefaultSmallMedia() too: a flag set
+    // on the message alone would leave the box offering "Shrink photo" for a
+    // card that was already going out small.
     using Flag = MTPDwebPage::Flag;
     auto flags = MTPDwebPage::Flags();
-    if (!renderedType.isEmpty()) flags |= Flag::f_type;
+    if (!type.isEmpty()) flags |= Flag::f_type;
     if (!siteName.isEmpty()) flags |= Flag::f_site_name;
     if (!title.isEmpty()) flags |= Flag::f_title;
     if (!description.isEmpty()) flags |= Flag::f_description;
@@ -776,7 +776,7 @@ std::optional<MTPMessageMedia> MediaFromWebPage(
             MTP_string(url),
             MTP_string(displayUrl.isEmpty() ? url : displayUrl),
             MTP_int(0),
-            MTP_string(renderedType),
+            MTP_string(type),
             MTP_string(siteName),
             MTP_string(title),
             MTP_string(description),

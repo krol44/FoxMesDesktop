@@ -93,7 +93,7 @@ build_patch_list() {
     "Version $ov is unsigned." "Version $nv is unsigned."
 
   add_patch "$ROOT/Telegram/build/foxmes/release-notes.md" \
-    "# FoxMes Desktop $ov" "# FoxMes Desktop $nv"
+    "FoxMes Desktop $ov" "FoxMes Desktop $nv"
 }
 
 apply_patches() {

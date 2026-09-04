@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/timer.h"
 #include "core/file_utilities.h"
 #include "core/version.h"
+#include "custom_backend/native_runtime.h"
 #include "ui/toast/toast.h"
 
 #include <gsl/gsl>
@@ -243,6 +244,13 @@ private:
 std::shared_ptr<GitHubUpdateChecker> InstanceValue;
 
 std::shared_ptr<GitHubUpdateChecker> Instance() {
+	// The checker owns a QNetworkAccessManager, which must not be destroyed
+	// after QCoreApplication: its worker thread would then be joined with
+	// nothing left to tell it to quit, and exit() would never return.
+	[[maybe_unused]] static const auto release = [] {
+		ReleaseOnQuit([] { InstanceValue = nullptr; });
+		return true;
+	}();
 	if (!InstanceValue) {
 		InstanceValue = std::make_shared<GitHubUpdateChecker>();
 	}

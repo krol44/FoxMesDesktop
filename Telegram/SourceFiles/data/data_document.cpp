@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_document.h"
 
+#include "custom_backend/native_runtime.h"
+#include "custom_backend/native_streaming_loader.h"
 #include "data/data_document_resolver.h"
 #include "data/data_session.h"
 #include "data/data_streaming.h"
@@ -1010,6 +1012,9 @@ PhotoData *DocumentData::goodThumbnailPhoto() const {
 }
 
 Storage::Cache::Key DocumentData::bigFileBaseCacheKey() const {
+	if (CustomBackend::Enabled() && !hasRemoteLocation()) {
+		return CustomBackend::Streaming::BigFileCacheKey(this);
+	}
 	return hasRemoteLocation()
 		? StorageFileLocation(
 			_dc,
@@ -1669,6 +1674,9 @@ bool DocumentData::useStreamingLoader() const {
 }
 
 bool DocumentData::canBeStreamed() const {
+	if (CustomBackend::Enabled() && !hasRemoteLocation()) {
+		return CustomBackend::Streaming::CanBeStreamed(this);
+	}
 	return hasRemoteLocation() && supportsStreaming();
 }
 
@@ -1714,6 +1722,9 @@ auto DocumentData::createStreamingLoader(
 			location.accessDisable();
 			return result;
 		}
+	}
+	if (CustomBackend::Enabled() && !hasRemoteLocation()) {
+		return CustomBackend::Streaming::MakeLoader(this);
 	}
 	return hasRemoteLocation()
 		? std::make_unique<Media::Streaming::LoaderMtproto>(

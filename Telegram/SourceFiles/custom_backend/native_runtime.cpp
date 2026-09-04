@@ -3,7 +3,9 @@
 #include "custom_backend/native_gifs_adapter.h"
 #include "custom_backend/native_wallpaper_adapter.h"
 #include "custom_backend/native_stickers_adapter.h"
+#include "custom_backend/native_streaming_loader.h"
 
+#include "base/algorithm.h"
 #include "custom_backend/api_client.h"
 #include "custom_backend/native_bridge.h"
 #include "custom_backend/token_store.h"
@@ -12,6 +14,7 @@
 #include "main/main_account.h"
 #include "main/main_session.h"
 
+#include <QCoreApplication>
 #include <QJsonDocument>
 #include <QSettings>
 #include <QUrl>
@@ -27,6 +30,7 @@
 #include <cstdlib>
 #include <memory>
 #include <unordered_map>
+#include <vector>
 
 namespace CustomBackend {
 namespace {
@@ -46,6 +50,21 @@ QJsonObject gLoginUser;
 std::unordered_map<qint64, std::unique_ptr<AuthContext>> gContexts;
 std::unordered_map<Main::Session*, std::unique_ptr<NativeBridge>> gBridges;
 rpl::event_stream<Main::Session*> gBridgeChanges;
+
+std::vector<std::function<void()>> gReleaseOnQuit;
+bool gReleaseOnQuitConnected = false;
+
+// The REST clients own a QNetworkAccessManager each, so they cannot outlive
+// QCoreApplication - see ReleaseOnQuit() for what happens when they do.
+void ReleaseClientsOnQuit() {
+    [[maybe_unused]] static const auto once = [] {
+        ReleaseOnQuit([] {
+            gContexts.clear();
+            gLoginClient = nullptr;
+        });
+        return true;
+    }();
+}
 
 // Single source of truth for the FOXMES_URL override: it both selects the
 // endpoint and marks the build as running against a dev environment.
@@ -76,6 +95,7 @@ void SaveContext(qint64 userId) {
 }
 
 AuthContext &EnsureContext(qint64 userId) {
+    ReleaseClientsOnQuit();
     auto &slot = gContexts[userId];
     if (!slot) slot = std::make_unique<AuthContext>();
     auto &context = *slot;
@@ -184,10 +204,15 @@ DownloadAuth AuthorizeDownload(Main::Session *session, const QUrl &url) {
         return {};
     }
     // Host allow-list, not a substring test: the bearer identifies the user,
-    // so anything but our own CDN must come out of here empty. The dev host is
-    // only accepted in a dev build, where FOXMES_URL is set.
+    // so anything but our own CDN and our own API must come out of here empty.
+    // The API is on the list because GET /link-preview/image is bearer'd like
+    // every other route, and that one is read by the file loaders rather than
+    // by the REST client. The dev host is only accepted in a dev build, where
+    // FOXMES_URL is set.
     const auto host = url.host().toLower();
+    const auto api = QUrl(BaseUrl()).host().toLower();
     const auto ours = (host == u"cdn.fxl.ru"_q)
+        || (!api.isEmpty() && (host == api))
         || (DevInsecureTls() && (host == u"cdn.fxl.test"_q));
     if (!ours) {
         return {};
@@ -219,7 +244,27 @@ bool AllowDownloadTls(QNetworkReply *reply, const DownloadAuth &auth) {
     return true;
 }
 
+void ReleaseOnQuit(std::function<void()> release) {
+    if (!release) {
+        return;
+    }
+    const auto app = QCoreApplication::instance();
+    Assert(app != nullptr);
+    if (!gReleaseOnQuitConnected) {
+        gReleaseOnQuitConnected = true;
+        // Runs after Sandbox::closeApplication(), which is connected first and
+        // has already taken down Core::Application and every session by then.
+        QObject::connect(app, &QCoreApplication::aboutToQuit, app, [] {
+            for (const auto &release : base::take(gReleaseOnQuit)) {
+                release();
+            }
+        });
+    }
+    gReleaseOnQuit.push_back(std::move(release));
+}
+
 ApiClient &Client() {
+    ReleaseClientsOnQuit();
     if (!gLoginClient) {
         gLoginClient = std::make_unique<ApiClient>(QUrl(BaseUrl()));
     }
@@ -385,6 +430,7 @@ void DetachSession(Main::Session *session) {
         Gifs::ClearSession(session);
         Stickers::ClearSession(session);
         Wallpapers::ClearSession(session);
+        Streaming::ClearSession(session);
     }
     gBridges.erase(session);
 	gBridgeChanges.fire_copy(session);

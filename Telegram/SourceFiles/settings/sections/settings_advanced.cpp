@@ -291,18 +291,23 @@ void BuildAutoDownloadSection(SectionBuilder &builder) {
 		&st::menuIconProfile,
 		Source::User,
 		{ u"auto"_q, u"download"_q, u"private"_q, u"media"_q });
-	add(
-		u"advanced/auto_download_groups"_q,
-		tr::lng_media_auto_in_groups(),
-		&st::menuIconGroups,
-		Source::Group,
-		{ u"auto"_q, u"download"_q, u"groups"_q, u"media"_q });
-	add(
-		u"advanced/auto_download_channels"_q,
-		tr::lng_media_auto_in_channels(),
-		&st::menuIconChannel,
-		Source::Channel,
-		{ u"auto"_q, u"download"_q, u"channels"_q, u"media"_q });
+	// Groups and channels are outside the current product scope: the bridge
+	// serves private chats and Saved Messages, so both rows would only ever
+	// configure a source no message can arrive from.
+	if (!CustomBackend::DisableWhile) {
+		add(
+			u"advanced/auto_download_groups"_q,
+			tr::lng_media_auto_in_groups(),
+			&st::menuIconGroups,
+			Source::Group,
+			{ u"auto"_q, u"download"_q, u"groups"_q, u"media"_q });
+		add(
+			u"advanced/auto_download_channels"_q,
+			tr::lng_media_auto_in_channels(),
+			&st::menuIconChannel,
+			Source::Channel,
+			{ u"auto"_q, u"download"_q, u"channels"_q, u"media"_q });
+	}
 
 	builder.addSkip(st::settingsCheckboxesSkip);
 }

@@ -292,8 +292,14 @@ rpl::event_stream<> &CatalogChangedStream() {
 
 
 QNetworkAccessManager &AssetManager() {
-    static auto manager = QNetworkAccessManager();
-    return manager;
+    static auto manager = std::make_unique<QNetworkAccessManager>();
+    [[maybe_unused]] static const auto release = [] {
+        ReleaseOnQuit([] { manager = nullptr; });
+        return true;
+    }();
+
+    Ensures(manager != nullptr);
+    return *manager;
 }
 
 // Fetches one CDN asset without any bearer token: reaction assets are public

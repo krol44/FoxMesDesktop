@@ -5,7 +5,7 @@ script_dir="$(cd "$(dirname "$0")" && pwd)"
 source_root="${FOXMES_SOURCE_ROOT:-$(cd "$script_dir/../../.." && pwd)}"
 artifact_root="${FOXMES_ARTIFACT_ROOT:-$source_root/artifacts/macos}"
 libraries_root="${FOXMES_LIBRARIES_ROOT:-$(cd "$source_root/.." && pwd)/Libraries}"
-version="1.4.1"
+version="1.4.2"
 
 # Two phases, because CI caches the dependency tree between them and needs a
 # seam to hang the cache save on. No argument runs both, so a local build is

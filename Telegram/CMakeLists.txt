@@ -181,6 +181,8 @@ PRIVATE
     custom_backend/native_language_adapter.h
     custom_backend/native_chat_themes_adapter.cpp
     custom_backend/native_chat_themes_adapter.h
+    custom_backend/native_streaming_loader.cpp
+    custom_backend/native_streaming_loader.h
     intro/intro_custom_login.cpp
     intro/intro_custom_login.h
     ${style_files}
