@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "menu/menu_ttl_validator.h"
 
 #include "apiwrap.h"
+#include "custom_backend/native_runtime.h"
 #include "data/data_channel.h"
 #include "data/data_chat.h"
 #include "data/data_peer.h"
@@ -31,6 +32,10 @@ constexpr auto kToastDuration = crl::time(3500);
 void ShowAutoDeleteToast(
 		std::shared_ptr<Ui::Show> show,
 		not_null<PeerData*> peer) {
+	if (CustomBackend::Enabled()) {
+		show->showToast(CustomBackend::AutoDeleteInfoText(), kToastDuration);
+		return;
+	}
 	const auto period = peer->messagesTTL();
 	if (!period) {
 		show->showToast(tr::lng_ttl_about_tooltip_off(tr::now));
@@ -109,6 +114,9 @@ Args TTLValidator::createArgs() const {
 }
 
 bool TTLValidator::can() const {
+	if (CustomBackend::Enabled()) {
+		return false;
+	}
 	return (_peer->isUser()
 			&& !_peer->isSelf()
 			&& !_peer->isNotificationsUser()

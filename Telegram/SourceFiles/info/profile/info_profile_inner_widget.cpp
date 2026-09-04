@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "info/profile/info_profile_inner_widget.h"
 
+#include "custom_backend/native_runtime.h"
 #include "info/info_controller.h"
 #include "info/info_memento.h"
 #include "info/info_wrap_widget.h"
@@ -311,11 +312,11 @@ object_ptr<Ui::RpWidget> InnerWidget::setupContent(
 		if (_savedMessages) {
 			tabs.push_back(MakeChatsTabDescriptor());
 		}
-		if (!_topic && !_savedMessages) {
+		if (!_topic && !_savedMessages && !CustomBackend::DisableWhile) {
 			tabs.push_back(MakeStoriesTabDescriptor(tabsPeer));
-			if (!_sublist) {
-				tabs.push_back(MakeGiftsTabDescriptor(_peer));
-			}
+		}
+		if (!_topic && !_sublist) {
+			tabs.push_back(MakeGiftsTabDescriptor(_peer));
 		}
 		if ((_peer->isChat() || _peer->isMegagroup())
 			&& !_peer->isMonoforum()
@@ -404,10 +405,15 @@ object_ptr<Ui::RpWidget> InnerWidget::setupContent(
 		});
 	}
 	if (auto actions = SetupActions(_controller, result.data(), _peer)) {
+		const auto raw = actions.data();
 		stack.addPlainSeparator();
 		stack.add(Section{
 			.widget = std::move(actions),
-			.shown = rpl::single(true),
+			.shown = CustomBackend::Enabled()
+				? (raw->heightValue()
+					| rpl::map([](int height) { return height > 0; })
+					| rpl::type_erased)
+				: (rpl::single(true) | rpl::type_erased),
 		});
 	}
 	if ((_peer->isChat() || _peer->isMegagroup())

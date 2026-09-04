@@ -15,6 +15,8 @@ class Router;
 
 void RegisterSettingsHandlers(Router &router);
 
+[[nodiscard]] bool IsSupportedSettingsSection(::Settings::Type section);
+
 [[nodiscard]] QString SettingsDeepLink(
 	::Settings::Type section,
 	const QString &controlId);

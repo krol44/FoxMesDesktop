@@ -1299,6 +1299,7 @@ void DocumentData::save(
 				&session(),
 				_url,
 				toFile,
+				size,
 				fromCloud,
 				autoLoading,
 				cacheTag());

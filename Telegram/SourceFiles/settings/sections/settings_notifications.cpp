@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/sections/settings_notifications.h"
 
+#include "custom_backend/native_runtime.h"
 #include "settings/settings_common_session.h"
 
 #include "api/api_authorizations.h"
@@ -495,7 +496,7 @@ void NotificationsCount::prepareNotificationSampleLarge() {
 		p.setPen(st::dialogsNameFg);
 		p.setFont(st::msgNameFont);
 
-		auto notifyTitle = st::msgNameFont->elided(u"Telegram Desktop"_q, rectForName.width());
+		auto notifyTitle = st::msgNameFont->elided(u"FoxMes Desktop"_q, rectForName.width());
 		p.drawText(rectForName.left(), rectForName.top() + st::msgNameFont->ascent, notifyTitle);
 
 		st::notifyClose.icon.paint(p, w - st::notifyClosePos.x() - st::notifyClose.width + st::notifyClose.iconPosition.x(), st::notifyClosePos.y() + st::notifyClose.iconPosition.y(), w);
@@ -1169,37 +1170,49 @@ void BuildNotifyTypeSection(SectionBuilder &builder) {
 			controller,
 			Data::DefaultNotify::User,
 			showOther);
-		const auto groups = AddTypeButton(
-			ctx.container,
-			controller,
-			Data::DefaultNotify::Group,
-			showOther);
-		const auto channels = AddTypeButton(
-			ctx.container,
-			controller,
-			Data::DefaultNotify::Broadcast,
-			showOther);
-		const auto reactions = AddReactionsButton(
-			ctx.container,
-			controller,
-			showOther);
+		// Groups and channels are outside the current product scope: the
+		// bridge serves the private chats default only, and a toggle whose
+		// change cannot be saved is worse than no toggle at all.
+		const auto groups = CustomBackend::DisableWhile
+			? static_cast<Ui::SettingsButton*>(nullptr)
+			: AddTypeButton(
+				ctx.container,
+				controller,
+				Data::DefaultNotify::Group,
+				showOther).get();
+		const auto channels = CustomBackend::DisableWhile
+			? static_cast<Ui::SettingsButton*>(nullptr)
+			: AddTypeButton(
+				ctx.container,
+				controller,
+				Data::DefaultNotify::Broadcast,
+				showOther).get();
+		const auto reactions = CustomBackend::Enabled()
+			? static_cast<Ui::SettingsButton*>(nullptr)
+			: AddReactionsButton(ctx.container, controller, showOther).get();
 		if (ctx.highlights) {
 			ctx.highlights->push_back({
 				u"notifications/private"_q,
 				{ privateChats.get(), { .rippleShape = true } },
 			});
-			ctx.highlights->push_back({
-				u"notifications/groups"_q,
-				{ groups.get(), { .rippleShape = true } },
-			});
-			ctx.highlights->push_back({
-				u"notifications/channels"_q,
-				{ channels.get(), { .rippleShape = true } },
-			});
-			ctx.highlights->push_back({
-				u"notifications/reactions"_q,
-				{ reactions.get(), { .rippleShape = true } },
-			});
+			if (groups) {
+				ctx.highlights->push_back({
+					u"notifications/groups"_q,
+					{ groups, { .rippleShape = true } },
+				});
+			}
+			if (channels) {
+				ctx.highlights->push_back({
+					u"notifications/channels"_q,
+					{ channels, { .rippleShape = true } },
+				});
+			}
+			if (reactions) {
+				ctx.highlights->push_back({
+					u"notifications/reactions"_q,
+					{ reactions, { .rippleShape = true } },
+				});
+			}
 		}
 		return SectionBuilder::WidgetToAdd{};
 	}, [] {
@@ -1210,30 +1223,38 @@ void BuildNotifyTypeSection(SectionBuilder &builder) {
 			.icon = { &st::menuIconProfile },
 		};
 	});
-	builder.add(nullptr, [] {
-		return SearchEntry{
-			.id = u"notifications/groups"_q,
-			.title = tr::lng_notification_groups(tr::now),
-			.keywords = { u"groups"_q, u"chats"_q },
-			.icon = { &st::menuIconGroups },
-		};
-	});
-	builder.add(nullptr, [] {
-		return SearchEntry{
-			.id = u"notifications/channels"_q,
-			.title = tr::lng_notification_channels(tr::now),
-			.keywords = { u"channels"_q, u"broadcast"_q },
-			.icon = { &st::menuIconChannel },
-		};
-	});
-	builder.add(nullptr, [] {
-		return SearchEntry{
-			.id = u"notifications/reactions"_q,
-			.title = tr::lng_notification_reactions(tr::now),
-			.keywords = { u"reactions"_q },
-			.icon = { &st::menuIconGroupReactions },
-		};
-	});
+	// Search must not offer a row that is not built: the group and channel
+	// buttons above are hidden while the product scope is private chats.
+	if (!CustomBackend::DisableWhile) {
+		builder.add(nullptr, [] {
+			return SearchEntry{
+				.id = u"notifications/groups"_q,
+				.title = tr::lng_notification_groups(tr::now),
+				.keywords = { u"groups"_q, u"chats"_q },
+				.icon = { &st::menuIconGroups },
+			};
+		});
+		builder.add(nullptr, [] {
+			return SearchEntry{
+				.id = u"notifications/channels"_q,
+				.title = tr::lng_notification_channels(tr::now),
+				.keywords = { u"channels"_q, u"broadcast"_q },
+				.icon = { &st::menuIconChannel },
+			};
+		});
+	}
+	// The reactions button above is not built under the bridge (its settings
+	// live in MTProto), so its search entry must not be offered either.
+	if (!CustomBackend::Enabled()) {
+		builder.add(nullptr, [] {
+			return SearchEntry{
+				.id = u"notifications/reactions"_q,
+				.title = tr::lng_notification_reactions(tr::now),
+				.keywords = { u"reactions"_q },
+				.icon = { &st::menuIconGroupReactions },
+			};
+		});
+	}
 }
 
 void BuildEventNotificationsSection(SectionBuilder &builder) {
@@ -1249,25 +1270,31 @@ void BuildEventNotificationsSection(SectionBuilder &builder) {
 	const auto session = builder.session();
 	const auto &settings = Core::App().settings();
 
-	auto joinSilent = rpl::single(
-		session->api().contactSignupSilentCurrent().value_or(false)
-	) | rpl::then(session->api().contactSignupSilent());
+	// "Contact joined": FoxMes has no signup broadcast, and the switch is
+	// stored server-side through account.setContactSignUpNotification, which
+	// the bridge does not speak. The pinned-messages switch below is a local
+	// setting and stays.
+	if (!CustomBackend::DisableWhile) {
+		auto joinSilent = rpl::single(
+			session->api().contactSignupSilentCurrent().value_or(false)
+		) | rpl::then(session->api().contactSignupSilent());
 
-	const auto joined = builder.addButton({
-		.id = u"notifications/events/joined"_q,
-		.title = tr::lng_settings_events_joined(),
-		.icon = { &st::menuIconInvite },
-		.toggled = std::move(joinSilent) | rpl::map([](bool s) { return !s; }),
-		.keywords = { u"joined"_q, u"contacts"_q, u"signup"_q },
-	});
-	if (joined) {
-		joined->toggledChanges(
-		) | rpl::filter([=](bool enabled) {
-			const auto silent = session->api().contactSignupSilentCurrent();
-			return (enabled == silent.value_or(false));
-		}) | rpl::on_next([=](bool enabled) {
-			session->api().saveContactSignupSilent(!enabled);
-		}, joined->lifetime());
+		const auto joined = builder.addButton({
+			.id = u"notifications/events/joined"_q,
+			.title = tr::lng_settings_events_joined(),
+			.icon = { &st::menuIconInvite },
+			.toggled = std::move(joinSilent) | rpl::map([](bool s) { return !s; }),
+			.keywords = { u"joined"_q, u"contacts"_q, u"signup"_q },
+		});
+		if (joined) {
+			joined->toggledChanges(
+			) | rpl::filter([=](bool enabled) {
+				const auto silent = session->api().contactSignupSilentCurrent();
+				return (enabled == silent.value_or(false));
+			}) | rpl::on_next([=](bool enabled) {
+				session->api().saveContactSignupSilent(!enabled);
+			}, joined->lifetime());
+		}
 	}
 
 	const auto pinned = builder.addButton({
@@ -1601,7 +1628,11 @@ void BuildNotificationsSectionContent(SectionBuilder &builder) {
 	BuildNotifyViewSection(builder);
 	BuildNotifyTypeSection(builder);
 	BuildEventNotificationsSection(builder);
-	BuildCallNotificationsSection(builder);
+	// Calls are not part of FoxMes: the toggle is backed by MTProto
+	// authorizations, and there is nothing here to accept a call on.
+	if (!CustomBackend::DisableWhile) {
+		BuildCallNotificationsSection(builder);
+	}
 	BuildBadgeCounterSection(builder);
 	BuildSystemIntegrationAndAdvancedSection(builder);
 }

@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "info/info_wrap_widget.h"
 
+#include "custom_backend/native_runtime.h"
 #include "info/profile/info_profile_widget.h"
 #include "info/profile/info_profile_values.h"
 #include "info/media/info_media_widget.h"
@@ -431,7 +432,10 @@ void WrapWidget::setupTopBarMenuToggle() {
 		addProfileCallsButton();
 	} else if (section.type() == Section::Type::Settings) {
 		addTopBarMenuButton();
-		if (section.settingsType() == ::Settings::MainId()) {
+		if (CustomBackend::Enabled()) {
+			// FoxMes bridge: settings search and the QR-login shortcut
+			// have no counterpart in the product.
+		} else if (section.settingsType() == ::Settings::MainId()) {
 			const auto &st = (wrap() == Wrap::Layer)
 				? st::infoLayerTopBarSearch
 				: st::infoTopBarSearch;

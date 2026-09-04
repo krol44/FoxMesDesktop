@@ -6,8 +6,11 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "intro/intro_widget.h"
+#include "custom_backend/github_update.h"
+#include "custom_backend/native_runtime.h"
 
 #include "intro/intro_start.h"
+#include "intro/intro_custom_login.h"
 #include "intro/intro_phone.h"
 #include "intro/intro_qr.h"
 #include "intro/intro_code.h"
@@ -35,6 +38,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/ui_utility.h"
 #include "boxes/abstract_box.h"
 #include "core/update_checker.h"
+#include "core/file_utilities.h"
 #include "core/application.h"
 #include "mtproto/mtproto_dc_options.h"
 #include "window/window_slide_animation.h"
@@ -107,19 +111,8 @@ Widget::Widget(
 		crl::on_main(this, [=] { createLanguageLink(); });
 	}, lifetime());
 
-	switch (point) {
-	case EnterPoint::Start:
-		getNearestDC();
-		appendStep(new StartWidget(this, _account, getData()));
-		break;
-	case EnterPoint::Phone:
-		appendStep(new PhoneWidget(this, _account, getData()));
-		break;
-	case EnterPoint::Qr:
-		appendStep(new QrWidget(this, _account, getData()));
-		break;
-	default: Unexpected("Enter point in Intro::Widget::Widget.");
-	}
+	Q_UNUSED(point);
+	appendStep(new CustomLoginWidget(this, _account, getData()));
 
 	setupStep();
 	fixOrder();
@@ -166,18 +159,20 @@ Widget::Widget(
 
 	cSetPasswordRecovered(false);
 
-	if (!Core::UpdaterDisabled()) {
-		Core::UpdateChecker checker;
-		checker.start();
-		rpl::merge(
-			rpl::single(rpl::empty),
-			checker.isLatest(),
-			checker.failed(),
-			checker.ready()
-		) | rpl::on_next([=] {
-			checkUpdateStatus();
-		}, lifetime());
+	if (!Core::UpdateCheckAvailable()) {
+		return;
 	}
+	Core::UpdateChecker checker;
+	checker.start();
+	rpl::merge(
+		rpl::single(rpl::empty),
+		checker.isLatest(),
+		checker.failed(),
+		checker.ready(),
+		CustomBackend::Updates::AvailableEvents() | rpl::to_empty
+	) | rpl::on_next([=] {
+		checkUpdateStatus();
+	}, lifetime());
 }
 
 rpl::producer<> Widget::showSettingsRequested() const {
@@ -314,9 +309,13 @@ void Widget::createLanguageLink() {
 }
 
 void Widget::checkUpdateStatus() {
-	Expects(!Core::UpdaterDisabled());
+	if (!Core::UpdateCheckAvailable()) {
+		return;
+	}
 
-	if (Core::UpdateChecker().state() == Core::UpdateChecker::State::Ready) {
+	using State = Core::UpdateChecker::State;
+	const auto state = Core::UpdateChecker().state();
+	if (state == State::Ready || CustomBackend::Updates::IsAvailable()) {
 		if (_update) return;
 		_update.create(
 			this,
@@ -331,8 +330,13 @@ void Widget::checkUpdateStatus() {
 		const auto stepHasCover = getStep()->hasCover();
 		_update->toggle(!stepHasCover, anim::type::instant);
 		_update->entity()->setClickedCallback([] {
-			Core::checkReadyUpdate();
-			Core::Restart();
+			const auto checker = Core::UpdateChecker();
+			if (checker.state() == State::Ready) {
+				Core::checkReadyUpdate();
+				Core::Restart();
+			} else {
+				CustomBackend::Updates::OpenReleasePage();
+			}
 		});
 	} else {
 		if (!_update) return;
@@ -420,7 +424,9 @@ void Widget::historyMove(StackAction action, Animate animate) {
 	_back->toggle(getStep()->hasBack(), anim::type::normal);
 
 	auto stepHasCover = getStep()->hasCover();
-	_settings->toggle(!stepHasCover, anim::type::normal);
+	_settings->toggle(
+		!stepHasCover && !CustomBackend::Enabled(),
+		anim::type::normal);
 	if (_testModeLabel) {
 		_testModeLabel->toggle(!stepHasCover, anim::type::normal);
 	}
@@ -713,7 +719,9 @@ void Widget::showControls() {
 	_nextShownAnimation.stop();
 	_connecting->setForceHidden(false);
 	auto hasCover = getStep()->hasCover();
-	_settings->toggle(!hasCover, anim::type::instant);
+	_settings->toggle(
+		!hasCover && !CustomBackend::Enabled(),
+		anim::type::instant);
 	if (_testModeLabel) {
 		_testModeLabel->toggle(!hasCover, anim::type::instant);
 	}

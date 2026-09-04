@@ -60,6 +60,7 @@ public:
 
 	void logOut();
 	void forcedLogOut();
+	void foxmesLoggedOut();
 	[[nodiscard]] bool loggingOut() const;
 
 	[[nodiscard]] AppConfig &appConfig() const {

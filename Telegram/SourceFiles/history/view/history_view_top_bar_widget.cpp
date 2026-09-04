@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_top_bar_widget.h"
 
+#include "custom_backend/native_runtime.h"
 #include "history/history.h"
 #include "history/view/history_view_send_action.h"
 #include "boxes/add_contact_box.h"
@@ -256,6 +257,14 @@ TopBarWidget::TopBarWidget(
 		updateConnectingState();
 	}, lifetime());
 
+	if (CustomBackend::Enabled()) {
+		CustomBackend::LiveUpdatesStatusValue(
+			&_controller->session().account()
+		) | rpl::on_next([=] {
+			updateConnectingState();
+		}, lifetime());
+	}
+
 	setCursor(style::cur_pointer);
 	_call->setAccessibleName(tr::lng_profile_action_short_call(tr::now));
 	_groupCall->setAccessibleName(tr::lng_group_call_title(tr::now));
@@ -273,7 +282,9 @@ Main::Session &TopBarWidget::session() const {
 }
 
 void TopBarWidget::updateConnectingState() {
-	const auto state = _controller->session().mtp().dcstate();
+	const auto state = CustomBackend::Enabled()
+		? CustomBackend::MtpDcStateFor(&_controller->session().account())
+		: _controller->session().mtp().dcstate();
 	const auto exposed = window()->windowHandle()
 		&& window()->windowHandle()->isExposed();
 	if (state == MTP::ConnectedState || !exposed) {
@@ -668,7 +679,9 @@ void TopBarWidget::paintTopBar(Painter &p) {
 			.nameWidth = _title.maxWidth(),
 			.outerWidth = width(),
 			.verified = &st::dialogsVerifiedIcon,
-			.premium = &st::dialogsPremiumIcon.icon,
+			.premium = CustomBackend::DisableWhile
+				? nullptr
+				: &st::dialogsPremiumIcon.icon,
 			.scam = &st::attentionButtonFg,
 			.direct = &st::windowSubTextFg,
 			.premiumFg = &st::dialogsVerifiedIconBg,
@@ -1386,7 +1399,8 @@ void TopBarWidget::updateControlsVisibility() {
 		}
 		return false;
 	}();
-	_call->setVisible(historyMode
+	_call->setVisible(!CustomBackend::DisableWhile
+		&& historyMode
 		&& callsEnabled
 		&& !_chooseForReportReason);
 	const auto groupCallsEnabled = [&] {

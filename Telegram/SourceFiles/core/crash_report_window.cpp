@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "core/crash_report_window.h"
+#include "custom_backend/native_runtime.h"
 
 #include "core/crash_reports.h"
 #include "core/application.h"
@@ -40,7 +41,7 @@ PreLaunchWindow::PreLaunchWindow(QString title) {
 	setWindowIcon(Window::CreateIcon());
 	setWindowFlags(Qt::Dialog | Qt::CustomizeWindowHint | Qt::WindowTitleHint | Qt::WindowCloseButtonHint);
 
-	setWindowTitle(title.isEmpty() ? u"Telegram"_q : title);
+	setWindowTitle(title.isEmpty() ? u"FoxMes"_q : title);
 
 	QPalette p(palette());
 	p.setColor(QPalette::Window, QColor(255, 255, 255));
@@ -565,6 +566,10 @@ void LastCrashedWindow::addReportFieldPart(const QLatin1String &name, const QLat
 }
 
 void LastCrashedWindow::sendReport() {
+	if (CustomBackend::Enabled()) {
+		// FoxMes bridge: never upload crash reports to Telegram servers.
+		return;
+	}
 	if (_checkReply) {
 		_checkReply->deleteLater();
 		_checkReply = nullptr;
@@ -606,6 +611,10 @@ QString LastCrashedWindow::minidumpFileName() {
 }
 
 void LastCrashedWindow::checkingFinished() {
+	if (CustomBackend::Enabled()) {
+		// FoxMes bridge: never upload crash reports to Telegram servers.
+		return;
+	}
 	if (!_checkReply || _sendReply) return;
 
 	QByteArray result = _checkReply->readAll().trimmed();

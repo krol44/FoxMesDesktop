@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "platform/linux/main_window_linux.h"
 
 #include "platform/linux/specific_linux.h"
+#include "custom_backend/native_runtime.h"
 #include "history/history.h"
 #include "history/history_widget.h"
 #include "history/history_inner_widget.h"
@@ -221,7 +222,7 @@ void MainWindow::createGlobalMenu() {
 		});
 
 	auto quit = file->addAction(
-		tr::lng_mac_menu_quit_telegram(tr::now, lt_telegram, u"Telegram"_q),
+		tr::lng_mac_menu_quit_telegram(tr::now, lt_telegram, u"FoxMes"_q),
 		this,
 		[=] { quitFromTray(); },
 		QKeySequence::Quit);
@@ -370,20 +371,22 @@ void MainWindow::createGlobalMenu() {
 
 	auto tools = psMainMenu->addMenu(tr::lng_linux_menu_tools(tr::now));
 
-	psContacts = tools->addAction(
-		tr::lng_mac_menu_contacts(tr::now),
-		crl::guard(this, [=] {
-			if (isHidden()) {
-				showFromTray();
-			}
+	if (!CustomBackend::DisableWhile) {
+		psContacts = tools->addAction(
+			tr::lng_mac_menu_contacts(tr::now),
+			crl::guard(this, [=] {
+				if (isHidden()) {
+					showFromTray();
+				}
 
-			if (!sessionController()) {
-				return;
-			}
+				if (!sessionController()) {
+					return;
+				}
 
-			sessionController()->show(
-				PrepareContactsBox(sessionController()));
-		}));
+				sessionController()->show(
+					PrepareContactsBox(sessionController()));
+			}));
+	}
 
 	psAddContact = tools->addAction(
 		tr::lng_mac_menu_add_contact(tr::now),
@@ -394,25 +397,27 @@ void MainWindow::createGlobalMenu() {
 			sessionController()->showAddContact();
 		});
 
-	tools->addSeparator();
+	if (!CustomBackend::DisableWhile) {
+		tools->addSeparator();
 
-	psNewGroup = tools->addAction(
-		tr::lng_mac_menu_new_group(tr::now),
-		this,
-		[=] {
-			Expects(sessionController() != nullptr);
-			ensureWindowShown();
-			sessionController()->showNewGroup();
-		});
+		psNewGroup = tools->addAction(
+			tr::lng_mac_menu_new_group(tr::now),
+			this,
+			[=] {
+				Expects(sessionController() != nullptr);
+				ensureWindowShown();
+				sessionController()->showNewGroup();
+			});
 
-	psNewChannel = tools->addAction(
-		tr::lng_mac_menu_new_channel(tr::now),
-		this,
-		[=] {
-			Expects(sessionController() != nullptr);
-			ensureWindowShown();
-			sessionController()->showNewChannel();
-		});
+		psNewChannel = tools->addAction(
+			tr::lng_mac_menu_new_channel(tr::now),
+			this,
+			[=] {
+				Expects(sessionController() != nullptr);
+				ensureWindowShown();
+				sessionController()->showNewChannel();
+			});
+	}
 
 	auto help = psMainMenu->addMenu(tr::lng_linux_menu_help(tr::now));
 
@@ -420,7 +425,7 @@ void MainWindow::createGlobalMenu() {
 		tr::lng_mac_menu_about_telegram(
 			tr::now,
 			lt_telegram,
-			u"Telegram"_q),
+			u"FoxMes"_q),
 		[=] {
 			ensureWindowShown();
 			controller().show(Box(AboutBox));
@@ -482,10 +487,16 @@ void MainWindow::updateGlobalMenuHook() {
 	ForceDisabled(psPaste, !canPaste);
 	ForceDisabled(psDelete, !canDelete);
 	ForceDisabled(psSelectAll, !canSelectAll);
-	ForceDisabled(psContacts, inactive || support);
+	if (psContacts) {
+		ForceDisabled(psContacts, inactive || support);
+	}
 	ForceDisabled(psAddContact, inactive);
-	ForceDisabled(psNewGroup, inactive || support);
-	ForceDisabled(psNewChannel, inactive || support);
+	if (psNewGroup) {
+		ForceDisabled(psNewGroup, inactive || support);
+	}
+	if (psNewChannel) {
+		ForceDisabled(psNewChannel, inactive || support);
+	}
 
 	const auto diabled = [=](const QString &tag) {
 		return !markdownState.enabledForTag(tag);

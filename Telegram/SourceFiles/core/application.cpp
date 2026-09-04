@@ -6,6 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "core/application.h"
+#include "custom_backend/native_deep_link.h"
+#include "custom_backend/native_runtime.h"
 
 #include "data/data_abstract_structure.h"
 #include "data/data_channel.h"
@@ -994,6 +996,15 @@ rpl::producer<FullMsgId> Application::floatPlayerClosed() const {
 }
 
 void Application::logout(Main::Account *account) {
+	if (account && CustomBackend::Enabled()) {
+		const auto weak = base::make_weak(account);
+		CustomBackend::Logout(account->maybeSession(), [weak] {
+			if (const auto strong = weak.get()) {
+				strong->foxmesLoggedOut();
+			}
+		});
+		return;
+	}
 	if (account) {
 		account->logOut();
 	} else {
@@ -1207,6 +1218,9 @@ void Application::checkStartUrls() {
 		cRefStartUrls() = ranges::views::all(
 			cRefStartUrls()
 		) | ranges::views::filter([&](const QUrl &url) {
+			if (CustomBackend::Enabled()) {
+				return !CustomBackend::DeepLinks::HandleStartUrl(url);
+			}
 			if (url.scheme() == u"tonsite"_q) {
 				iv().showTonSite(url.toString(), {});
 				return false;
@@ -2032,6 +2046,10 @@ void Application::startShortcuts() {
 }
 
 void Application::RegisterUrlScheme() {
+	if (CustomBackend::Enabled()) {
+		CustomBackend::DeepLinks::RegisterScheme();
+		return;
+	}
 	const auto arguments = Launcher::Instance().customWorkingDir()
 		? u"-workdir \"%1\""_q.arg(cWorkingDir())
 		: QString();

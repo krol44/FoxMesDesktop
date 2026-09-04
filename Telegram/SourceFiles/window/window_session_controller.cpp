@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/window_session_controller.h"
 
+#include "custom_backend/native_runtime.h"
 #include "apiwrap.h"
 #include "api/api_cloud_password.h"
 #include "api/api_text_entities.h"
@@ -1903,6 +1904,9 @@ bool SessionController::hasTabbedSelectorOwnership() const {
 }
 
 void SessionController::showEditPeerBox(PeerData *peer) {
+	if (CustomBackend::DisableWhile) {
+		return;
+	}
 	_showEditPeer = peer;
 	session().api().requestFullPeer(peer);
 }

@@ -6,6 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "core/update_checker.h"
+#include "custom_backend/github_update.h"
+#include "custom_backend/native_runtime.h"
 
 #include "platform/platform_specific.h"
 #include "base/platform/base_platform_info.h"
@@ -38,6 +40,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QFileSystemWatcher>
+#include <rpl/never.h>
 
 #include <ksandbox.h>
 
@@ -1758,6 +1761,10 @@ bool UpdaterDisabled() {
 	return UpdaterIsDisabled;
 }
 
+bool UpdateCheckAvailable() {
+	return !UpdaterIsDisabled || CustomBackend::Enabled();
+}
+
 void SetUpdaterDisabledAtStartup() {
 	Expects(UpdaterInstance.lock() == nullptr);
 
@@ -1940,6 +1947,10 @@ bool Updater::percent() const {
 }
 
 void Updater::stop() {
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Updates::StopUpdateCheck();
+		return;
+	}
 	_httpImplementation = Implementation();
 	_mtpImplementation = Implementation();
 	_flatpakImplementation = Implementation{
@@ -1950,6 +1961,12 @@ void Updater::stop() {
 }
 
 void Updater::start(bool forceWait) {
+	if (CustomBackend::Enabled()) {
+		// FoxMes bridge: GitHub Releases based check instead of the
+		// Telegram HttpChecker/MtpChecker pair.
+		CustomBackend::Updates::StartUpdateCheck();
+		return;
+	}
 	if (cExeName().isEmpty()) {
 		return;
 	}
@@ -2176,10 +2193,16 @@ UpdateChecker::UpdateChecker()
 }
 
 rpl::producer<> UpdateChecker::checking() const {
+	if (CustomBackend::Enabled()) {
+		return CustomBackend::Updates::CheckingEvents();
+	}
 	return _updater->checking();
 }
 
 rpl::producer<> UpdateChecker::isLatest() const {
+	if (CustomBackend::Enabled()) {
+		return CustomBackend::Updates::IsLatestEvents();
+	}
 	return _updater->isLatest();
 }
 
@@ -2189,6 +2212,9 @@ auto UpdateChecker::progress() const
 }
 
 rpl::producer<> UpdateChecker::failed() const {
+	if (CustomBackend::Enabled()) {
+		return CustomBackend::Updates::FailedEvents();
+	}
 	return _updater->failed();
 }
 

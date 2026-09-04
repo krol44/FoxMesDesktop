@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/peers/edit_peer_info_box.h"
 
+#include "custom_backend/native_runtime.h"
 #include "apiwrap.h"
 #include "api/api_communities.h"
 #include "api/api_credits.h"
@@ -3237,6 +3238,9 @@ object_ptr<Ui::SettingsButton> EditPeerInfoBox::CreateButton(
 }
 
 bool EditPeerInfoBox::Available(not_null<PeerData*> peer) {
+	if (CustomBackend::DisableWhile) {
+		return false;
+	}
 	if (const auto bot = peer->asUser()) {
 		return bot->botInfo && bot->botInfo->canEditInformation;
 	} else if (const auto chat = peer->asChat()) {

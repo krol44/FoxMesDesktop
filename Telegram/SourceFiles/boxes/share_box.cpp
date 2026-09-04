@@ -7,6 +7,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/share_box.h"
 
+#include "custom_backend/native_message_actions_adapter.h"
+#include "custom_backend/native_runtime.h"
+#include "custom_backend/native_search_adapter.h"
+
 #include "api/api_premium.h"
 #include "base/call_delayed.h"
 #include "base/random.h"
@@ -428,6 +432,16 @@ bool ShareBox::searchByUsername(bool searchCache) {
 		} else if (_peopleQuery != query) {
 			_peopleQuery = query;
 			_peopleFull = false;
+			if (CustomBackend::Enabled()) {
+				_peopleRequest = CustomBackend::Search::SearchPeersFound(
+					_descriptor.session,
+					_peopleQuery,
+					[=](MTPcontacts_Found result, mtpRequestId requestId) {
+						peopleDone(result, requestId);
+					});
+				_peopleQueries.insert(_peopleRequest, _peopleQuery);
+				return false;
+			}
 			_peopleRequest = _api.request(MTPcontacts_Search(
 				MTP_flags(0),
 				MTP_string(_peopleQuery),
@@ -550,6 +564,9 @@ SendMenu::Details ShareBox::sendMenuDetails() const {
 }
 
 void ShareBox::showMenu(not_null<Ui::RpWidget*> parent) {
+	if (CustomBackend::Enabled()) {
+		return;
+	}
 	if (_menu) {
 		_menu = nullptr;
 		return;
@@ -627,7 +644,9 @@ void ShareBox::createButtons() {
 		_forwardOptions.captionsCount
 			= _descriptor.forwardOptions.captionsCount;
 
-		send->setAcceptBoth();
+		if (!CustomBackend::Enabled()) {
+			send->setAcceptBoth();
+		}
 		send->clicks(
 		) | rpl::on_next([=](Qt::MouseButton button) {
 			if (button == Qt::RightButton) {
@@ -779,7 +798,9 @@ void ShareBox::selectedChanged() {
 	if (_hasSelected != hasSelected) {
 		_hasSelected = hasSelected;
 		createButtons();
-		_comment->toggle(_hasSelected, anim::type::normal);
+		if (!CustomBackend::Enabled()) {
+			_comment->toggle(_hasSelected, anim::type::normal);
+		}
 		_comment->resizeToWidth(st::boxWideWidth);
 	}
 	computeStarsCount();
@@ -1746,6 +1767,9 @@ ChatHelpers::ForwardedMessagePhraseArgs CreateForwardedMessagePhraseArgs(
 		.singleMessage = (msgIds.size() <= 1),
 		.to1 = (toCount > 0) ? result.front()->peer().get() : nullptr,
 		.to2 = (toCount > 1) ? result[1]->peer().get() : nullptr,
+		// Same reason as in ForwardToSelf(): the premium tagger toast that
+		// upstream defers to needs saved reaction tags the bridge never fills.
+		.toSelfWithPremiumIsEmpty = !CustomBackend::Enabled(),
 	};
 }
 
@@ -1806,6 +1830,34 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 		const auto items = history->owner().idsToItems(msgIds);
 		const auto existingIds = history->owner().itemsToIds(items);
 		if (existingIds.empty() || result.empty()) {
+			return;
+		}
+		if (CustomBackend::Enabled()) {
+			auto targets = std::vector<not_null<History*>>();
+			targets.reserve(result.size());
+			for (const auto &thread : result) {
+				targets.push_back(thread->owningHistory());
+			}
+			const auto phraseArgs = CreateForwardedMessagePhraseArgs(
+				result,
+				msgIds);
+			// The bridge ignores the comment field: the FoxMes forward API
+			// copies source messages as-is. Forward() resolves the request
+			// itself (success or an error toast); there is no MTP path to
+			// fall back to under the bridge, so this must always return.
+			(void)CustomBackend::Actions::Forward(
+				&history->session(),
+				items,
+				targets,
+				[=] {
+					if (show->valid()) {
+						show->hideLayer();
+						ShowForwardedMessageToast(
+							show,
+							&history->session(),
+							phraseArgs);
+					}
+				});
 			return;
 		}
 		if (HistoryView::Controls::HasRichPage(items)) {

@@ -534,6 +534,7 @@ std::unique_ptr<FileLoader> CreateFileLoader(
 			session,
 			data.url,
 			toFile,
+			fullSize,
 			fromCloud,
 			autoLoading,
 			cacheTag);

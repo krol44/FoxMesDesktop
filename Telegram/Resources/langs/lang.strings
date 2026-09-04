@@ -1,6 +1,6 @@
 /*
-This file is part of Telegram Desktop,
-the official desktop application for the Telegram messaging service.
+This file is part of FoxMes,
+the official desktop application for the FoxMes messaging service.
 
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
@@ -28,10 +28,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_disable_notifications_from_tray" = "Disable notifications";
 "lng_enable_notifications_from_tray" = "Enable notifications";
-"lng_open_from_tray" = "Open Telegram";
+"lng_open_from_tray" = "Open FoxMes";
 "lng_minimize_to_tray" = "Minimize to Tray";
-"lng_quit_from_tray" = "Quit Telegram";
-"lng_tray_icon_text" = "Telegram is still running here,\nyou can change this in Settings.\nIf it disappears from the tray,\nyou can drag it back from the hidden icons.";
+"lng_quit_from_tray" = "Quit FoxMes";
+"lng_tray_icon_text" = "FoxMes is still running here,\nyou can change this in Settings.\nIf it disappears from the tray,\nyou can drag it back from the hidden icons.";
 
 // For lng_month_year or plain month name.
 "lng_month1" = "January";
@@ -187,7 +187,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_lastseen_or" = "or";
 "lng_lastseen_premium_title" = "Upgrade to Premium";
 "lng_lastseen_premium_about" = "Subscribing will let you see **{user}'s** Last Seen\nstatus without showing yours.";
-"lng_lastseen_premium_button" = "Subscribe to Telegram Premium";
+"lng_lastseen_premium_button" = "Subscribe to FoxMes Premium";
 "lng_lastseen_shown_toast" = "Your last seen time is now visible.";
 
 "lng_readtime_show_title" = "Show Your Read Date";
@@ -196,14 +196,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_readtime_or" = "or";
 "lng_readtime_premium_title" = "Upgrade to Premium";
 "lng_readtime_premium_about" = "Subscription will let you see **{user}'s** read time\nwithout showing yours.";
-"lng_readtime_premium_button" = "Subscribe to Telegram Premium";
+"lng_readtime_premium_button" = "Subscribe to FoxMes Premium";
 "lng_readtime_shown_toast" = "Your read times are now visible.";
 
 "lng_channels_limit_title" = "Too Many Communities";
 "lng_channels_limit1#one" = "You are a member of **{count}** group or channel.";
 "lng_channels_limit1#other" = "You are a member of **{count}** groups and channels.";
-"lng_channels_limit2#one" = "Please leave some before joining a new one — or upgrade to **Telegram Premium** to double the limit to **{count}** group or channel.";
-"lng_channels_limit2#other" = "Please leave some before joining a new one — or upgrade to **Telegram Premium** to double the limit to **{count}** groups and channels.";
+"lng_channels_limit2#one" = "Please leave some before joining a new one — or upgrade to **FoxMes Premium** to double the limit to **{count}** group or channel.";
+"lng_channels_limit2#other" = "Please leave some before joining a new one — or upgrade to **FoxMes Premium** to double the limit to **{count}** groups and channels.";
 "lng_channels_limit2_final" = "Please leave some before joining a new one.";
 "lng_channels_leave_title" = "Least active communities";
 "lng_channels_leave_status" = "{type}, inactive {time}";
@@ -214,8 +214,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_links_limit_title" = "Too Many Public Links";
 "lng_links_limit1#one" = "You have reserved **{count}** public link.";
 "lng_links_limit1#other" = "You have reserved **{count}** public links.";
-"lng_links_limit2#one" = "Try revoking the link from an older group or channel, or subscribe to **Telegram Premium** to double the limit to **{count}** public link.";
-"lng_links_limit2#other" = "Try revoking the link from an older group or channel, or subscribe to **Telegram Premium** to double the limit to **{count}** public links.";
+"lng_links_limit2#one" = "Try revoking the link from an older group or channel, or subscribe to **FoxMes Premium** to double the limit to **{count}** public link.";
+"lng_links_limit2#other" = "Try revoking the link from an older group or channel, or subscribe to **FoxMes Premium** to double the limit to **{count}** public links.";
 "lng_links_limit2_final" = "Try revoking the link from an older group or channel";
 "lng_links_revoke_title" = "Your public communities";
 
@@ -224,20 +224,20 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_filter_chats_limit1#other" = "Sorry, you can't add more than **{count}** chats to a folder.";
 "lng_filter_chats_exlude_limit1#one" = "Sorry, you can't exclude more than **{count}** chat from a folder.";
 "lng_filter_chats_exlude_limit1#other" = "Sorry, you can't exclude more than **{count}** chats from a folder.";
-"lng_filter_chats_limit2#one" = "You can increase this limit to **{count}** by subscribing to **Telegram Premium**.";
-"lng_filter_chats_limit2#other" = "You can increase this limit to **{count}** by subscribing to **Telegram Premium**.";
+"lng_filter_chats_limit2#one" = "You can increase this limit to **{count}** by subscribing to **FoxMes Premium**.";
+"lng_filter_chats_limit2#other" = "You can increase this limit to **{count}** by subscribing to **FoxMes Premium**.";
 
 "lng_filters_limit_title" = "Limit Reached";
 "lng_filters_limit1#one" = "You have reached the limit of **{count}** folder.";
 "lng_filters_limit1#other" = "You have reached the limit of **{count}** folders.";
-"lng_filters_limit2#one" = "You can double the limit to **{count}** folder by subscribing to **Telegram Premium**.";
-"lng_filters_limit2#other" = "You can double the limit to **{count}** folders by subscribing to **Telegram Premium**.";
+"lng_filters_limit2#one" = "You can double the limit to **{count}** folder by subscribing to **FoxMes Premium**.";
+"lng_filters_limit2#other" = "You can double the limit to **{count}** folders by subscribing to **FoxMes Premium**.";
 
 "lng_filter_pin_limit_title" = "Limit Reached";
 "lng_filter_pin_limit1#one" = "Sorry, you can't pin more than **{count}** chat to the top.";
 "lng_filter_pin_limit1#other" = "Sorry, you can't pin more than **{count}** chats to the top.";
-"lng_filter_pin_limit2#one" = "Unpin some of the currently pinned ones or subscribe to **Telegram Premium** to double the limit to **{count}** chat.";
-"lng_filter_pin_limit2#other" = "Unpin some of the currently pinned ones or subscribe to **Telegram Premium** to double the limit to **{count}** chats.";
+"lng_filter_pin_limit2#one" = "Unpin some of the currently pinned ones or subscribe to **FoxMes Premium** to double the limit to **{count}** chat.";
+"lng_filter_pin_limit2#other" = "Unpin some of the currently pinned ones or subscribe to **FoxMes Premium** to double the limit to **{count}** chats.";
 
 "lng_forum_pin_limit#one" = "Sorry, you can't pin more than **{count}** topic to the top.";
 "lng_forum_pin_limit#other" = "Sorry, you can't pin more than **{count}** topics to the top.";
@@ -257,8 +257,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_caption_limit_title" = "Limit Reached";
 "lng_caption_limit1#one" = "Sorry, you can't use more than **{count}** character in media captions.";
 "lng_caption_limit1#other" = "Sorry, you can't use more than **{count}** characters in media captions.";
-"lng_caption_limit2#one" = "Make the caption shorter or subscribe to **Telegram Premium** to double the limit to **{count}** character.";
-"lng_caption_limit2#other" = "Make the caption shorter or subscribe to **Telegram Premium** to double the limit to **{count}** characters.";
+"lng_caption_limit2#one" = "Make the caption shorter or subscribe to **FoxMes Premium** to double the limit to **{count}** character.";
+"lng_caption_limit2#other" = "Make the caption shorter or subscribe to **FoxMes Premium** to double the limit to **{count}** characters.";
 "lng_caption_limit_reached#one" = "You've reached the media caption limit. Please make the caption shorter by {count} character.";
 "lng_caption_limit_reached#other" = "You've reached the media caption limit. Please make the caption shorter by {count} characters.";
 "lng_caption_move_up" = "Move Caption Up";
@@ -268,32 +268,32 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_file_size_limit#one" = "{count} GB";
 "lng_file_size_limit#other" = "{count} GB";
 "lng_file_size_limit1" = "The document can't be sent, because it is larger than {size}.";
-"lng_file_size_limit2" = "You can double this limit to {size} per document by subscribing to **Telegram Premium**.";
+"lng_file_size_limit2" = "You can double this limit to {size} per document by subscribing to **FoxMes Premium**.";
 
 "lng_filter_links_limit_title" = "Limit Reached";
 "lng_filter_links_limit1#one" = "Sorry, you can't create more than **{count}** invite link.";
 "lng_filter_links_limit1#other" = "Sorry, you can't create more than **{count}** invite links.";
-"lng_filter_links_limit2#one" = "You can increase the limit to **{count}** link by subscribing to **Telegram Premium**.";
-"lng_filter_links_limit2#other" = "You can increase the limit to **{count}** links by subscribing to **Telegram Premium**.";
+"lng_filter_links_limit2#one" = "You can increase the limit to **{count}** link by subscribing to **FoxMes Premium**.";
+"lng_filter_links_limit2#other" = "You can increase the limit to **{count}** links by subscribing to **FoxMes Premium**.";
 
 "lng_filter_shared_limit_title" = "Limit Reached";
 "lng_filter_shared_limit1#one" = "Sorry, you can't add more than **{count}** shareable folders.";
 "lng_filter_shared_limit1#other" = "Sorry, you can't add more than **{count}** shareable folders.";
-"lng_filter_shared_limit2#one" = "You can increase the limit to **{count}** folder by subscribing to **Telegram Premium**.";
-"lng_filter_shared_limit2#other" = "You can increase the limit to **{count}** folders by subscribing to **Telegram Premium**.";
+"lng_filter_shared_limit2#one" = "You can increase the limit to **{count}** folder by subscribing to **FoxMes Premium**.";
+"lng_filter_shared_limit2#other" = "You can increase the limit to **{count}** folders by subscribing to **FoxMes Premium**.";
 
 "lng_limits_increase" = "Increase Limit";
 
 "lng_sticker_premium_text" = "This set contains premium stickers like this one.";
 "lng_sticker_premium_view" = "View";
-"lng_animated_emoji_text" = "Subscribe to **Telegram Premium** to unlock this emoji.";
+"lng_animated_emoji_text" = "Subscribe to **FoxMes Premium** to unlock this emoji.";
 "lng_animated_emoji_saved" = "Try sending these emoji in **Saved Messages** for free to test.";
 "lng_animated_emoji_saved_open" = "Open";
 
 "lng_flood_error" = "Too many tries. Please try again later.";
 "lng_edit_error" = "You can't edit this message.";
 "lng_error_phone_flood" = "Sorry, you have deleted and re-created your account too many times recently. Please wait for a few days before signing up again.";
-"lng_error_start_minimized_passcoded" = "You have set a local passcode, so Telegram Desktop can't be launched minimized; it will ask you to enter your passcode before it can start working.";
+"lng_error_start_minimized_passcoded" = "You have set a local passcode, so FoxMes can't be launched minimized; it will ask you to enter your passcode before it can start working.";
 "lng_error_public_groups_denied" = "Unfortunately, you are banned from participating in public groups.\n{more_info}";
 "lng_error_cant_add_member" = "Sorry, you can't add the bot to this group. Ask a group admin to do it.";
 "lng_error_cant_add_bot" = "Sorry, this bot can't be added to groups.";
@@ -337,7 +337,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_proxy_box_username" = "Username";
 "lng_proxy_box_password" = "Password";
 "lng_proxy_invalid" = "The proxy link is invalid.";
-"lng_proxy_unsupported" = "Your Telegram Desktop version doesn't support this proxy type or the proxy link is invalid. Please update Telegram Desktop to the latest version.";
+"lng_proxy_unsupported" = "Your FoxMes version doesn't support this proxy type or the proxy link is invalid. Please update FoxMes to the latest version.";
 "lng_proxy_incorrect_secret" = "This proxy link uses invalid **secret** parameter. Please contact the proxy provider and ask him to update MTProxy source code and configure it with a correct **secret** value. Then let him provide a new link.";
 "lng_proxy_check_ip_warning_title" = "Warning";
 "lng_proxy_check_ip_warning" = "This will expose your IP address to the admin of the proxy server.";
@@ -384,18 +384,30 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_edit_caption_attach" = "Sorry, you can't attach new media while editing a message.";
 "lng_edit_caption_voice" = "Sorry, you can't edit messages when you have an unsent voice message.";
 
-"lng_intro_about" = "Welcome to the official Telegram Desktop app.\nIt's fast and secure.";
+"lng_intro_about" = "Welcome to the official FoxMes app.\nIt's fast and secure.";
 "lng_start_msgs" = "Start Messaging";
 
 "lng_intro_next" = "Next";
 "lng_intro_finish" = "Sign Up";
 "lng_intro_submit" = "Submit";
 
+"lng_fox_mes_title" = "FoxMes";
+"lng_fox_mes_code" = "Code from fxl.ru";
+"lng_fox_mes_get_code" = "Get code";
+"lng_fox_mes_connect" = "Connect";
+"lng_fox_mes_link_failed" = "Unable to get a link. Please try again.";
+"lng_fox_mes_invalid_link" = "The server returned an invalid pairing link.";
+"lng_fox_mes_browser_failed" = "Unable to open the browser. Please try again.";
+"lng_fox_mes_pairing_preparing" = "Preparing the connection. Try again in a moment.";
+"lng_fox_mes_code_required" = "Enter the code from fxl.ru.";
+"lng_fox_mes_login_failed" = "Login failed.";
+"lng_fox_mes_invalid_user" = "The server returned an invalid user.";
+
 "lng_photo_caption" = "Caption";
 "lng_photos_comment" = "Comment";
 
-"lng_intro_qr_title" = "Scan From Mobile Telegram";
-"lng_intro_qr_step1" = "Open Telegram on your phone";
+"lng_intro_qr_title" = "Scan From Mobile FoxMes";
+"lng_intro_qr_step1" = "Open FoxMes on your phone";
 "lng_intro_qr_step2" = "Go to Settings > Devices > Link Desktop Device";
 "lng_intro_qr_step3" = "Scan this image to Log In";
 "lng_intro_qr_skip" = "Or log in using your phone number";
@@ -421,17 +433,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_code_ph" = "Code";
 "lng_code_desc" = "We've sent an activation code to your phone.\nPlease enter it below.";
-"lng_code_from_telegram" = "A code was sent **via Telegram** to your other\ndevices, if you have any connected.";
+"lng_code_from_telegram" = "A code was sent **via FoxMes** to your other\ndevices, if you have any connected.";
 "lng_code_no_telegram" = "Send code via SMS";
-"lng_code_call" = "Telegram will call you in {minutes}:{seconds}";
-"lng_code_calling" = "Requesting a call from Telegram...";
-"lng_code_called" = "Telegram dialed your number";
+"lng_code_call" = "FoxMes will call you in {minutes}:{seconds}";
+"lng_code_calling" = "Requesting a call from FoxMes...";
+"lng_code_called" = "FoxMes dialed your number";
 
 "lng_bad_phone" = "Invalid phone number. Please try again.";
 "lng_bad_code" = "You have entered an invalid code.";
 "lng_bad_name" = "Enter your first and last name.";
-"lng_bad_photo" = "Sorry, Telegram can't process that type of image.";
-"lng_bad_video" = "Sorry, Telegram can't process that type of video.";
+"lng_bad_photo" = "Sorry, FoxMes can't process that type of image.";
+"lng_bad_video" = "Sorry, FoxMes can't process that type of video.";
 
 "lng_signin_title" = "Cloud password check";
 "lng_signin_desc" = "Please enter your cloud password.";
@@ -448,7 +460,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_signin_no_email_forgot" = "Since you didn't provide a recovery email when setting up your password, your remaining options are either to remember your password or to reset your account.";
 "lng_signin_cant_email_forgot" = "If you can't restore access to the email, your remaining options are either to remember your password or to reset your account.";
 "lng_signin_reset_account" = "Reset your account";
-"lng_signin_sure_reset" = "You will lose all your Telegram chats, messages, media and files if you proceed.\n\nDo you want to reset your account?";
+"lng_signin_sure_reset" = "You will lose all your FoxMes chats, messages, media and files if you proceed.\n\nDo you want to reset your account?";
 "lng_signin_reset" = "Reset";
 "lng_signin_reset_wait" = "Since the account {phone_number} is active and protected by a password, it will be deleted in 1 week. This delay is required for security purposes. You can cancel this process anytime.\n\nYou'll be able to reset your account in:\n{when}";
 "lng_signin_reset_in_days" = "{days_count} {hours_count} {minutes_count}";
@@ -470,7 +482,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_no_chats" = "Your chats will be here";
 "lng_no_conversations" = "You have no\nconversations yet.";
 "lng_no_conversations_button" = "New Message";
-"lng_no_conversations_subtitle" = "Your contacts on Telegram";
+"lng_no_conversations_subtitle" = "Your contacts on FoxMes";
 "lng_no_chats_filter" = "No chats currently belong to this folder.";
 "lng_no_saved_sublists" = "You can save messages from other chats here.";
 "lng_contacts_loading" = "Loading...";
@@ -479,7 +491,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_forum_all_messages" = "All Messages";
 "lng_forum_create_new_topic" = "Create New Thread";
 "lng_dlg_search_for_messages" = "Search for messages";
-"lng_update_telegram" = "Update Telegram";
+"lng_update_telegram" = "Update FoxMes";
 "lng_dlg_search_in" = "Search messages in";
 "lng_dlg_search_from" = "From: {user}";
 "lng_chat_menu" = "Chat menu";
@@ -488,7 +500,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_apply" = "Apply";
 
 "lng_username_title" = "Username";
-"lng_username_description1" = "You can choose a username on Telegram. If you do, other people will be able to find you by this username and contact you without knowing your phone number.";
+"lng_username_description1" = "You can choose a username on FoxMes. If you do, other people will be able to find you by this username and contact you without knowing your phone number.";
 "lng_username_description2" = "You can use **a-z**, **0-9** and **underscores**.\nMinimum length is **5 characters**.";
 "lng_username_choose" = "Choose your username.";
 "lng_username_invalid" = "This username is invalid.";
@@ -567,7 +579,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_include_muted_folders" = "Include muted chats in folder counters";
 "lng_settings_count_unread" = "Count unread messages";
 "lng_settings_events_title" = "Events";
-"lng_settings_events_joined" = "Contact joined Telegram";
+"lng_settings_events_joined" = "Contact joined FoxMes";
 "lng_settings_events_pinned" = "Pinned messages";
 "lng_settings_notifications_calls_title" = "Calls";
 
@@ -652,19 +664,20 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_effect_send" = "Send with Effect";
 "lng_effect_none" = "No effects found.";
 "lng_effect_premium" = "Subscribe to {link} to add this animated effect.";
-"lng_effect_premium_link" = "Telegram Premium";
+"lng_effect_premium_link" = "FoxMes Premium";
 
 "lng_languages" = "Language";
 "lng_languages_none" = "No languages found.";
 "lng_languages_count#one" = "{count} language";
 "lng_languages_count#other" = "{count} languages";
-"lng_sure_save_language" = "Telegram will restart in order to change the language";
+"lng_sure_save_language" = "FoxMes will restart in order to change the language";
 "lng_settings_update_automatically" = "Update automatically";
 "lng_settings_install_beta" = "Install beta versions";
 "lng_settings_current_version" = "Version {version}";
 "lng_settings_check_now" = "Check for updates";
 "lng_settings_update_checking" = "Checking for updates...";
 "lng_settings_latest_installed" = "Latest version is installed";
+"lng_settings_update_available" = "Version {version} is available";
 "lng_settings_update_ready" = "New version is ready";
 "lng_settings_update_fail" = "Update check failed :(";
 "lng_settings_workmode_tray" = "Show tray icon";
@@ -680,9 +693,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_title_total_count" = "Total unread count";
 "lng_settings_native_frame" = "Use system window frame";
 "lng_settings_qt_frame" = "Use Qt window frame";
-"lng_settings_auto_start" = "Launch Telegram when system starts";
+"lng_settings_auto_start" = "Launch FoxMes when system starts";
 "lng_settings_start_min" = "Launch minimized";
-"lng_settings_auto_start_disabled_uwp" = "Starting with the system was disabled in Windows Settings.\n\nPlease enable Telegram Desktop in the Startup Apps Settings.";
+"lng_settings_auto_start_disabled_uwp" = "Starting with the system was disabled in Windows Settings.\n\nPlease enable FoxMes in the Startup Apps Settings.";
 "lng_settings_restore_windows" = "Restore last opened windows";
 "lng_restore_windows_question" = "Restore windows?";
 "lng_restore_windows_restore" = "Restore";
@@ -692,7 +705,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_restore_windows_disabled_toast" = "Windows will not be restored. You can enable this in Settings > Advanced.";
 "lng_restore_windows_unavailable" = "This chat is no longer available.";
 "lng_settings_open_system_settings" = "Open Settings";
-"lng_settings_add_sendto" = "Place Telegram in \"Send to\" menu";
+"lng_settings_add_sendto" = "Place FoxMes in \"Send to\" menu";
 "lng_settings_mac_warn_before_quit" = "Show warning before quitting with {text}";
 "lng_settings_mac_round_icon" = "Round application icon";
 
@@ -830,17 +843,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_birthday_privacy" = "Date of Birth";
 "lng_settings_saved_music_privacy" = "Saved Music";
 "lng_settings_privacy_premium" = "Only subscribers of {link} can restrict receiving voice messages.";
-"lng_settings_privacy_premium_link" = "Telegram Premium";
+"lng_settings_privacy_premium_link" = "FoxMes Premium";
 "lng_settings_passcode_disable" = "Disable passcode";
 "lng_settings_passcode_disable_sure" = "Are you sure you want to disable passcode?";
 "lng_settings_use_winhello" = "Unlock with Windows Hello";
-"lng_settings_use_winhello_about" = "You need to enter your passcode once before unlocking Telegram with Windows Hello.";
+"lng_settings_use_winhello_about" = "You need to enter your passcode once before unlocking FoxMes with Windows Hello.";
 "lng_settings_use_touchid" = "Unlock with Touch ID";
-"lng_settings_use_touchid_about" = "You need to enter your passcode once before unlocking Telegram with Touch ID.";
+"lng_settings_use_touchid_about" = "You need to enter your passcode once before unlocking FoxMes with Touch ID.";
 "lng_settings_use_applewatch" = "Unlock with Apple Watch";
-"lng_settings_use_applewatch_about" = "You need to enter your passcode once before unlocking Telegram with Apple Watch.";
+"lng_settings_use_applewatch_about" = "You need to enter your passcode once before unlocking FoxMes with Apple Watch.";
 "lng_settings_use_systempwd" = "Unlock with System Password";
-"lng_settings_use_systempwd_about" = "You need to enter your passcode once before unlocking Telegram with System Password.";
+"lng_settings_use_systempwd_about" = "You need to enter your passcode once before unlocking FoxMes with System Password.";
 "lng_settings_password_disable" = "Disable cloud password";
 "lng_settings_password_abort" = "Abort two-step verification setup";
 "lng_settings_about_bio" = "Any details such as age, occupation or city.\nExample: 23 y.o. designer from San Francisco";
@@ -848,7 +861,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_username_label" = "Username";
 "lng_settings_phone_label" = "Phone number";
 "lng_settings_username_add" = "Add username";
-"lng_settings_username_about" = "Username lets people contact you on Telegram without needing your phone number.";
+"lng_settings_username_about" = "Username lets people contact you on FoxMes without needing your phone number.";
 "lng_settings_birthday_label" = "Date of Birth";
 "lng_settings_birthday_title" = "Set your Birthday";
 "lng_settings_birthday_add" = "Add";
@@ -868,7 +881,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_channel_saved" = "Your personal channel was updated.";
 "lng_settings_channel_removed" = "Personal channel removed.";
 "lng_settings_add_account_about" = "You can add up to four accounts with different phone numbers.";
-"lng_settings_peer_to_peer_about" = "Disabling peer-to-peer will relay all calls through Telegram servers to avoid revealing your IP address, but may decrease audio and video quality.";
+"lng_settings_peer_to_peer_about" = "Disabling peer-to-peer will relay all calls through FoxMes servers to avoid revealing your IP address, but may decrease audio and video quality.";
 "lng_settings_advanced" = "Advanced";
 "lng_settings_stickers_emoji" = "Stickers and emoji";
 "lng_settings_messages" = "Messages";
@@ -922,21 +935,21 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_edit_ip_confirm_about" = "Show confirmation when opening files that may reveal your IP address.";
 "lng_settings_clear_payment_info" = "Clear Payment and Shipping Info";
 "lng_settings_logged_in" = "Connected websites";
-"lng_settings_logged_in_title" = "Logged In with Telegram";
-"lng_settings_logged_in_description" = "You can log in on websites that support signing in with Telegram.";
+"lng_settings_logged_in_title" = "Logged In with FoxMes";
+"lng_settings_logged_in_description" = "You can log in on websites that support signing in with FoxMes.";
 "lng_settings_disconnect_all" = "Disconnect all websites";
 "lng_settings_disconnect_title" = "Disconnect website";
 "lng_settings_disconnect_sure" = "Are you sure you want to disconnect {domain}?";
 "lng_settings_disconnect_block" = "Block {name}";
 "lng_settings_disconnect_all_title" = "Disconnect websites";
-"lng_settings_disconnect_all_sure" = "Are you sure you want to disconnect all websites where you logged in with Telegram?";
+"lng_settings_disconnect_all_sure" = "Are you sure you want to disconnect all websites where you logged in with FoxMes?";
 "lng_settings_disconnect" = "Disconnect";
 "lng_settings_connected_title" = "Connected websites";
 
 "lng_settings_suggestion_phone_number_title" = "Is {phone} still your number?";
-"lng_settings_suggestion_phone_number_about" = "Keep your number up to date to ensure you can always log into Telegram. {link}";
+"lng_settings_suggestion_phone_number_about" = "Keep your number up to date to ensure you can always log into FoxMes. {link}";
 "lng_settings_suggestion_phone_number_about_link" = "https://telegram.org/faq#q-i-have-a-new-phone-number-what-do-i-do";
-"lng_settings_suggestion_phone_number_change" = "Please change your phone number in the official Telegram app on your phone as soon as possible. {emoji}";
+"lng_settings_suggestion_phone_number_change" = "Please change your phone number in the official FoxMes app on your phone as soon as possible. {emoji}";
 "lng_settings_suggestion_password_title" = "Your password";
 "lng_settings_suggestion_password_about" = "Your account is protected by 2-Step Veritifaction. Do you still remember your password?";
 "lng_settings_suggestion_password_yes" = "Yes, definitely";
@@ -973,7 +986,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_cloud_password_password_title" = "Password";
 "lng_settings_cloud_password_hint_title" = "Password Hint";
 "lng_settings_cloud_password_email_title" = "Recovery Email";
-"lng_settings_cloud_password_start_about" = "Protect your Telegram account with an additional password.";
+"lng_settings_cloud_password_start_about" = "Protect your FoxMes account with an additional password.";
 "lng_settings_cloud_password_hint_about" = "You can create a hint for your password.";
 "lng_settings_cloud_password_email_about" = "Please enter your new recovery email. It is the only way to recover a forgotten password.";
 "lng_settings_cloud_password_password_subtitle" = "Create Password";
@@ -993,11 +1006,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_cloud_password_reset_in" = "You can reset your password in {duration}.";
 
 "lng_settings_cloud_login_email_section_title" = "Login Email";
-"lng_settings_cloud_login_email_box_about" = "This email address will be used every time you log in to your Telegram account from a new device.";
+"lng_settings_cloud_login_email_box_about" = "This email address will be used every time you log in to your FoxMes account from a new device.";
 "lng_settings_cloud_login_email_box_ok" = "Change email";
 "lng_settings_cloud_login_email_title" = "Enter New Email";
 "lng_settings_cloud_login_email_placeholder" = "Enter Login Email";
-"lng_settings_cloud_login_email_about" = "You will receive Telegram login codes via email and not SMS. Please enter an email address to which you have access.";
+"lng_settings_cloud_login_email_about" = "You will receive FoxMes login codes via email and not SMS. Please enter an email address to which you have access.";
 "lng_settings_cloud_login_email_confirm" = "Confirm";
 "lng_settings_cloud_login_email_code_title" = "Check Your New Email";
 "lng_settings_cloud_login_email_code_about" = "Please enter the code we have sent to your new email {email}";
@@ -1040,7 +1053,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_clear_payment_info_shipping" = "Shipping info";
 "lng_clear_payment_info_payment" = "Payment info";
 "lng_clear_payment_info_clear" = "Clear";
-"lng_clear_payment_info_confirm" = "Delete your shipping info and instruct all payment providers to remove your saved credit cards? Note that Telegram never stores your credit card data.";
+"lng_clear_payment_info_confirm" = "Delete your shipping info and instruct all payment providers to remove your saved credit cards? Note that FoxMes never stores your credit card data.";
 
 "lng_settings_theme_settings" = "Theme settings";
 "lng_settings_theme_name_color" = "Your name color";
@@ -1058,7 +1071,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_color_reply_channel" = "Reply to your channel message";
 "lng_settings_color_text" = "Your name and replies to your messages will be shown in the selected color.";
 "lng_settings_color_text_channel" = "The name of the channel and replies to its messages will be shown in the selected color.";
-"lng_settings_color_link_name" = "Telegram";
+"lng_settings_color_link_name" = "FoxMes";
 "lng_settings_color_link_title" = "Link Preview";
 "lng_settings_color_link_description" = "Previews of links you send will also use this color.";
 "lng_settings_color_about" = "This color will be used for your name, the links you send, and replies to your messages.";
@@ -1109,7 +1122,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_theme_reverting#other" = "Reverting to the old theme in {count} seconds.";
 "lng_theme_keep_changes" = "Keep changes";
 "lng_theme_revert" = "Revert";
-"lng_theme_no_desktop" = "Sorry, this theme doesn't include a version for Telegram Desktop.";
+"lng_theme_no_desktop" = "Sorry, this theme doesn't include a version for FoxMes.";
 "lng_theme_share" = "Share";
 "lng_theme_edit" = "Edit";
 "lng_theme_delete" = "Delete";
@@ -1141,7 +1154,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_download_path_temp" = "Temp folder";
 "lng_download_path_default" = "Default folder";
 "lng_download_path_header" = "Choose download path";
-"lng_download_path_default_radio" = "Telegram folder in system «Downloads»";
+"lng_download_path_default_radio" = "FoxMes folder in system «Downloads»";
 "lng_download_path_temp_radio" = "Temp folder, cleared on logout or uninstall";
 "lng_download_path_dir_radio" = "Custom folder, cleared only manually";
 "lng_download_path_choose" = "Choose download path";
@@ -1181,14 +1194,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_local_storage_clear" = "Clear all";
 "lng_local_storage_clear_selected" = "Clear selected";
 "lng_local_storage_clearing" = "Clearing...";
-"lng_local_storage_device_telegram" = "Telegram cache";
+"lng_local_storage_device_telegram" = "FoxMes cache";
 "lng_local_storage_device_other" = "Other data";
 "lng_local_storage_device_free" = "Free";
 "lng_local_storage_device_total" = "Total";
-"lng_local_storage_device_usage" = "Telegram uses {percent} of your device storage.";
+"lng_local_storage_device_usage" = "FoxMes uses {percent} of your device storage.";
 "lng_local_storage_clearing_about" = "Please keep this window open while the cache is being cleared.";
 "lng_local_storage_cleared" = "{size} freed on your device!";
-"lng_local_storage_about" = "All media will stay in the Telegram cloud and can be re-downloaded if you need them again.";
+"lng_local_storage_about" = "All media will stay in the FoxMes cloud and can be re-downloaded if you need them again.";
 "lng_local_storage_manage_title" = "Manage limits";
 "lng_local_storage_max_size_about" = "If your cache size exceeds this limit, the oldest unused media will be removed from the device.";
 
@@ -1205,10 +1218,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_passcode_enter_first" = "Enter a passcode";
 "lng_passcode_enter_new" = "Enter new passcode";
 "lng_passcode_confirm_new" = "Re-enter new passcode";
-"lng_passcode_about" = "When a local passcode is set, a lock icon appears at the top of your chat list. Click it to lock Telegram Desktop.\n\nNote: if you forget your local passcode, you'll need to log out of Telegram Desktop and log in again.";
+"lng_passcode_about" = "When a local passcode is set, a lock icon appears at the top of your chat list. Click it to lock FoxMes.\n\nNote: if you forget your local passcode, you'll need to log out of FoxMes and log in again.";
 "lng_passcode_about1" = "When a local passcode is set, a lock icon appears at the top of your chat list.";
-"lng_passcode_about2" = "Click it to lock Telegram Desktop.";
-"lng_passcode_about3" = "Note: if you forget your passcode, you'll need to log out of Telegram Desktop and log in again.";
+"lng_passcode_about2" = "Click it to lock FoxMes.";
+"lng_passcode_about3" = "Note: if you forget your passcode, you'll need to log out of FoxMes and log in again.";
 "lng_passcode_differ" = "Passcodes are different";
 "lng_passcode_wrong" = "Wrong passcode";
 "lng_passcode_is_same" = "Passcode was not changed";
@@ -1220,7 +1233,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_passcode_touchid" = "You need to enter your passcode\nbefore you can use Touch ID.";
 "lng_passcode_applewatch" = "You need to enter your passcode\nbefore you can use Watch to unlock.";
 "lng_passcode_systempwd" = "You need to enter your passcode\nbefore you can use system password.";
-"lng_passcode_winhello_unlock" = "Telegram wants to unlock with Windows Hello.";
+"lng_passcode_winhello_unlock" = "FoxMes wants to unlock with Windows Hello.";
 "lng_passcode_touchid_unlock" = "unlock";
 "lng_passcode_create_button" = "Save Passcode";
 "lng_passcode_check_button" = "Submit";
@@ -1233,7 +1246,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_cloud_password_waiting_code" = "Confirmation code sent to {email}...";
 "lng_cloud_password_confirm" = "Confirm recovery email";
 "lng_cloud_password_change" = "Change cloud password";
-"lng_cloud_password_create" = "Telegram password";
+"lng_cloud_password_create" = "FoxMes password";
 "lng_cloud_password_remove" = "Remove cloud password";
 "lng_cloud_password_reset_ready" = "Reset password";
 "lng_cloud_password_enter_old" = "Enter current password";
@@ -1246,7 +1259,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_cloud_password_email" = "Enter recovery email";
 "lng_cloud_password_bad_email" = "Invalid email";
 "lng_cloud_password_about" = "This password will be asked when you log in on a new device in addition to the code you get via SMS.";
-"lng_cloud_password_about_recover" = "Warning! Are you sure you don't want to\nadd a password recovery email?\n\nIf you forget your password, you will\nlose access to your Telegram account.";
+"lng_cloud_password_about_recover" = "Warning! Are you sure you don't want to\nadd a password recovery email?\n\nIf you forget your password, you will\nlose access to your FoxMes account.";
 "lng_cloud_password_skip_email" = "Skip email";
 "lng_cloud_password_was_set" = "Two-step verification enabled.";
 "lng_cloud_password_updated" = "Your cloud password was updated.";
@@ -1254,7 +1267,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_cloud_password_differ" = "Passwords do not match";
 "lng_cloud_password_wrong" = "Wrong cloud password";
 "lng_cloud_password_is_same" = "Password was not changed";
-"lng_cloud_password_passport_losing" = "Warning! All data saved in your Telegram Passport will be lost.";
+"lng_cloud_password_passport_losing" = "Warning! All data saved in your FoxMes Passport will be lost.";
 "lng_cloud_password_resend" = "Resend code";
 "lng_cloud_password_resent" = "Code was resent.";
 "lng_cloud_password_reset_no_email" = "Since you didn't provide a recovery email when setting up your password, your remaining options are either to remember your password or wait 7 days until your password is reset.";
@@ -1286,7 +1299,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_proxy_auto_switch_about" = "You can choose how quickly the app should auto-connect to the nearest active proxy if the current one stops working.";
 "lng_proxy_auto_switch_timeout#one" = "{count} s";
 "lng_proxy_auto_switch_timeout#other" = "{count} s";
-"lng_proxy_about" = "Proxy servers may be helpful in accessing Telegram if there is no connection in a specific region.";
+"lng_proxy_about" = "Proxy servers may be helpful in accessing FoxMes if there is no connection in a specific region.";
 "lng_proxy_add" = "Add proxy";
 "lng_proxy_share" = "Share";
 "lng_proxy_online" = "online";
@@ -1313,9 +1326,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_proxy_credentials" = "Credentials";
 "lng_proxy_description" = "Your saved proxy list will be here.";
 "lng_proxy_sponsor" = "Proxy sponsor";
-"lng_proxy_sponsor_about" = "This channel is shown by your proxy server.\nTo remove this channel from your chat list,\ndisable the proxy in Telegram Settings.";
-"lng_proxy_sponsor_warning" = "This proxy may display a sponsored channel in your chat list. This doesn't reveal any of your Telegram traffic.";
-"lng_proxy_web_warning" = "This WEB proxy runs a web page from its provider in the background while you're connected. Only use it if you trust the provider. It may also display a sponsored channel in your chat list. This doesn't reveal any of your Telegram traffic.";
+"lng_proxy_sponsor_about" = "This channel is shown by your proxy server.\nTo remove this channel from your chat list,\ndisable the proxy in FoxMes Settings.";
+"lng_proxy_sponsor_warning" = "This proxy may display a sponsored channel in your chat list. This doesn't reveal any of your FoxMes traffic.";
+"lng_proxy_web_warning" = "This WEB proxy runs a web page from its provider in the background while you're connected. Only use it if you trust the provider. It may also display a sponsored channel in your chat list. This doesn't reveal any of your FoxMes traffic.";
 "lng_proxy_add_from_clipboard" = "Add proxy from clipboard";
 "lng_proxy_add_from_clipboard_good_toast" = "Proxy was added from clipboard.";
 "lng_proxy_add_from_clipboard_failed_toast" = "This is not a proxy link.";
@@ -1327,7 +1340,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_blocked_users" = "Blocked users";
 "lng_settings_no_blocked_users" = "None";
 "lng_settings_show_sessions" = "Active sessions";
-"lng_settings_export_data" = "Export Telegram data";
+"lng_settings_export_data" = "Export FoxMes data";
 "lng_settings_destroy_if" = "If away for...";
 
 "lng_settings_terminate_title" = "Terminate old sessions";
@@ -1340,13 +1353,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_rename_device_title" = "Rename current device";
 "lng_settings_manage_local_storage" = "Manage local storage";
 "lng_settings_ask_question" = "Ask a Question";
-"lng_settings_ask_sure" = "Please note that Telegram Support is done by volunteers. We try to respond as quickly as possible, but it may take a while.\n\nPlease take a look at the Telegram FAQ: it has important troubleshooting tips and answers to most questions.";
+"lng_settings_ask_sure" = "Please note that FoxMes Support is done by volunteers. We try to respond as quickly as possible, but it may take a while.\n\nPlease take a look at the FoxMes FAQ: it has important troubleshooting tips and answers to most questions.";
 "lng_settings_faq_button" = "Go to FAQ";
 "lng_settings_ask_ok" = "Ask a Volunteer";
-"lng_settings_faq" = "Telegram FAQ";
+"lng_settings_faq" = "FoxMes FAQ";
 "lng_settings_faq_subtitle" = "FAQ";
 "lng_settings_faq_link" = "https://telegram.org/faq#general-questions";
-"lng_settings_features" = "Telegram Features";
+"lng_settings_features" = "FoxMes Features";
 "lng_settings_credits" = "My Stars";
 "lng_settings_currency" = "My Grams";
 "lng_settings_logout" = "Log out";
@@ -1376,7 +1389,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_passkeys_none_button_unsupported" = "Unsupported";
 "lng_settings_passkeys_created" = "Created {date}";
 "lng_settings_passkeys_last_used" = "Last used {date}";
-"lng_settings_passkeys_unsigned_error" = "Passkeys are not available in unsigned builds. Please use an official signed version of Telegram Desktop.";
+"lng_settings_passkeys_unsigned_error" = "Passkeys are not available in unsigned builds. Please use an official signed version of FoxMes.";
 "lng_settings_passkey_unknown" = "Passkey";
 
 "lng_passkey_touch" = "Touch your security key";
@@ -1442,11 +1455,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_archive_hint_button" = "Got it";
 
 "lng_settings_generic_subscribe" = "Subscribe to {link} to use this setting.";
-"lng_settings_generic_subscribe_link" = "Telegram Premium";
+"lng_settings_generic_subscribe_link" = "FoxMes Premium";
 
 "lng_sessions_header" = "This device";
 "lng_sessions_other_header" = "Active Devices";
-"lng_sessions_other_desc" = "You can log in to Telegram from other mobile, tablet and desktop devices, using the same phone number. All your data will be instantly synchronized.";
+"lng_sessions_other_desc" = "You can log in to FoxMes from other mobile, tablet and desktop devices, using the same phone number. All your data will be instantly synchronized.";
 "lng_sessions_terminate_all" = "Terminate all other sessions";
 "lng_sessions_terminate_all_about" = "Logs out all devices except for this one.";
 "lng_sessions_incomplete" = "Incomplete login attempts";
@@ -1459,7 +1472,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_sessions_ip" = "IP address";
 "lng_sessions_location" = "Location";
 "lng_sessions_location_about" = "This location estimate is based on the IP address and may not always be accurate.";
-"lng_sessions_about_apps" = "The official Telegram app is available for Android, iPhone, iPad, Windows, macOS and Linux.";
+"lng_sessions_about_apps" = "The official FoxMes app is available for Android, iPhone, iPad, Windows, macOS and Linux.";
 
 "lng_blocked_list_title" = "Blocked users";
 "lng_blocked_list_unknown_phone" = "unknown phone number";
@@ -1470,7 +1483,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_blocked_list_about" = "Blocked users can't send you messages or add you to groups. They will not see your profile photos, stories, online and last seen status.";
 "lng_blocked_list_not_found" = "No users found.";
 "lng_blocked_list_confirm_title" = "Block {name}";
-"lng_blocked_list_confirm_text" = "Do you want to block {name} from messaging and calling you on Telegram?";
+"lng_blocked_list_confirm_text" = "Do you want to block {name} from messaging and calling you on FoxMes?";
 "lng_blocked_list_confirm_clear" = "Delete this chat";
 "lng_blocked_list_confirm_reply" = "Delete this reply";
 "lng_blocked_list_confirm_reply_all" = "Delete all replies from {user}";
@@ -1493,7 +1506,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_edit_privacy_exceptions" = "Add exceptions";
 "lng_edit_privacy_user_types" = "User types";
 "lng_edit_privacy_users_and_groups" = "Users and groups";
-"lng_edit_privacy_premium_status" = "all Telegram Premium subscribers";
+"lng_edit_privacy_premium_status" = "all FoxMes Premium subscribers";
 "lng_edit_privacy_miniapps_status" = "web mini apps that you use";
 
 "lng_edit_privacy_exceptions_count#one" = "{count} user";
@@ -1504,7 +1517,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_edit_privacy_phone_number_title" = "Phone number privacy";
 "lng_edit_privacy_phone_number_header" = "Who can see my phone number";
-"lng_edit_privacy_phone_number_warning" = "Users who have your number saved in their contacts will also see it on Telegram.";
+"lng_edit_privacy_phone_number_warning" = "Users who have your number saved in their contacts will also see it on FoxMes.";
 "lng_edit_privacy_phone_number_always_empty" = "Always share with";
 "lng_edit_privacy_phone_number_never_empty" = "Never share with";
 "lng_edit_privacy_phone_number_exceptions" = "Add users or groups to override the settings above.";
@@ -1512,7 +1525,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_edit_privacy_phone_number_never_title" = "Never share with";
 
 "lng_edit_privacy_phone_number_find" = "Who can find me by my number";
-"lng_edit_privacy_phone_number_contacts" = "Users who add your number to their contacts will see it on Telegram only if they are your contacts.";
+"lng_edit_privacy_phone_number_contacts" = "Users who add your number to their contacts will see it on FoxMes only if they are your contacts.";
 
 "lng_edit_privacy_lastseen_title" = "Last Seen & Online";
 "lng_edit_privacy_lastseen_header" = "Who can see my last seen time";
@@ -1524,7 +1537,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_edit_privacy_lastseen_never_title" = "Never share with";
 "lng_edit_lastseen_hide_read_time" = "Hide read time";
 "lng_edit_lastseen_hide_read_time_about" = "Hide the time when you read messages from people who can't see your last seen. If you turn this on, their read time will also be hidden from you (unless you are a Premium user).\n\nThis setting does not affect group chats.";
-"lng_edit_lastseen_subscribe" = "Subscribe to Telegram Premium";
+"lng_edit_lastseen_subscribe" = "Subscribe to FoxMes Premium";
 "lng_edit_lastseen_subscribe_about" = "If you subscribe to Premium, you will see other users' last seen and read time even if you hid yours from them (unless they specifically restricted it).";
 
 "lng_edit_privacy_groups_title" = "Groups & Channels";
@@ -1639,10 +1652,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_messages_privacy_everyone" = "Everybody";
 "lng_messages_privacy_restricted" = "My Contacts and Premium Users";
 "lng_messages_privacy_about" = "You can restrict messages from users who are not in your contacts and don't have Premium.";
-"lng_messages_privacy_premium_button" = "Subscribe to Telegram Premium";
-"lng_messages_privacy_premium_about" = "Subscribe now to change this setting and get access to other exclusive features of Telegram Premium.";
+"lng_messages_privacy_premium_button" = "Subscribe to FoxMes Premium";
+"lng_messages_privacy_premium_about" = "Subscribe now to change this setting and get access to other exclusive features of FoxMes Premium.";
 "lng_messages_privacy_premium" = "Only subscribers of {link} can select this option.";
-"lng_messages_privacy_premium_link" = "Telegram Premium";
+"lng_messages_privacy_premium_link" = "FoxMes Premium";
 "lng_messages_privacy_charge" = "Charge for messages";
 "lng_messages_privacy_charge_about" = "Charge a fee for messages from people outside your contacts or those you haven't messaged first.";
 "lng_messages_privacy_price" = "Set your price per message";
@@ -1658,7 +1671,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_change_phone_new_submit" = "Submit";
 "lng_change_phone_code_title" = "Enter code";
-"lng_change_phone_error" = "You can only change your phone number using mobile Telegram apps. Please use an official Telegram app on your phone to update your number.";
+"lng_change_phone_error" = "You can only change your phone number using mobile FoxMes apps. Please use an official FoxMes app on your phone to update your number.";
 
 "lng_mute_menu_mute" = "Mute";
 "lng_mute_menu_unmute" = "Unmute";
@@ -1691,7 +1704,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_profile_saved_messages#other" = "{count} saved messages";
 "lng_profile_peer_gifts#one" = "{count} gift";
 "lng_profile_peer_gifts#other" = "{count} gifts";
-"lng_profile_unofficial_warning" = "{icon} {name} uses an unofficial Telegram client — messages to this user may be less secure.";
+"lng_profile_unofficial_warning" = "{icon} {name} uses an unofficial FoxMes client — messages to this user may be less secure.";
 "lng_profile_participants_section" = "Members";
 "lng_profile_subscribers_section" = "Subscribers";
 "lng_profile_add_contact" = "Add Contact";
@@ -1882,12 +1895,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_profile_photo_reset_button" = "Reset";
 "lng_profile_photo_reset_sure" = "Are you sure you want to reset {user}'s photo to the original?";
 "lng_profile_photo_from_clipboard" = "From clipboard";
-"lng_profile_suggest_sure" = "You can suggest {user} to set this photo for their Telegram profile.";
+"lng_profile_suggest_sure" = "You can suggest {user} to set this photo for their FoxMes profile.";
 "lng_profile_suggest_button" = "Suggest";
 "lng_profile_set_personal_sure" = "Only you will see this photo and it will replace any photo {user} sets for themselves.";
-"lng_profile_accept_photo_sure" = "{user} suggests this photo for your Telegram profile.";
+"lng_profile_accept_photo_sure" = "{user} suggests this photo for your FoxMes profile.";
 "lng_profile_set_photo_button" = "Set Photo";
-"lng_profile_accept_video_sure" = "{user} suggests this photo for your Telegram profile.";
+"lng_profile_accept_video_sure" = "{user} suggests this photo for your FoxMes profile.";
 "lng_profile_set_video_button" = "Set Photo";
 "lng_profile_video_confirm_button" = "Set Video";
 "lng_video_quality_original" = "Original";
@@ -1909,6 +1922,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_profile_action_short_leave" = "Leave";
 "lng_profile_action_short_more" = "More";
 "lng_profile_action_short_manage" = "Manage";
+"lng_profile_action_short_profile" = "Profile";
 "lng_profile_action_short_live_stream" = "Live stream";
 "lng_profile_action_short_video_chat" = "Video chat";
 
@@ -2021,11 +2035,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_manage_peer_reactions_max_about" = "Limit the number of different reactions that can be added to a post, including already published ones.";
 
 "lng_manage_peer_reactions_paid" = "Enable Paid Reactions";
-"lng_manage_peer_reactions_paid_about" = "Switch this on to let your subscribers react to posts with Telegram Stars, which you will be able to withdraw as Grams. {link}";
+"lng_manage_peer_reactions_paid_about" = "Switch this on to let your subscribers react to posts with FoxMes Stars, which you will be able to withdraw as Grams. {link}";
 "lng_manage_peer_reactions_paid_link" = "Learn more >";
 
 "lng_manage_peer_antispam" = "Aggressive Anti-Spam";
-"lng_manage_peer_antispam_about" = "Telegram will filter more spam but may occasionally affect ordinary messages. You can report False Positives in Recent Actions.";
+"lng_manage_peer_antispam_about" = "FoxMes will filter more spam but may occasionally affect ordinary messages. You can report False Positives in Recent Actions.";
 "lng_manage_peer_antispam_not_enough#one" = "Aggressive filtering can be enabled only in groups with more than **{count} member**.";
 "lng_manage_peer_antispam_not_enough#other" = "Aggressive filtering can be enabled only in groups with more than **{count} members**.";
 
@@ -2073,7 +2087,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_disable_sharing_no_forwarding_about" = "Disable message forwarding to other chats.";
 "lng_disable_sharing_no_saving" = "No Saving";
 "lng_disable_sharing_no_saving_about" = "Disable copying texts and saving photos and videos to gallery.";
-"lng_disable_sharing_unlock" = "Unlock with Telegram Premium";
+"lng_disable_sharing_unlock" = "Unlock with FoxMes Premium";
 "lng_disable_sharing_button" = "Disable Sharing";
 "lng_disable_sharing_toast" = "Sharing disabled for this chat.";
 "lng_enable_sharing_toast" = "Sharing enabled for this chat.";
@@ -2144,7 +2158,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_star_ref_share_title" = "Share revenue with affiliates";
 "lng_star_ref_share_about" = "Set the commission for revenue generated by users referred to you.";
 "lng_star_ref_launch_title" = "Launch your affiliate program";
-"lng_star_ref_launch_about" = "Telegram will feature your program for millions of potential affiliates.";
+"lng_star_ref_launch_about" = "FoxMes will feature your program for millions of potential affiliates.";
 "lng_star_ref_let_title" = "Let affiliate promote you";
 "lng_star_ref_let_about" = "Affiliates will share your referral link with their audience.";
 "lng_star_ref_commission_title" = "Commission";
@@ -2173,9 +2187,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_star_ref_warning_if_end3" = "You will be able to start a new affiliate program only in **24** hours.";
 "lng_star_ref_warning_end" = "End Anyway";
 "lng_star_ref_created_title" = "Affiliate program started";
-"lng_star_ref_created_text" = "Any Telegram user, channel owner or mini app developer can now join your program.";
+"lng_star_ref_created_text" = "Any FoxMes user, channel owner or mini app developer can now join your program.";
 "lng_star_ref_updated_title" = "Affiliate program updated";
-"lng_star_ref_updated_text" = "Any Telegram user, channel owner or mini app developer can join your program.";
+"lng_star_ref_updated_text" = "Any FoxMes user, channel owner or mini app developer can join your program.";
 "lng_star_ref_ended_title" = "Affiliate program ended";
 "lng_star_ref_ended_text" = "Participating affiliates have been notified. All referral links will be disabled in **24** hours.";
 "lng_star_ref_list_title" = "Affiliate Programs";
@@ -2237,10 +2251,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_stars_rating_negative" = "A negative rating indicates that **{name}'s** payments are unreliable.";
 "lng_stars_rating_negative_your#one" = "A negative rating indicates that your payments are unreliable. Spend **{count} Star** to fix this issue.";
 "lng_stars_rating_negative_your#other" = "A negative rating indicates that your payments are unreliable. Spend **{count} Stars** to fix this issue.";
-"lng_stars_rating_about" = "This rating reflects **{name}'s** activity on Telegram. What affects it:";
-"lng_stars_rating_about_your" = "This rating reflects your activity on Telegram. What affects it:";
-"lng_stars_title_gifts_telegram" = "Gifts from Telegram";
-"lng_stars_about_gifts_telegram" = "{emoji} 100% of the Stars spent on gifts purchased from Telegram.";
+"lng_stars_rating_about" = "This rating reflects **{name}'s** activity on FoxMes. What affects it:";
+"lng_stars_rating_about_your" = "This rating reflects your activity on FoxMes. What affects it:";
+"lng_stars_title_gifts_telegram" = "Gifts from FoxMes";
+"lng_stars_about_gifts_telegram" = "{emoji} 100% of the Stars spent on gifts purchased from FoxMes.";
 "lng_stars_title_gifts_users" = "Gifts and Posts from Users";
 "lng_stars_about_gifts_users" = "{emoji} 20% of the Stars spent on resold gifts, paid messages and channel posts.";
 "lng_stars_title_refunds" = "Refunds and Conversions";
@@ -2554,12 +2568,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_sure_delete_selected_days#other" = "{count} selected days";
 
 "lng_message_empty" = "Empty Message";
-"lng_message_unsupported" = "This message is not supported by your version of Telegram. Please update to the latest version in Settings > Advanced, or install it from {link}. If you are already using the latest version, this message might depend on a feature that is not yet implemented.";
+"lng_message_unsupported" = "This message is not supported by your version of FoxMes. Please update to the latest version in Settings > Advanced, or install it from {link}. If you are already using the latest version, this message might depend on a feature that is not yet implemented.";
 "lng_unsupported_message_title" = "Unsupported Message";
-"lng_unsupported_message_text" = "Update Telegram to view this message";
+"lng_unsupported_message_text" = "Update FoxMes to view this message";
 "lng_unsupported_message_update" = "Update";
 "lng_unsupported_block_title" = "Unsupported Block";
-"lng_unsupported_block_text" = "Update Telegram to view this part of the message";
+"lng_unsupported_block_text" = "Update FoxMes to view this part of the message";
 "lng_message_not_found" = "Message doesn't exist.";
 
 "lng_duration_minsec_minutes#one" = "{count} min";
@@ -2595,7 +2609,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_action_you_joined_by_request_channel" = "Your request to join the channel was approved";
 "lng_action_user_joined_via_community" = "{from} joined the group via the {community} community";
 "lng_action_user_joined_via_community_unknown" = "{from} joined the group via a community";
-"lng_action_user_registered" = "{from} joined Telegram";
+"lng_action_user_registered" = "{from} joined FoxMes";
 "lng_action_removed_photo" = "{from} removed group photo";
 "lng_action_removed_photo_channel" = "Channel photo removed";
 "lng_action_changed_photo" = "{from} updated group photo";
@@ -2691,7 +2705,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_action_gift_transferred_unknown" = "Someone transferred you a gift";
 "lng_action_gift_transferred_unknown_channel" = "Someone transferred a gift to {channel}";
 "lng_action_gift_transferred_self" = "You transferred a unique collectible";
-"lng_action_gift_displayed_self" = "You've started displaying {name} on your Telegram profile page.";
+"lng_action_gift_displayed_self" = "You've started displaying {name} on your FoxMes profile page.";
 "lng_action_gift_transferred_self_channel" = "You transferred a gift to {channel}";
 "lng_action_gift_transferred_mine" = "You transferred a gift to {user}";
 "lng_action_gift_crafted" = "You crafted a new gift";
@@ -2727,7 +2741,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_action_gift_sent_upgradable" = "{user} can upgrade this gift to a unique collectible.";
 "lng_action_gift_premium_months#one" = "{count} Month Premium";
 "lng_action_gift_premium_months#other" = "{count} Months Premium";
-"lng_action_gift_premium_about" = "Subscription for exclusive Telegram features.";
+"lng_action_gift_premium_about" = "Subscription for exclusive FoxMes features.";
 "lng_action_gift_refunded" = "This gift was downgraded because a request to refund the payment related to this gift was made, and the money was returned.";
 "lng_action_gift_got_ton" = "Use Grams to suggest posts to channels.";
 "lng_action_gift_offer_incoming" = "An offer to buy this gift for {amount}.";
@@ -2747,11 +2761,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_action_gift_offer_expired_your" = "Your offer to buy {name} for {cost} has expired.";
 "lng_action_gift_offer_declined" = "{user} rejected your offer to buy {name} for {cost}.";
 "lng_action_gift_offer_declined_you" = "You rejected {user}'s offer to buy your {name} for {cost}.";
-"lng_action_suggested_photo_me" = "You suggested this photo for {user}'s Telegram profile.";
-"lng_action_suggested_photo" = "{user} suggests this photo for your Telegram profile.";
+"lng_action_suggested_photo_me" = "You suggested this photo for {user}'s FoxMes profile.";
+"lng_action_suggested_photo" = "{user} suggests this photo for your FoxMes profile.";
 "lng_action_suggested_photo_button" = "View Photo";
-"lng_action_suggested_video_me" = "You suggested this photo for {user}'s Telegram profile.";
-"lng_action_suggested_video" = "{user} suggests this photo for your Telegram profile.";
+"lng_action_suggested_video_me" = "You suggested this photo for {user}'s FoxMes profile.";
+"lng_action_suggested_video" = "{user} suggests this photo for your FoxMes profile.";
 "lng_action_suggested_video_button" = "View Photo";
 "lng_action_suggested_birthday_me" = "You suggest {user} add a date of birth:";
 "lng_action_suggested_birthday" = "{user} suggests you add your date of birth:";
@@ -2790,18 +2804,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_action_story_mention_button" = "View Story";
 "lng_action_story_mention_me_unavailable" = "The story where you mentioned {user} is no longer available.";
 "lng_action_story_mention_unavailable" = "The story where {user} mentioned you is no longer available.";
-"lng_action_giveaway_started_group" = "{from} just started a giveaway of Telegram Premium subscriptions to its members.";
-"lng_action_giveaway_started" = "{from} just started a giveaway of Telegram Premium subscriptions for its followers.";
+"lng_action_giveaway_started_group" = "{from} just started a giveaway of FoxMes Premium subscriptions to its members.";
+"lng_action_giveaway_started" = "{from} just started a giveaway of FoxMes Premium subscriptions for its followers.";
 "lng_action_giveaway_credits_started_amount#one" = "{count} Star";
 "lng_action_giveaway_credits_started_amount#other" = "{count} Stars";
 "lng_action_giveaway_credits_started_group" = "{from} just started a giveaway of {amount} to its members.";
 "lng_action_giveaway_credits_started" = "{from} just started a giveaway of {amount} to its followers.";
-"lng_action_giveaway_results#one" = "{count} winner of the giveaway was randomly selected by Telegram and received private messages with giftcodes.";
-"lng_action_giveaway_results#other" = "{count} winners of the giveaway were randomly selected by Telegram and received private messages with giftcodes.";
-"lng_action_giveaway_results_some" = "Some winners of the giveaway were randomly selected by Telegram and received private messages with giftcodes.";
-"lng_action_giveaway_results_credits#one" = "{count} winner of the giveaway was randomly selected by Telegram and received their prize.";
-"lng_action_giveaway_results_credits#other" = "{count} winners of the giveaway were randomly selected by Telegram and received their prize.";
-"lng_action_giveaway_results_credits_some" = "Some winners of the giveaway were randomly selected by Telegram and received their prize.";
+"lng_action_giveaway_results#one" = "{count} winner of the giveaway was randomly selected by FoxMes and received private messages with giftcodes.";
+"lng_action_giveaway_results#other" = "{count} winners of the giveaway were randomly selected by FoxMes and received private messages with giftcodes.";
+"lng_action_giveaway_results_some" = "Some winners of the giveaway were randomly selected by FoxMes and received private messages with giftcodes.";
+"lng_action_giveaway_results_credits#one" = "{count} winner of the giveaway was randomly selected by FoxMes and received their prize.";
+"lng_action_giveaway_results_credits#other" = "{count} winners of the giveaway were randomly selected by FoxMes and received their prize.";
+"lng_action_giveaway_results_credits_some" = "Some winners of the giveaway were randomly selected by FoxMes and received their prize.";
 "lng_action_giveaway_results_none" = "No winners of the giveaway could be selected.";
 "lng_action_boost_apply_me" = "You boosted the group";
 "lng_action_boost_apply#one" = "{from} boosted the group";
@@ -2910,7 +2924,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_similar_channels_more" = "More Channels";
 "lng_similar_channels_premium_all#one" = "Subscribe to {link} to unlock up to **{count}** similar channel.";
 "lng_similar_channels_premium_all#other" = "Subscribe to {link} to unlock up to **{count}** similar channels.";
-"lng_similar_channels_premium_all_link" = "Telegram Premium";
+"lng_similar_channels_premium_all_link" = "FoxMes Premium";
 "lng_similar_channels_show_more" = "Show more channels";
 
 "lng_similar_bots_title" = "Similar bots";
@@ -2924,7 +2938,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_peer_gifts_empty_search" = "No matching gifts";
 "lng_peer_gifts_view_all" = "View All Gifts";
 "lng_peer_gifts_notify" = "Notify About New Gifts";
-"lng_peer_gifts_notify_enabled" = "You will receive a message from Telegram when your channel receives a gift.";
+"lng_peer_gifts_notify_enabled" = "You will receive a message from FoxMes when your channel receives a gift.";
 "lng_peer_gifts_filter_by_value" = "Sort by Value";
 "lng_peer_gifts_filter_by_date" = "Sort by Date";
 "lng_peer_gifts_filter_unlimited" = "Unlimited";
@@ -3015,8 +3029,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_group_invite_can_join#other" = "{count} can join";
 "lng_group_invite_days_left#one" = "{count} day left";
 "lng_group_invite_days_left#other" = "{count} days left";
-"lng_group_invite_about_permanent_group" = "Anyone who has Telegram installed will be able to join your group by following this link.";
-"lng_group_invite_about_permanent_channel" = "Anyone who has Telegram installed will be able to join your channel by following this link.";
+"lng_group_invite_about_permanent_group" = "Anyone who has FoxMes installed will be able to join your group by following this link.";
+"lng_group_invite_about_permanent_channel" = "Anyone who has FoxMes installed will be able to join your channel by following this link.";
 "lng_group_invite_title" = "Invite links";
 "lng_group_invite_add" = "Create a New Link";
 "lng_group_invite_add_about" = "You can generate invite links that expire after they are used.";
@@ -3059,7 +3073,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_group_invite_can_join_via_link#one" = "{count} person can join via this link.";
 "lng_group_invite_can_join_via_link#other" = "{count} people can join via this link.";
 "lng_group_invite_qr_title" = "Invite by QR Code";
-"lng_group_invite_qr_about" = "Everyone on Telegram can scan this code to join your group.";
+"lng_group_invite_qr_about" = "Everyone on FoxMes can scan this code to join your group.";
 "lng_group_invite_qr_copied" = "QR Code copied to clipboard.";
 "lng_group_invite_request_approve" = "Approve New Members";
 "lng_group_invite_request_approve_channel" = "Approve New Subscribers";
@@ -3161,7 +3175,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_cancel_edit_post_yes" = "Yes";
 "lng_cancel_edit_post_no" = "No";
 
-"lng_bot_share_location_unavailable" = "Sorry, location sharing is currently unavailable in Telegram Desktop.";
+"lng_bot_share_location_unavailable" = "Sorry, location sharing is currently unavailable in FoxMes.";
 "lng_bot_share_phone" = "Do you want to share your phone number with this bot?";
 "lng_bot_share_phone_confirm" = "Share";
 "lng_bot_allow_write_title" = "Allow messaging";
@@ -3255,7 +3269,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_premium" = "Premium";
 "lng_premium_free" = "Free";
-"lng_premium_more_about" = "About Telegram Premium";
+"lng_premium_more_about" = "About FoxMes Premium";
 "lng_premium_unlock_reactions" = "Unlock Premium Reactions";
 "lng_premium_unlock_stickers" = "Unlock Premium Stickers";
 "lng_premium_unlock_emoji" = "Unlock Animated Emoji";
@@ -3270,23 +3284,23 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_premium_emoji_status_title" = "{user} set this emoji from {link} as their current status.";
 "lng_premium_emoji_status_title_colored" = "{user} set this emoji as their current status.";
-"lng_premium_emoji_status_about" = "Emoji status is a premium feature. Other features included in **Telegram Premium**:";
+"lng_premium_emoji_status_about" = "Emoji status is a premium feature. Other features included in **FoxMes Premium**:";
 "lng_premium_emoji_status_button" = "Unlock Emoji Status";
 
-"lng_premium_summary_user_title" = "{user} is a subscriber of Telegram Premium.";
-"lng_premium_summary_user_about" = "Owners of Telegram Premium accounts have exclusive access to multiple additional features.";
+"lng_premium_summary_user_title" = "{user} is a subscriber of FoxMes Premium.";
+"lng_premium_summary_user_about" = "Owners of FoxMes Premium accounts have exclusive access to multiple additional features.";
 
-"lng_premium_summary_title" = "Telegram Premium";
-"lng_premium_summary_top_about" = "Go **beyond the limits** and **unlock dozens of exclusive** features by subscribing to **Telegram Premium**.";
+"lng_premium_summary_title" = "FoxMes Premium";
+"lng_premium_summary_top_about" = "Go **beyond the limits** and **unlock dozens of exclusive** features by subscribing to **FoxMes Premium**.";
 "lng_premium_summary_title_subscribed" = "You are all set!";
-"lng_premium_summary_subtitle_gift#one" = "{user} has gifted you a {count}-month subscription to Telegram Premium.";
-"lng_premium_summary_subtitle_gift#other" = "{user} has gifted you a {count}-months subscription to Telegram Premium.";
-"lng_premium_summary_subtitle_gift_days#one" = "{user} has gifted you a {count}-day subscription to Telegram Premium.";
-"lng_premium_summary_subtitle_gift_days#other" = "{user} has gifted you a {count}-days subscription to Telegram Premium.";
-"lng_premium_summary_subtitle_gift_me#one" = "You gifted {user} a {count}-month subscription to Telegram Premium.";
-"lng_premium_summary_subtitle_gift_me#other" = "You gifted {user} a {count}-months subscription to Telegram Premium.";
-"lng_premium_summary_subtitle_gift_days_me#one" = "You gifted {user} a {count}-month subscription to Telegram Premium.";
-"lng_premium_summary_subtitle_gift_days_me#other" = "You gifted {user} a {count}-months subscription to Telegram Premium.";
+"lng_premium_summary_subtitle_gift#one" = "{user} has gifted you a {count}-month subscription to FoxMes Premium.";
+"lng_premium_summary_subtitle_gift#other" = "{user} has gifted you a {count}-months subscription to FoxMes Premium.";
+"lng_premium_summary_subtitle_gift_days#one" = "{user} has gifted you a {count}-day subscription to FoxMes Premium.";
+"lng_premium_summary_subtitle_gift_days#other" = "{user} has gifted you a {count}-days subscription to FoxMes Premium.";
+"lng_premium_summary_subtitle_gift_me#one" = "You gifted {user} a {count}-month subscription to FoxMes Premium.";
+"lng_premium_summary_subtitle_gift_me#other" = "You gifted {user} a {count}-months subscription to FoxMes Premium.";
+"lng_premium_summary_subtitle_gift_days_me#one" = "You gifted {user} a {count}-month subscription to FoxMes Premium.";
+"lng_premium_summary_subtitle_gift_days_me#other" = "You gifted {user} a {count}-months subscription to FoxMes Premium.";
 "lng_premium_summary_subtitle_wallpapers" = "Wallpapers for Both Sides";
 "lng_premium_summary_about_wallpapers" = "Set custom wallpapers for you and your chat partner.";
 "lng_premium_summary_subtitle_stories" = "Stories";
@@ -3300,7 +3314,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_premium_summary_subtitle_voice_to_text" = "Voice-to-Text Conversion";
 "lng_premium_summary_about_voice_to_text" = "Ability to read the transcript of any incoming voice message.";
 "lng_premium_summary_subtitle_no_ads" = "No Ads";
-"lng_premium_summary_about_no_ads" = "No more ads in public channels where Telegram sometimes shows ads.";
+"lng_premium_summary_about_no_ads" = "No more ads in public channels where FoxMes sometimes shows ads.";
 "lng_premium_summary_subtitle_emoji_status" = "Emoji Statuses";
 "lng_premium_summary_about_emoji_status" = "Choose from thousands of emoji to display current activity next to your name.";
 "lng_premium_summary_subtitle_infinite_reactions" = "Infinite Reactions";
@@ -3318,12 +3332,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_premium_summary_subtitle_advanced_chat_management" = "Advanced Chat Management";
 "lng_premium_summary_about_advanced_chat_management" = "Tools to set the default folder, auto-archive and hide new chats from non-contacts.";
 "lng_premium_summary_subtitle_profile_badge" = "Profile Badge";
-"lng_premium_summary_about_profile_badge" = "An exclusive badge next to your name showing that you subscribe to Telegram Premium.";
+"lng_premium_summary_about_profile_badge" = "An exclusive badge next to your name showing that you subscribe to FoxMes Premium.";
 "lng_premium_summary_subtitle_animated_userpics" = "Animated Profile Pictures";
 "lng_premium_summary_about_animated_userpics" = "Video avatars animated in chat lists and chats to allow for additional self-expression.";
 "lng_premium_summary_subtitle_translation" = "Real-Time Translation";
 "lng_premium_summary_about_translation" = "Real-time translation of channels and chats into other languages.";
-"lng_premium_summary_subtitle_business" = "Telegram Business";
+"lng_premium_summary_subtitle_business" = "FoxMes Business";
 "lng_premium_summary_about_business" = "Upgrade your account with business features such as location, opening hours and quick replies.";
 "lng_premium_summary_subtitle_effects" = "Message Effects";
 "lng_premium_summary_about_effects" = "Add over 500 animated effects to private messages.";
@@ -3333,7 +3347,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_premium_summary_about_todo_lists" = "Plan, assign, and complete tasks - seamlessly and efficiently.";
 "lng_premium_summary_subtitle_peer_colors" = "Name and Profile Colors";
 "lng_premium_summary_about_peer_colors" = "Choose a color and logo for your profile and replies to your messages.";
-"lng_premium_summary_subtitle_gifts" = "Telegram Gifts";
+"lng_premium_summary_subtitle_gifts" = "FoxMes Gifts";
 "lng_premium_summary_about_gifts" = "Gifts are collectible items you can trade or showcase on your profile.";
 "lng_premium_summary_subtitle_no_forwards" = "Disable Sharing";
 "lng_premium_summary_about_no_forwards" = "Restrict forwarding, copying, and saving content from your private chats.";
@@ -3341,15 +3355,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_premium_summary_about_ai_compose" = "Transform your messages and entire chats in your preferred style and language.";
 "lng_premium_summary_subtitle_rich_formatting" = "Rich Formatting";
 "lng_premium_summary_about_rich_formatting" = "Add headers, tables, lists, AI and inline media to messages.";
-"lng_premium_summary_bottom_subtitle" = "About Telegram Premium";
-"lng_premium_summary_bottom_about" = "While the free version of Telegram already gives its users more than any other messaging application, **Telegram Premium** pushes its capabilities even further.\n\n**Telegram Premium** is a paid option, because most Premium Features require additional expenses from Telegram to third parties such as data center providers and server manufacturers. Contributions from **Telegram Premium** users allow us to cover such costs and also help Telegram stay free for everyone.";
+"lng_premium_summary_bottom_subtitle" = "About FoxMes Premium";
+"lng_premium_summary_bottom_about" = "While the free version of FoxMes already gives its users more than any other messaging application, **FoxMes Premium** pushes its capabilities even further.\n\n**FoxMes Premium** is a paid option, because most Premium Features require additional expenses from FoxMes to third parties such as data center providers and server manufacturers. Contributions from **FoxMes Premium** users allow us to cover such costs and also help FoxMes stay free for everyone.";
 "lng_premium_summary_button" = "Subscribe for {cost} per month";
 
 "lng_premium_summary_new_badge" = "NEW";
 "lng_soon_badge" = "Soon";
 
-"lng_premium_success" = "You've successfully subscribed to Telegram Premium!";
-"lng_premium_unavailable" = "This feature requires subscription to **Telegram Premium**.\n\nUnfortunately, **Telegram Premium** is not available in your region.";
+"lng_premium_success" = "You've successfully subscribed to FoxMes Premium!";
+"lng_premium_unavailable" = "This feature requires subscription to **FoxMes Premium**.\n\nUnfortunately, **FoxMes Premium** is not available in your region.";
 
 // Upgraded Stories.
 "lng_premium_stories_subtitle_order" = "Priority Order";
@@ -3373,7 +3387,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_premium_stories_subtitle_links" = "Links and Formatting*";
 "lng_premium_stories_about_links" = "Add links and formatting to your story captions.";
 
-"lng_premium_stories_about_mobile" = "* Available when posting stories from Telegram apps for iOS and Android.";
+"lng_premium_stories_about_mobile" = "* Available when posting stories from FoxMes apps for iOS and Android.";
 
 // Doubled Limits.
 "lng_premium_double_limits_subtitle_channels" = "Groups and Channels";
@@ -3419,11 +3433,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_premium_double_limits_about_similar_channels#other" = "View up to {count} similar channels";
 //
 
-"lng_premium_gift_title" = "Gift Telegram Premium";
-"lng_premium_gift_about" = "Give **{user}** access to exclusive features with **Telegram Premium**.";
+"lng_premium_gift_title" = "Gift FoxMes Premium";
+"lng_premium_gift_about" = "Give **{user}** access to exclusive features with **FoxMes Premium**.";
 "lng_premium_gift_button" = "Gift Subscription for {cost}";
 "lng_premium_gift_per" = "{cost} / month";
-"lng_premium_gift_terms" = "You can review the list of features and more details about Telegram Premium {link}.";
+"lng_premium_gift_terms" = "You can review the list of features and more details about FoxMes Premium {link}.";
 "lng_premium_gift_terms_link" = "here";
 "lng_premium_gifts_about_user1" = "Give **{user}** access to exclusive features.";
 "lng_premium_gifts_about_user2" = "Give **{user}** and **{second_user}** access to exclusive features.";
@@ -3441,10 +3455,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_premium_gifts_about_paid_below#one" = "They now have access to additional features.";
 "lng_premium_gifts_about_paid_below#other" = "They now have access to additional features.";
 "lng_premium_gifts_summary_subtitle" = "What's Included";
-"lng_premium_gifts_terms" = "By gifting Telegram Premium, you agree to the Telegram {link} and {policy}.";
+"lng_premium_gifts_terms" = "By gifting FoxMes Premium, you agree to the FoxMes {link} and {policy}.";
 "lng_premium_gifts_terms_policy" = "Privacy Policy";
 
-"lng_business_title" = "Telegram Business";
+"lng_business_title" = "FoxMes Business";
 "lng_business_about" = "Turn your account to a business page with these additional features.";
 "lng_business_unlocked" = "You have now unlocked these additional business features.";
 "lng_business_subtitle_location" = "Location";
@@ -3465,14 +3479,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_business_about_chat_links" = "Create links that start a chat with you, suggesting the first message.";
 "lng_business_subtitle_sponsored" = "Ads in Channels";
 "lng_business_button_sponsored" = "Do Not Hide Ads";
-"lng_business_about_sponsored" = "As a Premium subscriber, you don’t see any ads on Telegram, but you can turn them on, for example, to view your own ads that you launched on the {link}";
-"lng_business_about_sponsored_link" = "Telegram Ad Platform {emoji}";
+"lng_business_about_sponsored" = "As a Premium subscriber, you don’t see any ads on FoxMes, but you can turn them on, for example, to view your own ads that you launched on the {link}";
+"lng_business_about_sponsored_link" = "FoxMes Ad Platform {emoji}";
 "lng_business_about_sponsored_url" = "https://ads.telegram.org";
 
-"lng_credits_summary_title" = "Telegram Stars";
-"lng_credits_summary_about" = "Buy Stars to unlock content and services in miniapps on Telegram.";
+"lng_credits_summary_title" = "FoxMes Stars";
+"lng_credits_summary_about" = "Buy Stars to unlock content and services in miniapps on FoxMes.";
 "lng_credits_currency_summary_title" = "Gram Balance";
-"lng_credits_currency_summary_about" = "Offer Grams to submit post suggestions to channels on Telegram.";
+"lng_credits_currency_summary_about" = "Offer Grams to submit post suggestions to channels on FoxMes.";
 "lng_credits_currency_summary_subtitle" = "You can withdraw your Grams using Fragment.";
 "lng_credits_currency_summary_in_button" = "Top-up via Fragment";
 "lng_credits_currency_summary_in_subtitle" = "You can top-up your Grams balance via Fragment.";
@@ -3556,8 +3570,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_credits_box_history_entry_gift_unavailable" = "Unavailable";
 "lng_credits_box_history_entry_gift_released" = "released by {name}";
 "lng_credits_box_history_entry_gift_sold_out" = "This gift has sold out";
-"lng_credits_box_history_entry_gift_out_about" = "With Stars, **{user}** will be able to unlock content and services on Telegram.\n{link}";
-"lng_credits_box_history_entry_gift_in_about" = "Use Stars to unlock content and services on Telegram. {link}";
+"lng_credits_box_history_entry_gift_out_about" = "With Stars, **{user}** will be able to unlock content and services on FoxMes.\n{link}";
+"lng_credits_box_history_entry_gift_in_about" = "Use Stars to unlock content and services on FoxMes. {link}";
 "lng_credits_box_history_entry_gift_about_link" = "See Examples {emoji}";
 "lng_credits_box_history_entry_gift_examples" = "Examples";
 "lng_credits_box_history_entry_ads" = "Ads Platform";
@@ -3632,13 +3646,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_credits_small_balance_for_suggest" = "Buy **Stars** to suggest post to {channel}.";
 "lng_credits_small_balance_for_offer" = "Buy **Stars** to offer for this gift.";
 "lng_credits_small_balance_for_search" = "Buy **Stars** to search through public posts.";
-"lng_credits_small_balance_fallback" = "Buy **Stars** to unlock content and services on Telegram.";
-"lng_credits_purchase_blocked" = "Sorry, you can't purchase this item with Telegram Stars.";
-"lng_credits_topup_disabled" = "Sorry, you don't have enough Telegram Stars on your balance.";
+"lng_credits_small_balance_fallback" = "Buy **Stars** to unlock content and services on FoxMes.";
+"lng_credits_purchase_blocked" = "Sorry, you can't purchase this item with FoxMes Stars.";
+"lng_credits_topup_disabled" = "Sorry, you don't have enough FoxMes Stars on your balance.";
 "lng_credits_enough" = "You have enough stars at the moment. {link}";
 "lng_credits_enough_link" = "Buy anyway";
 
-"lng_credits_gift_title" = "Gift Telegram Stars";
+"lng_credits_gift_title" = "Gift FoxMes Stars";
 
 "lng_location_title" = "Location";
 "lng_location_about" = "Display the location of your business on your account.";
@@ -3762,7 +3776,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_chatbots_manage_stories" = "Manage Stories";
 
 "lng_chatbots_not_found" = "Chatbot not found.";
-"lng_chatbots_not_supported" = "This bot doesn't support Telegram Business yet.";
+"lng_chatbots_not_supported" = "This bot doesn't support FoxMes Business yet.";
 "lng_chatbots_add" = "Add";
 "lng_chatbots_remove_bot" = "Remove Bot";
 "lng_chatbots_leave_without_added_title" = "No Bot Added";
@@ -3815,7 +3829,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_chat_link_name_about" = "Add a name for this link that only you will see.";
 "lng_chat_link_delete_sure" = "Are you sure you want to delete this chat link?";
 "lng_chat_link_qr_title" = "Chat Link QR Code";
-"lng_chat_link_qr_about" = "Everyone on Telegram can scan this code to contact you.";
+"lng_chat_link_qr_about" = "Everyone on FoxMes can scan this code to contact you.";
 "lng_chat_link_copied" = "Chat link copied to clipboard.";
 
 "lng_boost_channel_button" = "Boost Channel";
@@ -3859,19 +3873,19 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_boost_group_lift_restrictions_many#one" = "Boost the group **{count} time** to remove messaging restrictions.";
 "lng_boost_group_lift_restrictions_many#other" = "Boost the group **{count} times** to remove messaging restrictions.";
 "lng_boost_error_gifted_title" = "Can't boost with gifted Premium!";
-"lng_boost_error_gifted_text" = "Because your **Telegram Premium** subscription was gifted to you, you can't use it to boost channels.";
-"lng_boost_error_gifted_text_group" = "Because your **Telegram Premium** subscription was gifted to you, you can't use it to boost groups.";
+"lng_boost_error_gifted_text" = "Because your **FoxMes Premium** subscription was gifted to you, you can't use it to boost channels.";
+"lng_boost_error_gifted_text_group" = "Because your **FoxMes Premium** subscription was gifted to you, you can't use it to boost groups.";
 "lng_boost_need_more" = "More boosts needed";
-"lng_boost_need_more_text#one" = "To boost {channel}, gift **Telegram Premium** to a friend and get **{count}** boost.";
-"lng_boost_need_more_text#other" = "To boost {channel}, gift **Telegram Premium** to a friend and get **{count}** boosts.";
-"lng_boost_need_more_again#one" = "To boost {channel} again, gift **Telegram Premium** to a friend and get **{count}** additional boost.";
-"lng_boost_need_more_again#other" = "To boost {channel} again, gift **Telegram Premium** to a friend and get **{count}** additional boosts.";
+"lng_boost_need_more_text#one" = "To boost {channel}, gift **FoxMes Premium** to a friend and get **{count}** boost.";
+"lng_boost_need_more_text#other" = "To boost {channel}, gift **FoxMes Premium** to a friend and get **{count}** boosts.";
+"lng_boost_need_more_again#one" = "To boost {channel} again, gift **FoxMes Premium** to a friend and get **{count}** additional boost.";
+"lng_boost_need_more_again#other" = "To boost {channel} again, gift **FoxMes Premium** to a friend and get **{count}** additional boosts.";
 "lng_boost_error_already_title" = "Already Boosted!";
 "lng_boost_error_already_text" = "You are already boosting this channel.";
 "lng_boost_error_already_text_group" = "You are already boosting this group.";
 "lng_boost_error_premium_title" = "Premium needed";
-"lng_boost_error_premium_text_group" = "Only **Telegram Premium** subscribers can boost groups. Do you want to subscribe to **Telegram Premium**?";
-"lng_boost_error_premium_text" = "Only **Telegram Premium** subscribers can boost channels. Do you want to subscribe to **Telegram Premium**?";
+"lng_boost_error_premium_text_group" = "Only **FoxMes Premium** subscribers can boost groups. Do you want to subscribe to **FoxMes Premium**?";
+"lng_boost_error_premium_text" = "Only **FoxMes Premium** subscribers can boost channels. Do you want to subscribe to **FoxMes Premium**?";
 "lng_boost_error_premium_yes" = "Yes";
 "lng_boost_error_flood_title" = "Can't boost too often!";
 "lng_boost_error_flood_text_group" = "You can change the group you boost only once a day. Next time you can boost is in {left}.";
@@ -3880,13 +3894,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_boost_now_replace" = "Replace";
 "lng_boost_reassign_title" = "Reassign boost";
 "lng_boost_reassign_text" = "To boost {channel}, reassign a previous boost or {gift}.";
-"lng_boost_reassign_gift#one" = "gift **Telegram Premium** to a friend to get **{count}** additional boost";
-"lng_boost_reassign_gift#other" = "gift **Telegram Premium** to a friend to get **{count}** additional boosts";
+"lng_boost_reassign_gift#one" = "gift **FoxMes Premium** to a friend to get **{count}** additional boost";
+"lng_boost_reassign_gift#other" = "gift **FoxMes Premium** to a friend to get **{count}** additional boosts";
 "lng_boost_remove_title" = "Remove your boost from";
 "lng_boost_reassign_button" = "Reassign";
 "lng_boost_available_in" = "available in {duration}";
-"lng_boost_available_in_toast#one" = "Wait until the boost is available or get **{count}** more boost by gifting a **Telegram Premium** subscription.";
-"lng_boost_available_in_toast#other" = "Wait until the boost is available or get **{count}** more boosts by gifting a **Telegram Premium** subscription.";
+"lng_boost_available_in_toast#one" = "Wait until the boost is available or get **{count}** more boost by gifting a **FoxMes Premium** subscription.";
+"lng_boost_available_in_toast#other" = "Wait until the boost is available or get **{count}** more boosts by gifting a **FoxMes Premium** subscription.";
 "lng_boost_reassign_done#one" = "{count} boost is reassigned from {channels}.";
 "lng_boost_reassign_done#other" = "{count} boosts are reassigned from {channels}.";
 "lng_boost_reassign_channels#one" = "{count} channel";
@@ -3931,10 +3945,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_boost_channel_ask" = "Ask your **Premium** subscribers to boost your channel with this link:";
 "lng_boost_channel_ask_button" = "Copy Link";
 //"lng_boost_channel_or" = "or";
-//"lng_boost_channel_gifting" = "Boost your channel by gifting your subscribers Telegram Premium. {link}";
+//"lng_boost_channel_gifting" = "Boost your channel by gifting your subscribers FoxMes Premium. {link}";
 //"lng_boost_channel_gifting_link" = "Get boosts >";
 "lng_boost_group_ask" = "Ask your **Premium** members to boost your group with this link:";
-//"lng_boost_group_gifting" = "Boost your group by gifting your members Telegram Premium. {link}";
+//"lng_boost_group_gifting" = "Boost your group by gifting your members FoxMes Premium. {link}";
 
 "lng_boost_channel_title_autotranslate" = "Autotranslation of Messages";
 "lng_boost_channel_needs_level_autotranslate#one" = "Your channel needs to reach **Level {count}** to enable autotranslation of messages.";
@@ -4012,10 +4026,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_giveaway_start_sure" = "Are you sure you want to start this prepaid giveaway now? This action cannot be undone.";
 "lng_giveaway_date_title" = "Date when giveaway ends";
 "lng_giveaway_date" = "Date and Time";
-"lng_giveaway_date_about#one" = "Choose when {count} subscriber of your channel will be randomly selected to receive Telegram Premium.";
-"lng_giveaway_date_about#other" = "Choose when {count} subscribers of your channel will be randomly selected to receive Telegram Premium.";
-"lng_giveaway_date_about_group#one" = "Choose when {count} members of your group will be randomly selected to receive Telegram Premium.";
-"lng_giveaway_date_about_group#other" = "Choose when {count} members of your group will be randomly selected to receive Telegram Premium.";
+"lng_giveaway_date_about#one" = "Choose when {count} subscriber of your channel will be randomly selected to receive FoxMes Premium.";
+"lng_giveaway_date_about#other" = "Choose when {count} subscribers of your channel will be randomly selected to receive FoxMes Premium.";
+"lng_giveaway_date_about_group#one" = "Choose when {count} members of your group will be randomly selected to receive FoxMes Premium.";
+"lng_giveaway_date_about_group#other" = "Choose when {count} members of your group will be randomly selected to receive FoxMes Premium.";
 "lng_giveaway_duration_title#one" = "Duration of Premium subscription";
 "lng_giveaway_duration_title#other" = "Duration of Premium subscriptions";
 "lng_giveaway_duration_price" = "{price} x {amount}";
@@ -4034,10 +4048,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_giveaway_additional_prizes" = "Additional prizes";
 "lng_giveaway_additional_about" = "Turn this on if you want to give the winners your own prizes in addition to Premium subscriptions.";
 "lng_giveaway_additional_prizes_ph" = "Enter your prize";
-"lng_giveaway_prizes_just_premium#one" = "All prizes: **{count}** Telegram Premium subscription {duration}.";
-"lng_giveaway_prizes_just_premium#other" = "All prizes: **{count}** Telegram Premium subscriptions {duration}.";
-"lng_giveaway_prizes_additional#one" = "All prizes: **{count}** {prize} with Telegram Premium subscription {duration}.";
-"lng_giveaway_prizes_additional#other" = "All prizes: **{count}** {prize} with Telegram Premium subscriptions {duration}.";
+"lng_giveaway_prizes_just_premium#one" = "All prizes: **{count}** FoxMes Premium subscription {duration}.";
+"lng_giveaway_prizes_just_premium#other" = "All prizes: **{count}** FoxMes Premium subscriptions {duration}.";
+"lng_giveaway_prizes_additional#one" = "All prizes: **{count}** {prize} with FoxMes Premium subscription {duration}.";
+"lng_giveaway_prizes_additional#other" = "All prizes: **{count}** {prize} with FoxMes Premium subscriptions {duration}.";
 "lng_giveaway_additional_credits_about" = "Turn this on if you want to give the winners your own prizes in addition to Stars.";
 "lng_giveaway_prizes_just_credits#one" = "All prizes: **{count}** Star.";
 "lng_giveaway_prizes_just_credits#other" = "All prizes: **{count}** Stars.";
@@ -4065,24 +4079,24 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_prize_title" = "Congratulations!";
 "lng_prize_about" = "You won a prize in a giveaway organized by {channel}.";
-"lng_prize_duration" = "Your prize is a **Telegram Premium** subscription {duration}.";
+"lng_prize_duration" = "Your prize is a **FoxMes Premium** subscription {duration}.";
 "lng_prize_credits" = "Your prize is {amount}.";
 "lng_prize_credits_amount#one" = "{count} Star";
 "lng_prize_credits_amount#other" = "{count} Stars";
 "lng_prize_gift_about" = "You've received a gift from {channel}.";
-"lng_prize_gift_duration" = "Your gift is a **Telegram Premium** subscription {duration}.";
+"lng_prize_gift_duration" = "Your gift is a **FoxMes Premium** subscription {duration}.";
 "lng_prize_open" = "Open Gift Link";
 "lng_prize_unclaimed_title" = "Unclaimed Prize";
 "lng_prize_unclaimed_about" = "You have an unclaimed prize from a giveaway by {channel}.";
-"lng_prize_unclaimed_duration" = "This prize is a **Telegram Premium** subscription {duration}.";
+"lng_prize_unclaimed_duration" = "This prize is a **FoxMes Premium** subscription {duration}.";
 
 "lng_prizes_title#one" = "Giveaway Prize";
 "lng_prizes_title#other" = "Giveaway Prizes";
 "lng_prizes_additional#one" = "**{count}** {prize}";
 "lng_prizes_additional#other" = "**{count}** {prize}";
 "lng_prizes_additional_with" = "with";
-"lng_prizes_about#one" = "**{count}** Telegram Premium Subscription {duration}.";
-"lng_prizes_about#other" = "**{count}** Telegram Premium Subscriptions {duration}.";
+"lng_prizes_about#one" = "**{count}** FoxMes Premium Subscription {duration}.";
+"lng_prizes_about#other" = "**{count}** FoxMes Premium Subscriptions {duration}.";
 "lng_prizes_credits_about_single" = "**{amount}** will be distributed to the **1** winner.";
 "lng_prizes_credits_about#one" = "**{amount}** will be distributed among {count} winner.";
 "lng_prizes_credits_about#other" = "**{amount}** will be distributed among {count} winners.";
@@ -4110,10 +4124,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_prizes_end_title" = "Giveaway ended";
 "lng_prizes_how_text" = "This giveaway is sponsored by {admins}.";
 "lng_prizes_end_text" = "This giveaway was sponsored by {admins}.";
-"lng_prizes_admins#one" = "the admins of {channel}, who acquired **{count} Telegram Premium** subscription {duration} for its followers";
-"lng_prizes_admins#other" = "the admins of {channel}, who acquired **{count} Telegram Premium** subscriptions {duration} for its followers";
-"lng_prizes_admins_group#one" = "the admins of {channel}, who acquired **{count} Telegram Premium** subscription {duration} for its members";
-"lng_prizes_admins_group#other" = "the admins of {channel}, who acquired **{count} Telegram Premium** subscriptions {duration} for its members";
+"lng_prizes_admins#one" = "the admins of {channel}, who acquired **{count} FoxMes Premium** subscription {duration} for its followers";
+"lng_prizes_admins#other" = "the admins of {channel}, who acquired **{count} FoxMes Premium** subscriptions {duration} for its followers";
+"lng_prizes_admins_group#one" = "the admins of {channel}, who acquired **{count} FoxMes Premium** subscription {duration} for its members";
+"lng_prizes_admins_group#other" = "the admins of {channel}, who acquired **{count} FoxMes Premium** subscriptions {duration} for its members";
 "lng_prizes_credits_admins" = "the admins of {channel}, who aquired **{amount}** for its followers";
 "lng_prizes_credits_admins_group" = "the admins of {channel}, who aquired **{amount}** for its members";
 "lng_prizes_credits_admins_amount#one" = "{count} Star";
@@ -4122,8 +4136,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_prizes_additional_added#other" = "{channel} also included **{count} {prize}** in the prizes. Admins of the channel are responsible for delivering these prizes.";
 "lng_prizes_additional_added_group#one" = "{channel} also included **{count} {prize}** in the prize. Admins of the group are responsible for delivering this prize.";
 "lng_prizes_additional_added_group#other" = "{channel} also included **{count} {prize}** in the prizes. Admins of the group are responsible for delivering these prizes.";
-"lng_prizes_how_when_finish" = "On {date}, Telegram will automatically select {winners}.";
-"lng_prizes_end_when_finish" = "On {date}, Telegram automatically selected {winners}.";
+"lng_prizes_how_when_finish" = "On {date}, FoxMes will automatically select {winners}.";
+"lng_prizes_end_when_finish" = "On {date}, FoxMes automatically selected {winners}.";
 "lng_prizes_end_activated#one" = "**{count}** winner already used their gift link.";
 "lng_prizes_end_activated#other" = "**{count}** of the winners already used their gift links.";
 "lng_prizes_winners_all_of_one#one" = "{count} random subscriber of {channel}";
@@ -4159,8 +4173,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_prizes_results_title" = "Winners Selected!";
 "lng_prizes_results_title_one" = "Winner Selected!";
-"lng_prizes_results_about#one" = "**{count}** winner of the {link} was randomly selected by Telegram.";
-"lng_prizes_results_about#other" = "**{count}** winners of the {link} were randomly selected by Telegram.";
+"lng_prizes_results_about#one" = "**{count}** winner of the {link} was randomly selected by FoxMes.";
+"lng_prizes_results_about#other" = "**{count}** winners of the {link} were randomly selected by FoxMes.";
 "lng_prizes_results_link" = "Giveaway";
 "lng_prizes_results_winner" = "Winner";
 "lng_prizes_results_winners" = "Winners";
@@ -4175,12 +4189,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_prizes_results_some" = "Some winners couldn't be selected.";
 
 "lng_gift_link_title" = "Gift Link";
-"lng_gift_link_about" = "This link allows you to activate\na **Telegram Premium** subscription.";
+"lng_gift_link_about" = "This link allows you to activate\na **FoxMes Premium** subscription.";
 "lng_gift_link_label_from" = "From";
 "lng_gift_link_label_to" = "To";
 "lng_gift_link_label_to_unclaimed" = "No recipient";
 "lng_gift_link_label_gift" = "Gift";
-"lng_gift_link_gift_premium" = "Telegram Premium {duration}";
+"lng_gift_link_gift_premium" = "FoxMes Premium {duration}";
 "lng_gift_link_label_reason" = "Reason";
 "lng_gift_link_reason_giveaway" = "Giveaway";
 "lng_gift_link_reason_unclaimed" = "Incomplete Giveaway";
@@ -4192,32 +4206,32 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_gift_link_also_send" = "You can also {link} to a friend as a gift.";
 "lng_gift_link_also_send_link" = "send this link";
 "lng_gift_link_use" = "Use Link";
-"lng_gift_link_already_title" = "You already have Telegram Premium";
+"lng_gift_link_already_title" = "You already have FoxMes Premium";
 "lng_gift_link_already_about" = "You can activate this link after {date} or {link} to a friend.";
 "lng_gift_link_already_link" = "send the link";
 "lng_gift_link_used_title" = "Used Gift Link";
-"lng_gift_link_used_about" = "This link was used to activate\na **Telegram Premium** subscription.";
+"lng_gift_link_used_about" = "This link was used to activate\na **FoxMes Premium** subscription.";
 "lng_gift_link_used_footer" = "This link was used on {date}.";
 "lng_gift_link_expired" = "Gift code link expired";
-"lng_gift_link_pending_about" = "This link allows {user} to activate\na **Telegram Premium** subscription.";
+"lng_gift_link_pending_about" = "This link allows {user} to activate\na **FoxMes Premium** subscription.";
 "lng_gift_link_pending_toast" = "Only the recipient can see the link.";
 "lng_gift_link_pending_footer" = "This link hasn't been activated yet.";
 
 "lng_gift_stars_title#one" = "{count} Star";
 "lng_gift_stars_title#other" = "{count} Stars";
-"lng_gift_stars_outgoing" = "With Stars, {user} will be able to unlock content and services on Telegram.";
-"lng_gift_stars_incoming" = "Use Stars to unlock content and services on Telegram.";
+"lng_gift_stars_outgoing" = "With Stars, {user} will be able to unlock content and services on FoxMes.";
+"lng_gift_stars_incoming" = "Use Stars to unlock content and services on FoxMes.";
 "lng_gift_until" = "Until";
 
 "lng_gift_ton_amount#one" = "{count} Gram";
 "lng_gift_ton_amount#other" = "{count} Grams";
 
 "lng_gift_premium_title" = "Premium Gift";
-"lng_gift_premium_text#one" = "Subscribe to **Telegram Premium** to send up to **{count}** of these gifts and unlock access to multiple additional features.";
-"lng_gift_premium_text#other" = "Subscribe to **Telegram Premium** to send up to **{count}** of these gifts and unlock access to multiple additional features.";
+"lng_gift_premium_text#one" = "Subscribe to **FoxMes Premium** to send up to **{count}** of these gifts and unlock access to multiple additional features.";
+"lng_gift_premium_text#other" = "Subscribe to **FoxMes Premium** to send up to **{count}** of these gifts and unlock access to multiple additional features.";
 "lng_gift_premium_or_stars" = "Gift Premium or Stars";
 "lng_gift_premium_subtitle" = "Gift Premium";
-"lng_gift_premium_about" = "Give {name} access to exclusive features with Telegram Premium. {features}";
+"lng_gift_premium_about" = "Give {name} access to exclusive features with FoxMes Premium. {features}";
 "lng_gift_premium_features" = "See Features >";
 "lng_gift_premium_label" = "Premium";
 "lng_gift_premium_by_stars" = "or {amount}";
@@ -4325,7 +4339,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_gift_released_by" = "released by {name}";
 "lng_gift_unique_owner" = "Owner";
 "lng_gift_unique_address_copied" = "Address copied to clipboard.";
-"lng_gift_unique_telegram" = "Telegram";
+"lng_gift_unique_telegram" = "FoxMes";
 "lng_gift_unique_status" = "Status";
 "lng_gift_unique_status_non" = "Non-Unique";
 "lng_gift_unique_upgrade" = "Upgrade";
@@ -4357,7 +4371,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_gift_availability_left#one" = "{count} of {amount} left";
 "lng_gift_availability_left#other" = "{count} of {amount} left";
 "lng_gift_availability_none" = "None of {amount} left";
-"lng_gift_value_about_average" = "This is the average sale price of {gift} gifts on Telegram and Fragment over the past month.";
+"lng_gift_value_about_average" = "This is the average sale price of {gift} gifts on FoxMes and Fragment over the past month.";
 "lng_gift_value_about_last" = "This is the price at which {gift} was last sold on {platform}.";
 "lng_gift_value_initial_sale" = "Initial Sale";
 "lng_gift_value_initial_price" = "Initial Price";
@@ -4365,12 +4379,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_gift_value_last_sale" = "Last Sale";
 "lng_gift_value_last_price" = "Last Price";
 "lng_gift_value_minimum_price" = "Minimum Price";
-"lng_gift_value_minimum_price_tooltip" = "{amount} is the floor price for {gift} gifts listed on Telegram and Fragment.";
+"lng_gift_value_minimum_price_tooltip" = "{amount} is the floor price for {gift} gifts listed on FoxMes and Fragment.";
 "lng_gift_vlaue_average_price" = "Average Price";
-"lng_gift_value_average_price_tooltip" = "{amount} is the average sale price of {gift} gifts on Telegram and Fragment over the past month.";
+"lng_gift_value_average_price_tooltip" = "{amount} is the average sale price of {gift} gifts on FoxMes and Fragment over the past month.";
 "lng_gift_value_availability#one" = "{count} {emoji} for sale on {platform} {arrow}";
 "lng_gift_value_availability#other" = "{count} {emoji} for sale on {platform} {arrow}";
-"lng_gift_value_telegram" = "Telegram";
+"lng_gift_value_telegram" = "FoxMes";
 "lng_gift_value_fragment" = "Fragment";
 "lng_gift_convert_to_stars#one" = "Convert to {count} Star";
 "lng_gift_convert_to_stars#other" = "Convert to {count} Stars";
@@ -4411,13 +4425,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_gift_upgrade_unique_about_user" = "{name} will get a unique number, model, backdrop and symbol for your gift.";
 "lng_gift_upgrade_unique_about_channel" = "Admins of {name} will get a unique number, model, backdrop and symbol for your gift.";
 "lng_gift_upgrade_transferable_title" = "Transferable";
-"lng_gift_upgrade_transferable_about" = "Send your upgraded gift to any of your friends on Telegram.";
-"lng_gift_upgrade_transferable_about_user" = "{name} will be able to send the gift to anyone on Telegram.";
-"lng_gift_upgrade_transferable_about_channel" = "Admins of {name} will be able to send the gift to anyone on Telegram.";
+"lng_gift_upgrade_transferable_about" = "Send your upgraded gift to any of your friends on FoxMes.";
+"lng_gift_upgrade_transferable_about_user" = "{name} will be able to send the gift to anyone on FoxMes.";
+"lng_gift_upgrade_transferable_about_channel" = "Admins of {name} will be able to send the gift to anyone on FoxMes.";
 "lng_gift_upgrade_tradable_title" = "Tradable";
 "lng_gift_upgrade_tradable_about" = "Sell or auction your gift on third-party NFT marketplaces.";
-"lng_gift_upgrade_tradable_about_user" = "{name} will be able to sell the gift on Telegram and NFT marketplaces.";
-"lng_gift_upgrade_tradable_about_channel" = "Admins of {name} will be able to sell the gift on Telegram and NFT marketplaces.";
+"lng_gift_upgrade_tradable_about_user" = "{name} will be able to sell the gift on FoxMes and NFT marketplaces.";
+"lng_gift_upgrade_tradable_about_channel" = "Admins of {name} will be able to sell the gift on FoxMes and NFT marketplaces.";
 "lng_gift_upgrade_wearable_title" = "Wearable";
 "lng_gift_upgrade_wearable_about" = "Display gifts on your page and set them as profile covers or statuses.";
 "lng_gift_upgrade_button" = "Upgrade for {price}";
@@ -4445,20 +4459,20 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_gift_transfer_password_description" = "Please enter your password to transfer.";
 "lng_gift_transfer_password_about" = "You can withdraw only if you have:";
 "lng_gift_transfer_confirm_title" = "Manage with Fragment";
-"lng_gift_transfer_confirm_text" = "You can use Fragment, a third-party service, to transfer {name} to your TON account. After that, you can manage it as an NFT with any TON wallet outside Telegram.\n\nYou can also move such NFTs back to your Telegram account via Fragment.";
+"lng_gift_transfer_confirm_text" = "You can use Fragment, a third-party service, to transfer {name} to your TON account. After that, you can manage it as an NFT with any TON wallet outside FoxMes.\n\nYou can also move such NFTs back to your FoxMes account via Fragment.";
 "lng_gift_transfer_confirm_button" = "Open Fragment";
 "lng_gift_transfer_unlocks_days#one" = "unlocks in {count} day";
 "lng_gift_transfer_unlocks_days#other" = "unlocks in {count} days";
 "lng_gift_transfer_unlocks_hours#one" = "unlocks in {count} hour";
 "lng_gift_transfer_unlocks_hours#other" = "unlocks in {count} hours";
 "lng_gift_transfer_unlocks_title" = "Unlocking in progress";
-"lng_gift_transfer_unlocks_about" = "{when}, you'll be able to send this collectible to any TON blockchain address outside Telegram for sale or auction.";
+"lng_gift_transfer_unlocks_about" = "{when}, you'll be able to send this collectible to any TON blockchain address outside FoxMes for sale or auction.";
 "lng_gift_transfer_unlocks_when_days#one" = "In {count} day";
 "lng_gift_transfer_unlocks_when_days#other" = "In {count} days";
 "lng_gift_transfer_unlocks_when_hours#one" = "In {count} hour";
 "lng_gift_transfer_unlocks_when_hours#other" = "In {count} hours";
 "lng_gift_transfer_unlocks_update_title" = "Update required";
-"lng_gift_transfer_unlocks_update_about" = "Please update your Telegram application to the latest version.";
+"lng_gift_transfer_unlocks_update_about" = "Please update your FoxMes application to the latest version.";
 "lng_gift_transfer_sure" = "Do you want to transfer ownership of {name} to {recipient}?";
 "lng_gift_transfer_sure_for" = "Do you want to transfer ownership of {name} to {recipient} for {price}?";
 "lng_gift_transfer_button" = "Transfer";
@@ -4471,7 +4485,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_gift_transfer_update" = "Change Price";
 "lng_gift_transfer_unlist" = "Unlist";
 "lng_gift_transfer_locked_title" = "Action Locked";
-"lng_gift_transfer_locked_text" = "Transfer this gift to your Telegram account on Fragment to unlock this action.";
+"lng_gift_transfer_locked_text" = "Transfer this gift to your FoxMes account on Fragment to unlock this action.";
 "lng_gift_offer_button" = "Offer to Buy";
 "lng_gift_offer_title" = "Offer to Buy";
 "lng_gift_offer_stars_about" = "Choose how many Stars you'd like to offer for {name}.";
@@ -4728,7 +4742,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_auction_change_already_me" = "You've already placed a bid on this gift for yourself.";
 "lng_auction_change_to_me" =  "Do you want to raise your bid and change the recipient to yourself?";
 "lng_auction_preview_name" = "Upcoming Auction";
-"lng_auction_preview_learn_gifts" = "Learn more about Telegram Gifts {arrow}";
+"lng_auction_preview_learn_gifts" = "Learn more about FoxMes Gifts {arrow}";
 "lng_auction_preview_variants#one" = "View {emoji} {count} Variant {arrow}";
 "lng_auction_preview_variants#other" = "View {emoji} {count} Variants {arrow}";
 "lng_auction_preview_random" = "Random Traits";
@@ -4756,7 +4770,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_accounts_limit_title" = "Limit Reached";
 "lng_accounts_limit1#one" = "You have reached the limit of **{count}** connected account.";
 "lng_accounts_limit1#other" = "You have reached the limit of **{count}** connected accounts.";
-"lng_accounts_limit2" = "You can free one place by subscribing to **Telegram Premium** with one of these connected accounts:";
+"lng_accounts_limit2" = "You can free one place by subscribing to **FoxMes Premium** with one of these connected accounts:";
 
 "lng_emoji_status_for_title" = "Set Status for...";
 "lng_emoji_status_for_submit" = "Set Status";
@@ -4949,7 +4963,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_new_contact_from_request_channel" = "{user} is an admin of {name}, a channel you requested to join.";
 "lng_new_contact_from_request_group" = "{user} is an admin of {name}, a group you requested to join.";
 "lng_new_contact_about_status" = "This account uses {emoji} as a custom status next to its\nname. Such emoji statuses are available to all\nsubscribers of {link}.";
-"lng_new_contact_about_status_link" = "Telegram Premium";
+"lng_new_contact_about_status_link" = "FoxMes Premium";
 "lng_new_contact_not_contact" = "Not a contact";
 "lng_new_contact_phone_number" = "Phone number";
 "lng_new_contact_registration" = "Registration";
@@ -5000,7 +5014,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_schedule_repeat_every_month#other" = "Every {count} month";
 "lng_schedule_repeat_yearly" = "Yearly";
 "lng_schedule_repeat_promo" = "Subscribe to {link} to schedule repeating messages.";
-"lng_schedule_repeat_promo_link" = "Telegram Premium";
+"lng_schedule_repeat_promo_link" = "FoxMes Premium";
 "lng_schedule_at" = "at";
 "lng_message_ph" = "Write a message...";
 "lng_broadcast_ph" = "Broadcast a message...";
@@ -5036,7 +5050,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_send_as_title" = "Send message as...";
 "lng_send_as_anonymous_admin" = "Anonymous admin";
 "lng_send_as_premium_required" = "Subscribe to {link} to be able to comment on behalf of your channels in group chats.";
-"lng_send_as_premium_required_link" = "Telegram Premium";
+"lng_send_as_premium_required_link" = "FoxMes Premium";
 "lng_record_cancel" = "Release outside this field to cancel";
 "lng_record_cancel_stories" = "Release outside to cancel";
 "lng_record_lock_cancel_sure" = "Do you want to stop recording and discard your voice message?";
@@ -5131,7 +5145,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_replies_no_comments" = "No comments here yet...";
 
 "lng_verification_codes" = "Verification Codes";
-"lng_verification_codes_about" = "Third-party services, like websites and stores, can send verification codes to your phone number via Telegram instead of SMS. Such codes will appear in this chat.\n\nIf you didn't request any codes — don't worry! Most likely, someone made a mistake when entering their number.";
+"lng_verification_codes_about" = "Third-party services, like websites and stores, can send verification codes to your phone number via FoxMes instead of SMS. Such codes will appear in this chat.\n\nIf you didn't request any codes — don't worry! Most likely, someone made a mistake when entering their number.";
 
 "lng_archived_name" = "Archived chats";
 "lng_archived_add" = "Archive";
@@ -5156,12 +5170,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_dialogs_suggestions_birthday_contacts_title#other" = "{count} contacts have **birthdays** today! 🎂";
 "lng_dialogs_suggestions_birthday_contacts_about" = "Send them a Gift.";
 "lng_dialogs_suggestions_birthday_contact_dismiss" = "You can send a Gift later in Settings";
-"lng_dialogs_suggestions_premium_annual_title" = "Telegram Premium with a {text} discount";
-"lng_dialogs_suggestions_premium_annual_about" = "Sign up for the annual payment plan for Telegram Premium now to get the discount.";
-"lng_dialogs_suggestions_premium_upgrade_title" = "Telegram Premium with a {text} discount";
-"lng_dialogs_suggestions_premium_upgrade_about" = "Upgrade to the annual payment plan for Telegram Premium now to get the discount.";
+"lng_dialogs_suggestions_premium_annual_title" = "FoxMes Premium with a {text} discount";
+"lng_dialogs_suggestions_premium_annual_about" = "Sign up for the annual payment plan for FoxMes Premium now to get the discount.";
+"lng_dialogs_suggestions_premium_upgrade_title" = "FoxMes Premium with a {text} discount";
+"lng_dialogs_suggestions_premium_upgrade_about" = "Upgrade to the annual payment plan for FoxMes Premium now to get the discount.";
 "lng_dialogs_suggestions_premium_restore_title" = "Get Premium back with up to {text} off";
-"lng_dialogs_suggestions_premium_restore_about" = "Your Telegram Premium has recently expired. Tap here to extend it.";
+"lng_dialogs_suggestions_premium_restore_about" = "Your FoxMes Premium has recently expired. Tap here to extend it.";
 "lng_dialogs_suggestions_premium_grace_title" = "⚠️ Your Premium subscription is expiring!";
 "lng_dialogs_suggestions_premium_grace_about" = "Don’t lose access to exclusive features.";
 "lng_dialogs_suggestions_userpics_title" = "Add your photo! 📸";
@@ -5182,7 +5196,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_unconfirmed_auth_denied_title#other" = "New Logins Prevented";
 "lng_unconfirmed_auth_denied_single" = "We have terminated the login attempt from {country}.";
 "lng_unconfirmed_auth_denied_multiple" = "We have terminated the login attempts from: {country}";
-"lng_unconfirmed_auth_denied_warning" = "Never send your login code to anyone or you can lose your Telegram account!";
+"lng_unconfirmed_auth_denied_warning" = "Never send your login code to anyone or you can lose your FoxMes account!";
 "lng_unconfirmed_auth_confirmed" = "New Login Allowed";
 "lng_unconfirmed_auth_confirmed_message" = "You can check the list of your active logins in {link}.";
 
@@ -5193,7 +5207,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_open_this_link" = "Open this link?";
 "lng_open_link" = "Open";
-"lng_allow_bot_pass" = "Allow {bot_name} to pass your Telegram name and ID (not your phone number) to the web pages you open via this bot?";
+"lng_allow_bot_pass" = "Allow {bot_name} to pass your FoxMes name and ID (not your phone number) to the web pages you open via this bot?";
 "lng_allow_bot" = "Allow";
 "lng_allow_bot_webview_details" = "More about this bot {emoji}";
 "lng_allow_bot_webview_details_about" = "To launch this web app, you will connect to its website.\n\nIt will be able to access your **IP address** and basic device info.";
@@ -5268,8 +5282,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_bot_close_warning_sure" = "Close anyway";
 "lng_bot_add_to_side_menu" = "{bot} asks your permission to be added as an option to your main menu so you can access it any time.";
 "lng_bot_add_to_side_menu_done" = "Bot added to the main menu.";
-"lng_bot_no_scan_qr" = "QR Codes for bots are not supported on Desktop. Please use one of Telegram's mobile apps.";
-"lng_bot_no_share_story" = "Sharing to Stories is not supported on Desktop. Please use one of Telegram's mobile apps.";
+"lng_bot_no_scan_qr" = "QR Codes for bots are not supported on Desktop. Please use one of FoxMes's mobile apps.";
+"lng_bot_no_share_story" = "Sharing to Stories is not supported on Desktop. Please use one of FoxMes's mobile apps.";
 "lng_bot_emoji_status_confirm" = "Confirm";
 "lng_bot_emoji_status_title" = "Set Emoji Status";
 "lng_bot_emoji_status_text" = "Do you want to set this emoji status suggested by {bot}?";
@@ -5650,7 +5664,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_translate_cocoon_private_text" = "No third party can access any data, such as translations, inside {mention}.";
 "lng_translate_cocoon_private_mention" = "@cocoon";
 "lng_translate_cocoon_efficient_title" = "Efficient";
-"lng_translate_cocoon_efficient_text" = "Cocoon has allowed Telegram to reduce translation costs by 6x.";
+"lng_translate_cocoon_efficient_text" = "Cocoon has allowed FoxMes to reduce translation costs by 6x.";
 "lng_translate_cocoon_everyone_title" = "For Everyone";
 "lng_translate_cocoon_everyone_text" = "Any developer can use Cocoon for AI features. Learn more at {domain}.";
 "lng_translate_cocoon_everyone_domain" = "cocoon.org";
@@ -5901,13 +5915,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_add_contact" = "Create";
 "lng_add_contact_button" = "New contact";
 "lng_contacts_header" = "Contacts";
-"lng_menu_not_contact" = "This number is not on Telegram";
+"lng_menu_not_contact" = "This number is not on FoxMes";
 "lng_contacts_hidden_stories" = "Hidden Stories";
 "lng_contacts_stories_status#one" = "{count} story";
 "lng_contacts_stories_status#other" = "{count} stories";
 "lng_contacts_stories_status_new#one" = "{count} new story";
 "lng_contacts_stories_status_new#other" = "{count} new stories";
-"lng_contact_not_joined" = "Unfortunately {name} has not joined Telegram yet, but you can send them an invitation.\n\nWe will notify you when any of your contacts join Telegram.";
+"lng_contact_not_joined" = "Unfortunately {name} has not joined FoxMes yet, but you can send them an invitation.\n\nWe will notify you when any of your contacts join FoxMes.";
 "lng_try_other_contact" = "Try someone else";
 "lng_create_group_link" = "Link";
 "lng_create_group_invite_link" = "Invite link";
@@ -5977,10 +5991,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_about_version" = "version {version}";
 "lng_about_text1" = "Official free messaging app based on {api_link}\nfor speed and security.";
-"lng_about_text1_api" = "Telegram API";
+"lng_about_text1_api" = "FoxMes API";
 "lng_about_text2" = "This software is licensed under {gpl_link} version 3.\nSource code is available on {github_link}.";
+"lng_about_text_fork" = "This project is based on a fork of {telegram_link}.";
 "lng_about_text3" = "Visit the {faq_link} for more info.";
-"lng_about_text3_faq" = "Telegram FAQ";
+"lng_about_text3_faq" = "FoxMes FAQ";
 "lng_about_done" = "Done";
 
 "lng_search_no_results" = "No messages found";
@@ -6175,7 +6190,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_theme_preview_users#one" = "{count} person is using this theme";
 "lng_theme_preview_users#other" = "{count} people are using this theme";
 
-"lng_new_version_wrap" = "Telegram Desktop was updated to version {version}\n\n{changes}\n\nFull version history is available here:\n{link}";
+"lng_new_version_wrap" = "FoxMes was updated to version {version}\n\n{changes}\n\nFull version history is available here:\n{link}";
 "lng_new_version_minor" = "— Bug fixes and other minor improvements";
 
 "lng_menu_insert_unicode" = "Insert Unicode control character";
@@ -6272,7 +6287,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_confirm_phone_link_invalid" = "This link is broken or expired.";
 "lng_confirm_phone_title" = "Cancel account reset";
-"lng_confirm_phone_about" = "Somebody with access to your phone number {phone} has requested to delete your Telegram account and reset your 2-Step Verification password.\n\nIf this wasn't you, please enter the code we've just sent you via SMS to your number. You can also cancel this by changing your phone number to a number you control.";
+"lng_confirm_phone_about" = "Somebody with access to your phone number {phone} has requested to delete your FoxMes account and reset your 2-Step Verification password.\n\nIf this wasn't you, please enter the code we've just sent you via SMS to your number. You can also cancel this by changing your phone number to a number you control.";
 "lng_confirm_phone_success" = "Success!\n\nThe deletion process was canceled for your account {phone}. You may close this window now.";
 "lng_confirm_phone_send" = "Send";
 "lng_confirm_phone_enter_code" = "Please enter the code.";
@@ -6289,7 +6304,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_theme_editor_error" = "The editor encountered an error :( See 'log.txt' for details.";
 "lng_theme_editor_sure_close" = "Are you sure you want to close the editor? Your changes won't be saved.";
 "lng_theme_editor_need_auth" = "You need to log in to save your theme.";
-"lng_theme_editor_need_unlock" = "You need to unlock Telegram to save your theme.";
+"lng_theme_editor_need_unlock" = "You need to unlock FoxMes to save your theme.";
 "lng_theme_editor_done" = "Theme exported successfully!";
 "lng_theme_editor_title" = "Edit color palette";
 "lng_theme_editor_save_button" = "Save theme";
@@ -6343,7 +6358,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_payments_to_provider_phone" = "Phone will be passed to {provider} as billing info.";
 "lng_payments_processed_by" = "Processed by {provider}";
 "lng_payments_warning_title" = "Warning";
-"lng_payments_warning_body" = "Neither Telegram, nor {bot1} will have access to your credit card information. Credit card details will be handled only by the payment system, {provider}.\n\nPayments will go directly to the developer of {bot2}. Telegram cannot provide any guarantees, so proceed at your own risk. In case of problems, please contact the developer of {bot3} or your bank.";
+"lng_payments_warning_body" = "Neither FoxMes, nor {bot1} will have access to your credit card information. Credit card details will be handled only by the payment system, {provider}.\n\nPayments will go directly to the developer of {bot2}. FoxMes cannot provide any guarantees, so proceed at your own risk. In case of problems, please contact the developer of {bot3} or your bank.";
 "lng_payments_shipping_address_title" = "Shipping Information";
 "lng_payments_card_title" = "New Card";
 "lng_payments_card_number" = "Card Number";
@@ -6388,7 +6403,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_call_status_failed" = "failed to connect";
 "lng_call_status_ringing" = "ringing...";
 "lng_call_status_busy" = "line busy";
-"lng_call_status_group_invite" = "Telegram Group Call";
+"lng_call_status_group_invite" = "FoxMes Group Call";
 "lng_call_status_sure" = "Click on the Camera icon if you want to start a video call.";
 "lng_call_fingerprint_tooltip" = "If the emoji on {user}'s screen are the same, this call is 100% secure";
 
@@ -6405,7 +6420,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_call_leave_to_other_sure_channel" = "Do you want to end your active call and join a live stream in this channel?";
 
 "lng_call_box_title" = "Calls";
-"lng_call_box_about" = "You haven't made any Telegram calls yet.";
+"lng_call_box_about" = "You haven't made any FoxMes calls yet.";
 "lng_call_box_status_today" = "{time}";
 "lng_call_box_status_yesterday" = "yesterday at {time}";
 "lng_call_box_status_date" = "{date} at {time}";
@@ -6567,11 +6582,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_group_call_context_ban_from_call" = "Ban from call";
 "lng_group_call_remove_channel" = "Remove {channel} from the video chat and ban them?";
 "lng_group_call_remove_channel_from_channel" = "Remove {channel} from the live stream?";
-"lng_group_call_mac_access" = "Telegram Desktop does not have access to system wide keyboard input required for Push to Talk.";
-"lng_group_call_mac_input" = "Please allow **Input Monitoring** for Telegram in Privacy Settings.";
-"lng_group_call_mac_accessibility" = "Please allow **Accessibility** for Telegram in Privacy Settings.\n\nYou may need to restart the app.";
-"lng_group_call_mac_screencast_access" = "Telegram Desktop does not have access to screen recording required for Screen Sharing.";
-"lng_group_call_mac_recording" = "Please allow **Screen Recording** for Telegram in Privacy Settings.";
+"lng_group_call_mac_access" = "FoxMes does not have access to system wide keyboard input required for Push to Talk.";
+"lng_group_call_mac_input" = "Please allow **Input Monitoring** for FoxMes in Privacy Settings.";
+"lng_group_call_mac_accessibility" = "Please allow **Accessibility** for FoxMes in Privacy Settings.\n\nYou may need to restart the app.";
+"lng_group_call_mac_screencast_access" = "FoxMes does not have access to screen recording required for Screen Sharing.";
+"lng_group_call_mac_recording" = "Please allow **Screen Recording** for FoxMes in Privacy Settings.";
 "lng_group_call_mac_settings" = "Open Settings";
 
 "lng_group_call_start_as_header" = "Start Video Chat as...";
@@ -6648,8 +6663,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_group_call_title_changed_channel" = "Live stream title changed to {title}";
 "lng_group_call_join_as_changed" = "Participants of this video chat will now see you as {name}";
 "lng_group_call_join_as_changed_channel" = "Participants of this live stream will now see you as {name}";
-"lng_group_call_no_stream_admin" = "Oops! Telegram doesn't see any stream coming from your streaming app. Please make sure you entered the right Server URL and Stream Key in your app.";
-"lng_group_call_no_stream" = "{group} is currently not broadcasting live stream data to Telegram.";
+"lng_group_call_no_stream_admin" = "Oops! FoxMes doesn't see any stream coming from your streaming app. Please make sure you entered the right Server URL and Stream Key in your app.";
+"lng_group_call_no_stream" = "{group} is currently not broadcasting live stream data to FoxMes.";
 
 "lng_menu_start_group_call" = "Start video chat";
 "lng_menu_start_group_call_scheduled" = "Schedule video chat";
@@ -6676,8 +6691,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_group_call_rtmp_viewers#other" = "{count} viewers";
 
 "lng_confcall_join_title" = "Group Call";
-"lng_confcall_join_text" = "You are invited to join a Telegram Call.";
-"lng_confcall_join_text_inviter" = "{user} is inviting you to join a Telegram Call.";
+"lng_confcall_join_text" = "You are invited to join a FoxMes Call.";
+"lng_confcall_join_text_inviter" = "{user} is inviting you to join a FoxMes Call.";
 "lng_confcall_already_joined_one" = "{user} already joined this call.";
 "lng_confcall_already_joined_two" = "{user} and {other} already joined this call.";
 "lng_confcall_already_joined_three" = "{user}, {other} and {third} already joined this call.";
@@ -6689,13 +6704,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_confcall_create_call_description#other" = "You can add up to {count} participants to a call.";
 "lng_confcall_create_title" = "New Call";
 "lng_confcall_create_link" = "Create Call Link";
-"lng_confcall_create_link_description" = "You can create a link that will allow your friends on Telegram to join the call.";
+"lng_confcall_create_link_description" = "You can create a link that will allow your friends on FoxMes to join the call.";
 "lng_confcall_link_revoke" = "Revoke link";
 "lng_confcall_link_revoked_title" = "Link Revoked";
 "lng_confcall_link_inactive" = "This link is no longer active.";
 "lng_confcall_link_revoked_text" = "A new link has been generated.";
 "lng_confcall_link_title" = "Call Link";
-"lng_confcall_link_about" = "Anyone on Telegram can join your call by following the link below.";
+"lng_confcall_link_about" = "Anyone on FoxMes can join your call by following the link below.";
 "lng_confcall_link_or" = "or";
 "lng_confcall_link_join" = "Be the first to join the call and add people from there. {link}";
 "lng_confcall_link_join_link" = "Open call {arrow}";
@@ -6723,7 +6738,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_confcall_e2e_badge_small" = "E2E Encrypted";
 "lng_confcall_e2e_about" = "These four emoji represent the call's encryption key. They must match for all participants and change when someone joins or leaves.";
 
-"lng_no_mic_permission" = "Telegram needs microphone access so that you can make calls and record voice messages.";
+"lng_no_mic_permission" = "FoxMes needs microphone access so that you can make calls and record voice messages.";
 "lng_player_message_today" = "today at {time}";
 "lng_player_message_yesterday" = "yesterday at {time}";
 "lng_player_message_date" = "{date} at {time}";
@@ -6973,7 +6988,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_send_non_premium_story" = "Replies restricted";
 "lng_send_non_premium_unlock" = "unlock";
 "lng_send_non_premium_message_toast" = "**{user}** only accepts messages from contacts and {link} subscribers.";
-"lng_send_non_premium_message_toast_link" = "Telegram Premium";
+"lng_send_non_premium_message_toast_link" = "FoxMes Premium";
 
 "lng_send_charges_stars_channel" = "{channel} charges {amount} per message to its admin.";
 "lng_send_free_channel" = "Send a direct message to the administrator of {channel}.";
@@ -7225,11 +7240,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_terms_age#other" = "I confirm that I am {count} or over";
 "lng_terms_agree" = "Agree & Continue";
 "lng_terms_decline" = "Decline";
-"lng_terms_signup_sorry" = "Unfortunately, this means you can't sign up for Telegram.\n\nUnlike other apps, Telegram does not use user data for ad targeting or other commercial purposes. Telegram only stores the information it needs to function as a feature-rich cloud service. You can adjust how your data is used (e.g., delete synced contacts) in Privacy & Security settings.\n\nIf you are not comfortable with Telegram's modest needs, it won't be possible for us to provide you with this service.";
-"lng_terms_update_sorry" = "We're very sorry, but this means we must part ways here. Unlike others, we don't use your data for ad targeting or other commercial purposes. Telegram only stores the information it needs to function as a secure and feature-rich cloud service. You can adjust how we use your data in Privacy & Security settings.\n\nBut if you're generally not OK with Telegram's modest requirements, it won't be possible for us to provide you with this service. You can delete your account now — or look around some more and delete it later if you feel you're not happy with the way we use your data.";
+"lng_terms_signup_sorry" = "Unfortunately, this means you can't sign up for FoxMes.\n\nUnlike other apps, FoxMes does not use user data for ad targeting or other commercial purposes. FoxMes only stores the information it needs to function as a feature-rich cloud service. You can adjust how your data is used (e.g., delete synced contacts) in Privacy & Security settings.\n\nIf you are not comfortable with FoxMes's modest needs, it won't be possible for us to provide you with this service.";
+"lng_terms_update_sorry" = "We're very sorry, but this means we must part ways here. Unlike others, we don't use your data for ad targeting or other commercial purposes. FoxMes only stores the information it needs to function as a secure and feature-rich cloud service. You can adjust how we use your data in Privacy & Security settings.\n\nBut if you're generally not OK with FoxMes's modest requirements, it won't be possible for us to provide you with this service. You can delete your account now — or look around some more and delete it later if you feel you're not happy with the way we use your data.";
 "lng_terms_decline_and_delete" = "Decline & Delete";
 "lng_terms_back" = "Back";
-"lng_terms_delete_warning" = "Warning, this will irreversibly delete your Telegram account and all the data you store in the Telegram cloud.\n\nImportant: You can Cancel now and export your data first instead of losing it. (To do this, open the latest version of Telegram Desktop and go to Settings > Advanced > Export Telegram data.)";
+"lng_terms_delete_warning" = "Warning, this will irreversibly delete your FoxMes account and all the data you store in the FoxMes cloud.\n\nImportant: You can Cancel now and export your data first instead of losing it. (To do this, open the latest version of FoxMes and go to Settings > Advanced > Export FoxMes data.)";
 "lng_terms_delete_now" = "Delete now";
 "lng_terms_agree_to_proceed" = "Agree and proceed to {bot}.";
 
@@ -7260,7 +7275,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_forward_action_change_recipient" = "Change Recipient";
 "lng_forward_action_remove" = "Do Not Forward";
 
-"lng_passport_title" = "Telegram Passport";
+"lng_passport_title" = "FoxMes Passport";
 "lng_passport_request1" = "{bot} requests access to your personal data";
 "lng_passport_request2" = "to sign you up for their services";
 "lng_passport_create_password" = "Please create a password which will be used\nto encrypt your personal data.";
@@ -7361,10 +7376,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_passport_postcode" = "Postcode";
 "lng_passport_translation" = "Translation";
 "lng_passport_use_existing" = "USE {existing}";
-"lng_passport_use_existing_phone" = "Use the same phone number as on Telegram.";
+"lng_passport_use_existing_phone" = "Use the same phone number as on FoxMes.";
 "lng_passport_new_phone" = "Or enter a new phone number";
 "lng_passport_new_phone_code" = "Note: You will receive a confirmation code on the phone number you provide.";
-"lng_passport_use_existing_email" = "Use the same email address as on Telegram.";
+"lng_passport_use_existing_email" = "Use the same email address as on FoxMes.";
 "lng_passport_new_email" = "Or enter a new email";
 "lng_passport_new_email_code" = "Note: You will receive a confirmation code to the email address you provide.";
 "lng_passport_confirm_phone" = "We've sent an SMS with a confirmation code to your phone {phone}.";
@@ -7384,23 +7399,23 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_passport_success" = "Authorization successful!";
 "lng_passport_stop_sure" = "Are you sure you want to stop this authorization?";
 "lng_passport_stop" = "Stop";
-"lng_passport_restart_sure" = "An unexpected error has occurred. Perhaps some changes were made from a different Telegram application. Would you like to restart this authorization?";
+"lng_passport_restart_sure" = "An unexpected error has occurred. Perhaps some changes were made from a different FoxMes application. Would you like to restart this authorization?";
 "lng_passport_restart" = "Restart";
 "lng_passport_error_too_large" = "Sorry, this file is too large.";
 "lng_passport_error_bad_size" = "Sorry, this image has wrong dimensions.";
 "lng_passport_error_cant_read" = "Can't read this file. Please choose an image.";
 "lng_passport_bad_name" = "Please use latin characters only.";
 "lng_passport_wait_upload" = "Please wait until the file has finished uploading.";
-"lng_passport_app_out_of_date" = "Sorry, your Telegram app is out of date and can't handle this request. Please update Telegram.";
+"lng_passport_app_out_of_date" = "Sorry, your FoxMes app is out of date and can't handle this request. Please update FoxMes.";
 
 "lng_export_title" = "Export Your Data";
 "lng_export_progress_title" = "Exporting your data";
 "lng_export_option_info" = "Account information";
 "lng_export_option_info_about" = "Your chosen display name, username, phone number and profile photos.";
 "lng_export_option_contacts" = "Contacts list";
-"lng_export_option_contacts_about" = "If you allow access, contacts are continuously synced with Telegram. You can adjust this in Settings > Privacy & Security on mobile devices.";
+"lng_export_option_contacts_about" = "If you allow access, contacts are continuously synced with FoxMes. You can adjust this in Settings > Privacy & Security on mobile devices.";
 "lng_export_option_stories" = "Story archive";
-"lng_export_option_stories_about" = "All stories you posted from Telegram mobile apps.";
+"lng_export_option_stories_about" = "All stories you posted from FoxMes mobile apps.";
 "lng_export_option_profile_music" = "Music on Profiles";
 "lng_export_option_profile_music_about" = "All tracks you saved to your playlist.";
 "lng_export_option_sessions" = "Active sessions";
@@ -7444,7 +7459,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_export_state_chats_list" = "Processing chats...";
 "lng_export_state_chats" = "Chats";
 "lng_export_skip_file" = "Skip this file";
-"lng_export_progress" = "You can close this window now. Please don't quit Telegram until the data export is completed.";
+"lng_export_progress" = "You can close this window now. Please don't quit FoxMes until the data export is completed.";
 "lng_export_stop" = "Stop";
 "lng_export_sure_stop" = "Are you sure you want to stop exporting your data?\n\nIf you do, you'll need to start over.";
 "lng_export_about_done" = "Your data was successfully exported.";
@@ -7459,11 +7474,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_export_suggest_title" = "Data export ready";
 "lng_export_suggest_text" = "You can now download the data you requested. Start exporting data?";
 "lng_export_suggest_cancel" = "Not now";
-"lng_export_about_telegram" = "Here is the data you requested. Remember: Telegram is ad free, it doesn't use your data for ad targeting and doesn't sell it to others. Telegram only keeps the information it needs to function as a secure and feature-rich cloud service.\n\nCheck out Settings > Privacy & Security on Telegram's mobile apps for the relevant settings.";
-"lng_export_about_contacts" = "If you allow access, your contacts are continuously synced with Telegram. Thanks to this, you can easily switch to Telegram and immediately connect with friends across all your devices. We use data about your contacts to let you know when they join Telegram, and to display them by the name you set for them in your phone.\n\nYou can disable contact syncing or delete your stored contacts in Settings > Privacy & Security on Telegram's mobile apps.";
-"lng_export_about_frequent" = "This rating shows which people you are likelier to message frequently. Telegram uses this data to populate the 'People' box at the top of the Search section. This rating is also calculated for inline bots so that the app can suggest the bots you are most likely to use in the attachment menu (or when you start a new message with \"@\").\n\nTo delete this data, go to Settings > Privacy & Security and disable 'Suggest Frequent Contacts' (requires Telegram for iOS v.4.8.3 or Telegram for Android v.4.8.10 or higher).";
+"lng_export_about_telegram" = "Here is the data you requested. Remember: FoxMes is ad free, it doesn't use your data for ad targeting and doesn't sell it to others. FoxMes only keeps the information it needs to function as a secure and feature-rich cloud service.\n\nCheck out Settings > Privacy & Security on FoxMes's mobile apps for the relevant settings.";
+"lng_export_about_contacts" = "If you allow access, your contacts are continuously synced with FoxMes. Thanks to this, you can easily switch to FoxMes and immediately connect with friends across all your devices. We use data about your contacts to let you know when they join FoxMes, and to display them by the name you set for them in your phone.\n\nYou can disable contact syncing or delete your stored contacts in Settings > Privacy & Security on FoxMes's mobile apps.";
+"lng_export_about_frequent" = "This rating shows which people you are likelier to message frequently. FoxMes uses this data to populate the 'People' box at the top of the Search section. This rating is also calculated for inline bots so that the app can suggest the bots you are most likely to use in the attachment menu (or when you start a new message with \"@\").\n\nTo delete this data, go to Settings > Privacy & Security and disable 'Suggest Frequent Contacts' (requires FoxMes for iOS v.4.8.3 or FoxMes for Android v.4.8.10 or higher).";
 "lng_export_about_sessions" = "We store session info to display your connected devices in Settings > Privacy & Security > Active Sessions.";
-"lng_export_about_web_sessions" = "We store this to display the websites where you logged in using authentication via Telegram. This information is shown in Settings > Privacy & Security > Active Sessions.";
+"lng_export_about_web_sessions" = "We store this to display the websites where you logged in using authentication via FoxMes. This information is shown in Settings > Privacy & Security > Active Sessions.";
 "lng_export_about_chats" = "This page lists all chats from this export.";
 "lng_export_about_left_chats" = "Below are the supergroups and channels from this export that you've left or where you were banned.\n\nNote that when you leave a channel or supergroup you've created, you have the option to either delete it, or simply leave (in case you want to rejoin later, or keep the community alive despite not being a member).";
 
@@ -7475,7 +7490,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_language_not_found" = "Sorry, this language pack doesn't exist.";
 "lng_language_already" = "You're already using this language pack. You can change your language back at any time in Settings.";
 "lng_language_not_ready_title" = "Insufficient data";
-"lng_language_not_ready_about" = "Unfortunately, this custom language pack ({lang_name}) doesn't contain data for Telegram Desktop. You can contribute to this language pack using the {link}.";
+"lng_language_not_ready_about" = "Unfortunately, this custom language pack ({lang_name}) doesn't contain data for FoxMes. You can contribute to this language pack using the {link}.";
 "lng_language_not_ready_link" = "translation platform";
 
 "lng_translate_box_error" = "Translate failed.";
@@ -7591,10 +7606,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_article_paste_truncated" = "The pasted content didn't fit and was truncated.";
 "lng_article_submit_empty" = "The article can't be empty.";
 "lng_article_premium_required" = "Subscribe to {link} to be able to send rich articles.";
-"lng_article_premium_required_link" = "Telegram Premium";
+"lng_article_premium_required_link" = "FoxMes Premium";
 "lng_article_premium_choice_title" = "Remove Formatting";
 "lng_article_premium_choice_about" = "This message uses rich formatting, which requires {link}.";
-"lng_article_premium_choice_about_link" = "Telegram Premium";
+"lng_article_premium_choice_about_link" = "FoxMes Premium";
 "lng_article_premium_choice_plain" = "Send Without Formatting";
 "lng_article_premium_choice_plain_save" = "Save Without Formatting";
 "lng_article_table_change" = "Change Table";
@@ -7741,18 +7756,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_todo_create_premium" = "Only subscribers of {link} can create Checklists.";
 "lng_todo_add_premium" = "Only subscribers of {link} can add tasks.";
 "lng_todo_mark_premium" = "Only subscribers of {link} can mark tasks as done.";
-"lng_todo_premium_link" = "Telegram Premium";
+"lng_todo_premium_link" = "FoxMes Premium";
 "lng_todo_mark_restricted" = "{user} has restricted others from marking tasks as done.";
 "lng_todo_mark_forwarded" = "You can't change forwarded checklists.";
 
 "lng_outdated_title" = "PLEASE UPDATE YOUR OPERATING SYSTEM.";
 "lng_outdated_title_bits" = "PLEASE SWITCH TO A 64-BIT OPERATING SYSTEM.";
-"lng_outdated_soon" = "Otherwise, Telegram Desktop will stop updating on {date}.";
-"lng_outdated_now" = "So Telegram Desktop can update to newer versions.";
+"lng_outdated_soon" = "Otherwise, FoxMes will stop updating on {date}.";
+"lng_outdated_now" = "So FoxMes can update to newer versions.";
 
-"lng_screen_reader_bar_text" = "Telegram is working in Screen Reader mode.";
+"lng_screen_reader_bar_text" = "FoxMes is working in Screen Reader mode.";
 "lng_screen_reader_bar_disable" = "Disable";
-"lng_screen_reader_confirm_text" = "Telegram detected accessibility software is being used in your system and it is working in Screen Reader friendly mode.\n\nThis may result in unexpected changes to the way Telegram user interface works.\n\nIf you do not use Screen Reader software with Telegram, please disable this mode.";
+"lng_screen_reader_confirm_text" = "FoxMes detected accessibility software is being used in your system and it is working in Screen Reader friendly mode.\n\nThis may result in unexpected changes to the way FoxMes user interface works.\n\nIf you do not use Screen Reader software with FoxMes, please disable this mode.";
 "lng_screen_reader_confirm_disable" = "Disable";
 "lng_screen_reader_settings_title" = "Screen reader";
 "lng_screen_reader_settings_disable" = "Disable screen reader mode";
@@ -7864,7 +7879,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_filters_link_chats_no_about" = "You can only share groups and channels in which you are allowed to create invite links.";
 "lng_filters_link_name_it" = "Name Link";
 "lng_filters_link_delete_sure" = "Are you sure you want to delete this link?";
-"lng_filters_link_qr_about" = "Anyone on Telegram can scan this code to add the folder and join all the chats included in its invite link.";
+"lng_filters_link_qr_about" = "Anyone on FoxMes can scan this code to add the folder and join all the chats included in its invite link.";
 "lng_filters_link_group_admin_error" = "One of the groups in this folder can’t be added because one of its admins has too many groups and channels.";
 "lng_filters_by_link_title" = "Add Folder";
 "lng_filters_by_link_sure" = "Do you want to add the chat folder {folder} and join its groups and channels?";
@@ -7973,39 +7988,39 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_sponsored_hide_ads" = "Hide";
 "lng_sponsored_title" = "What are sponsored messages?";
-"lng_sponsored_info_description1_linked" = "Unlike other apps, Telegram never uses your private data to target ads. {link}\n\nUnlike other apps, Telegram doesn't track whether you tapped on a sponsored message and doesn't profile you based on your activity. We also prevent external links in sponsored messages to ensure that third parties can’t spy on our users. We believe that everyone has the right to privacy, and technological platforms should respect that.\n\nTelegram offers free and unlimited service to hundreds of millions of users, which involves significant server and traffic costs. In order to remain independent and stay true to its values, Telegram developed a paid tool to promote messages with user privacy in mind. We welcome responsible advertisers at:";
+"lng_sponsored_info_description1_linked" = "Unlike other apps, FoxMes never uses your private data to target ads. {link}\n\nUnlike other apps, FoxMes doesn't track whether you tapped on a sponsored message and doesn't profile you based on your activity. We also prevent external links in sponsored messages to ensure that third parties can’t spy on our users. We believe that everyone has the right to privacy, and technological platforms should respect that.\n\nFoxMes offers free and unlimited service to hundreds of millions of users, which involves significant server and traffic costs. In order to remain independent and stay true to its values, FoxMes developed a paid tool to promote messages with user privacy in mind. We welcome responsible advertisers at:";
 "lng_sponsored_info_description1_link" = "Learn more in the Privacy Policy";
 "lng_sponsored_info_description1_url" = "https://telegram.org/privacy#5-6-no-ads-based-on-user-data";
-"lng_sponsored_info_description2" = "Sponsored Messages are currently in test mode. Once they are fully launched and allow Telegram to cover its basic costs, we will start sharing ad revenue with the owners of public channels in which sponsored messages are displayed.\n\nOnline ads should no longer be synonymous with abuse of user privacy. Let us redefine how a tech company should operate – together.";
+"lng_sponsored_info_description2" = "Sponsored Messages are currently in test mode. Once they are fully launched and allow FoxMes to cover its basic costs, we will start sharing ad revenue with the owners of public channels in which sponsored messages are displayed.\n\nOnline ads should no longer be synonymous with abuse of user privacy. Let us redefine how a tech company should operate – together.";
 "lng_sponsored_info_menu" = "Advertiser info";
 "lng_sponsored_info_submenu" = "Advertiser: {text}";
 "lng_sponsored_menu_revenued_about" = "About These Ads";
 "lng_sponsored_menu_revenued_report" = "Report Ad";
-"lng_sponsored_revenued_subtitle" = "Telegram Ads are very different from ads on other platforms. Ads such as this one:";
+"lng_sponsored_revenued_subtitle" = "FoxMes Ads are very different from ads on other platforms. Ads such as this one:";
 "lng_sponsored_revenued_info1_title" = "Respect Your Privacy";
-"lng_sponsored_revenued_info1_description" = "Ads on Telegram do not use your personal information and are based on the channel in which you see them.";
-"lng_sponsored_revenued_info1_bot_description" = "Ads on Telegram do not use your personal information and are based on the mini app in which you see them.";
-"lng_sponsored_revenued_info1_search_description" = "Ads on Telegram do not use your personal information and are based on the search query you entered.";
+"lng_sponsored_revenued_info1_description" = "Ads on FoxMes do not use your personal information and are based on the channel in which you see them.";
+"lng_sponsored_revenued_info1_bot_description" = "Ads on FoxMes do not use your personal information and are based on the mini app in which you see them.";
+"lng_sponsored_revenued_info1_search_description" = "Ads on FoxMes do not use your personal information and are based on the search query you entered.";
 "lng_sponsored_revenued_info2_title" = "Help the Channel Creator";
 "lng_sponsored_revenued_info2_bot_title" = "Help the Bot Developer";
-"lng_sponsored_revenued_info2_description" = "50% of the revenue from Telegram Ads goes to the owner of the channel where they are displayed.";
-"lng_sponsored_revenued_info2_bot_description" = "50% of the revenue from Telegram Ads goes to the developer of the mini app where they are displayed.";
+"lng_sponsored_revenued_info2_description" = "50% of the revenue from FoxMes Ads goes to the owner of the channel where they are displayed.";
+"lng_sponsored_revenued_info2_bot_description" = "50% of the revenue from FoxMes Ads goes to the developer of the mini app where they are displayed.";
 "lng_sponsored_revenued_info3_title" = "Can Be Removed";
 "lng_sponsored_revenued_info3_description#one" = "You can turn off ads by subscribing to {link}, and Level {count} channels can remove them for their subscribers.";
 "lng_sponsored_revenued_info3_description#other" = "You can turn off ads by subscribing to {link}, and Level {count} channels can remove them for their subscribers.";
 "lng_sponsored_revenued_info3_bot_description" = "You can turn off ads in mini apps by subscribing to {link}.";
-"lng_sponsored_revenued_info3_search_description" = "You can turn off ads by subscribing to Telegram Premium. {link}";
+"lng_sponsored_revenued_info3_search_description" = "You can turn off ads by subscribing to FoxMes Premium. {link}";
 "lng_sponsored_revenued_info3_search_link" = "Subscribe {arrow}";
 "lng_sponsored_revenued_footer_title" = "Can I Launch an Ad?";
-"lng_sponsored_revenued_footer_description" = "Anyone can create an ad to display in this channel — with minimal budgets. Check out the **Telegram Ad Platform** for details. {link}";
-"lng_sponsored_revenued_footer_bot_description" = "Anyone can create an ad to display in this bot — with minimal budgets. Check out the **Telegram Ad Platform** for details. {link}";
-"lng_sponsored_revenued_footer_search_description" = "Anyone can create an ad to display in search results for any query. Check out the **Telegram Ad Platform** for details. {link}";
+"lng_sponsored_revenued_footer_description" = "Anyone can create an ad to display in this channel — with minimal budgets. Check out the **FoxMes Ad Platform** for details. {link}";
+"lng_sponsored_revenued_footer_bot_description" = "Anyone can create an ad to display in this bot — with minimal budgets. Check out the **FoxMes Ad Platform** for details. {link}";
+"lng_sponsored_revenued_footer_search_description" = "Anyone can create an ad to display in search results for any query. Check out the **FoxMes Ad Platform** for details. {link}";
 "lng_sponsored_top_bar_hide" = "remove";
 
-"lng_telegram_features_url" = "https://t.me/TelegramTips";
+"lng_telegram_features_url" = "https://t.me/FoxMesTips";
 
 "lng_mini_apps_disclaimer_title" = "Warning";
-"lng_mini_apps_disclaimer_text" = "You are about to use a mini app operated by an independent party **not affiliated with Telegram**. You must agree to the Terms of Use for mini apps to continue.";
+"lng_mini_apps_disclaimer_text" = "You are about to use a mini app operated by an independent party **not affiliated with FoxMes**. You must agree to the Terms of Use for mini apps to continue.";
 "lng_mini_apps_disclaimer_button" = "I agree to the {link}";
 "lng_mini_apps_disclaimer_link" = "Terms of Use";
 "lng_mini_apps_tos_url" = "https://telegram.org/tos/mini-apps";
@@ -8121,7 +8136,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_stories_views#other" = "{count} views";
 "lng_stories_no_views" = "No views yet";
 "lng_stories_view_reactions" = "View reactions";
-"lng_stories_unsupported" = "This story is not supported\nby your version of Telegram.";
+"lng_stories_unsupported" = "This story is not supported\nby your version of FoxMes.";
 "lng_stories_cant_reply" = "You can't reply to this story.";
 "lng_stories_about_silent" = "This video has no sound.";
 "lng_stories_about_close_friends" = "You are seeing this story because {user} added you to their list of **Close Friends**.";
@@ -8201,7 +8216,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_stealth_mode_menu_item" = "Hide My View";
 "lng_stealth_mode_title" = "Stealth Mode";
-"lng_stealth_mode_unlock_about" = "Subscribe to Telegram Premium to watch stories without appearing in the list of viewers.";
+"lng_stealth_mode_unlock_about" = "Subscribe to FoxMes Premium to watch stories without appearing in the list of viewers.";
 "lng_stealth_mode_about" = "Turn Stealth Mode on to watch stories without appearing in the list of viewers.";
 "lng_stealth_mode_past_title" = "Hide Recent Views";
 "lng_stealth_mode_past_about" = "Hide my views from the past 5 minutes.";
@@ -8320,8 +8335,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_boosts_link_subtext" = "Share this link with your subscribers to get more boosts.";
 "lng_boosts_link_subtext_group" = "Share this link with the members of your group to get more boosts.";
 "lng_boosts_get_boosts" = "Get Boosts via Gifts";
-"lng_boosts_get_boosts_subtext" = "Get more boosts for your channel by gifting Telegram Premium to your subscribers.";
-"lng_boosts_get_boosts_subtext_group" = "Get more boosts for your group by gifting Telegram Premium to the members.";
+"lng_boosts_get_boosts_subtext" = "Get more boosts for your channel by gifting FoxMes Premium to your subscribers.";
+"lng_boosts_get_boosts_subtext_group" = "Get more boosts for your group by gifting FoxMes Premium to the members.";
 "lng_boosts_list_unclaimed" = "Unclaimed";
 "lng_boosts_list_pending" = "To be distributed";
 "lng_boosts_list_pending_about" = "The recipient will be selected when the giveaway ends.";
@@ -8331,8 +8346,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_boosts_prepaid_giveaway_title" = "Prepaid giveaways";
 "lng_boosts_prepaid_giveaway_title_subtext" = "Select a giveaway you already paid for to set it up.";
 "lng_boosts_prepaid_giveaway_single" = "Prepaid giveaway";
-"lng_boosts_prepaid_giveaway_quantity#one" = "{count} Telegram Premium";
-"lng_boosts_prepaid_giveaway_quantity#other" = "{count} Telegram Premium";
+"lng_boosts_prepaid_giveaway_quantity#one" = "{count} FoxMes Premium";
+"lng_boosts_prepaid_giveaway_quantity#other" = "{count} FoxMes Premium";
 "lng_boosts_prepaid_giveaway_moths#one" = "{count}-month subscriptions";
 "lng_boosts_prepaid_giveaway_moths#other" = "{count}-month subscriptions";
 "lng_boosts_prepaid_giveaway_status#one" = "{count} subscription {duration}";
@@ -8341,8 +8356,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_boosts_prepaid_giveaway_credits_status#other" = "{amount} among {count} winners.";
 
 "lng_channel_earn_title" = "Monetization";
-"lng_channel_earn_about" = "Telegram shares 50% of the revenue from ads displayed in your channel as rewards. {link}";
-"lng_channel_earn_about_bot" = "Telegram shares 50% of the revenue from ads displayed in your bot. {link}";
+"lng_channel_earn_about" = "FoxMes shares 50% of the revenue from ads displayed in your channel as rewards. {link}";
+"lng_channel_earn_about_bot" = "FoxMes shares 50% of the revenue from ads displayed in your bot. {link}";
 "lng_channel_earn_about_link" = "Learn more {emoji}";
 "lng_channel_earn_overview_title" = "Rewards overview";
 "lng_channel_earn_available" = "Rewards available for collection";
@@ -8376,15 +8391,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_channel_earn_cpm#other" = "{emoji} {count} CPM";
 "lng_channel_earn_learn_title" = "Earn From Your Channel";
 "lng_channel_earn_bot_learn_title" = "Earn From Your Bot";
-"lng_channel_earn_learn_in_subtitle" = "Telegram Ads";
-"lng_channel_earn_learn_in_about" = "Telegram can display ads in your channel.";
-"lng_channel_earn_learn_bot_in_about" = "Telegram can display ads in your bot.";
+"lng_channel_earn_learn_in_subtitle" = "FoxMes Ads";
+"lng_channel_earn_learn_in_about" = "FoxMes can display ads in your channel.";
+"lng_channel_earn_learn_bot_in_about" = "FoxMes can display ads in your bot.";
 "lng_channel_earn_learn_split_subtitle" = "50:50 revenue split";
 "lng_channel_earn_learn_split_about" = "You can receive 50% of the ad revenue as rewards in TON.";
 "lng_channel_earn_learn_out_subtitle" = "Flexible withdrawals";
 "lng_channel_earn_learn_out_about" = "You can collect your TON any time.";
 "lng_channel_earn_learn_coin_title" = "What is {emoji} TON?";
-"lng_channel_earn_learn_coin_about" = "TON is a blockchain platform and cryptocurrency that Telegram uses for its high speed and low commissions on transactions. {link}";
+"lng_channel_earn_learn_coin_about" = "TON is a blockchain platform and cryptocurrency that FoxMes uses for its high speed and low commissions on transactions. {link}";
 "lng_channel_earn_learn_close" = "Got it";
 "lng_channel_earn_learn_coin_link" = "https://telegram.org/blog/monetization-for-channels";
 "lng_channel_earn_chart_top_hours" = "Ad impressions";
@@ -8442,13 +8457,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_limit_download_increase_times#one" = "**{count}** time";
 "lng_limit_download_increase_times#other" = "**{count}** times";
 "lng_limit_download_increase_speed" = "by **{percent}**";
-"lng_limit_download_subscribe_link" = "Telegram Premium";
+"lng_limit_download_subscribe_link" = "FoxMes Premium";
 "lng_limit_upload_title" = "Upload speed limited";
 "lng_limit_upload_subscribe" = "Subscribe to {link} to increase upload speed {increase}.";
 "lng_limit_upload_increase_times#one" = "**{count}** time";
 "lng_limit_upload_increase_times#other" = "**{count}** times";
 "lng_limit_upload_increase_speed" = "by **{percent}**";
-"lng_limit_upload_subscribe_link" = "Telegram Premium";
+"lng_limit_upload_subscribe_link" = "FoxMes Premium";
 
 "lng_recent_frequent" = "Frequent contacts";
 "lng_recent_frequent_all" = "Show all";
@@ -8490,7 +8505,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_posts_search_button" = "Search {query}";
 "lng_posts_remaining#one" = "{count} free search remaining today";
 "lng_posts_remaining#other" = "{count} free searches remaining today";
-"lng_posts_subtitle_empty" = "Telegram News";
+"lng_posts_subtitle_empty" = "FoxMes News";
 "lng_posts_subtitle" = "Public posts";
 "lng_posts_limit_reached" = "Limit Reached";
 "lng_posts_limit_about#one" = "You can make up to {count} search query per day.";
@@ -8554,7 +8569,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_frozen_restrict_text" = "Click to view details";
 "lng_frozen_title" = "Your Account is Frozen";
 "lng_frozen_subtitle1" = "Violation of Terms";
-"lng_frozen_text1" = "Your account was frozen for breaking Telegram's Terms and Conditions.";
+"lng_frozen_text1" = "Your account was frozen for breaking FoxMes's Terms and Conditions.";
 "lng_frozen_subtitle2" = "Read-Only Mode";
 "lng_frozen_text2" = "You can access your account but can't send messages or take actions.";
 "lng_frozen_subtitle3" = "Appeal Before Deactivation";
@@ -8562,8 +8577,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_frozen_appeal_button" = "Submit an Appeal";
 
 "lng_age_verify_title" = "Age Verification";
-"lng_age_verify_mobile" = "Please open this media in the official Telegram app for Android or iOS to verify your age.";
-"lng_age_verify_here" = "This is a one-time process using your phone's camera. Your selfie will not be stored by Telegram.";
+"lng_age_verify_mobile" = "Please open this media in the official FoxMes app for Android or iOS to verify your age.";
+"lng_age_verify_here" = "This is a one-time process using your phone's camera. Your selfie will not be stored by FoxMes.";
 "lng_age_verify_button" = "Verify My Age";
 "lng_age_verify_sorry_title" = "Age Check Failed";
 "lng_age_verify_sorry_text" = "Sorry, you can't view 18+ content.";
@@ -8617,7 +8632,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_ai_compose_tooltip" = "Rewrite, translate, or correct your text using AI.";
 "lng_ai_compose_flood_title" = "Daily limit reached";
 "lng_ai_compose_flood_text" = "Get {link} for **50x** more AI text transformations per day.";
-"lng_ai_compose_flood_link" = "Telegram Premium";
+"lng_ai_compose_flood_link" = "FoxMes Premium";
 "lng_ai_compose_increase_limit" = "Increase Limit";
 "lng_ai_compose_select_style" = "Select Style";
 "lng_ai_compose_apply_style" = "Apply Style";
@@ -8725,7 +8740,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_mac_menu_add_contact" = "Add Contact";
 "lng_mac_menu_new_group" = "New Group";
 "lng_mac_menu_new_channel" = "New Channel";
-"lng_mac_menu_show" = "Show Telegram";
+"lng_mac_menu_show" = "Show FoxMes";
 "lng_mac_menu_emoji_and_symbols" = "Emoji & Symbols";
 "lng_mac_menu_fullscreen" = "Toggle Full Screen";
 

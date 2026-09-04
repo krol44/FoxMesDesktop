@@ -10,6 +10,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_chat_participants.h"
 #include "api/api_premium.h" // MessageMoneyRestriction.
 #include "base/random.h"
+#include "custom_backend/native_runtime.h"
+#include "custom_backend/native_search_adapter.h"
 #include "boxes/filters/edit_filter_chats_list.h"
 #include "settings/settings_common.h"
 #include "settings/sections/settings_premium.h"
@@ -254,6 +256,16 @@ bool PeerListGlobalSearchController::searchInCache() {
 }
 
 void PeerListGlobalSearchController::searchOnServer() {
+	if (CustomBackend::Enabled()) {
+		_requestId = CustomBackend::Search::SearchPeersFound(
+			_session,
+			_query,
+			[=](MTPcontacts_Found result, mtpRequestId requestId) {
+				searchDone(result, requestId);
+			});
+		_queries.emplace(_requestId, _query);
+		return;
+	}
 	_requestId = _api.request(MTPcontacts_Search(
 		MTP_flags(0),
 		MTP_string(_query),

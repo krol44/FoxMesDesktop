@@ -38,7 +38,8 @@ namespace {
 rpl::producer<TextWithEntities> Text1() {
 	return tr::lng_about_text1(
 		lt_api_link,
-		tr::lng_about_text1_api(tr::url(u"https://core.telegram.org/api"_q)),
+		tr::lng_about_text1_api(tr::url(
+			u"https://fxl.ru/@info/983-chto-takoe-lisiy-khvost"_q)),
 		tr::marked);
 }
 
@@ -47,10 +48,19 @@ rpl::producer<TextWithEntities> Text2() {
 		lt_gpl_link,
 		rpl::single(tr::link(
 			"GNU GPL",
-			"https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE")),
+			"https://github.com/krol44/FoxMesDesktop/blob/master/LICENSE")),
 		lt_github_link,
 		rpl::single(tr::link(
 			"GitHub",
+			"https://github.com/krol44/FoxMesDesktop")),
+		tr::marked);
+}
+
+rpl::producer<TextWithEntities> TextFork() {
+	return tr::lng_about_text_fork(
+		lt_telegram_link,
+		rpl::single(tr::link(
+			"Telegram",
 			"https://github.com/telegramdesktop/tdesktop")),
 		tr::marked);
 }
@@ -65,7 +75,7 @@ rpl::producer<TextWithEntities> Text3() {
 } // namespace
 
 void AboutBox(not_null<Ui::GenericBox*> box) {
-	box->setTitle(u"Telegram Desktop"_q);
+	box->setTitle(u"FoxMes Desktop"_q);
 
 	auto layout = box->verticalLayout();
 
@@ -126,6 +136,7 @@ void AboutBox(not_null<Ui::GenericBox*> box) {
 
 	addText(Text1());
 	addText(Text2());
+	addText(TextFork());
 	addText(Text3());
 
 	box->addButton(tr::lng_close(), [=] { box->closeBox(); });
@@ -134,20 +145,7 @@ void AboutBox(not_null<Ui::GenericBox*> box) {
 }
 
 QString telegramFaqLink() {
-	const auto result = u"https://telegram.org/faq"_q;
-	const auto langpacked = [&](const char *language) {
-		return result + '/' + language;
-	};
-	const auto current = Lang::Id();
-	for (const auto language : { "de", "es", "it", "ko" }) {
-		if (current.startsWith(QLatin1String(language))) {
-			return langpacked(language);
-		}
-	}
-	if (current.startsWith(u"pt-br"_q)) {
-		return langpacked("br");
-	}
-	return result;
+	return u"https://fxl.ru/@info/983-chto-takoe-lisiy-khvost"_q;
 }
 
 namespace {
@@ -331,4 +329,3 @@ void ArchiveHintBox(
 		box->addButton(std::move(button));
 	}
 }
-

@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "info/profile/info_profile_top_bar.h"
 
+#include "custom_backend/native_runtime.h"
 #include "api/api_peer_colors.h"
 #include "api/api_peer_photo.h"
 #include "api/api_user_privacy.h"
@@ -24,6 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "calls/calls_instance.h"
 #include "chat_helpers/stickers_lottie.h"
 #include "core/application.h"
+#include "core/file_utilities.h"
 #include "core/shortcuts.h"
 #include "data/components/recent_shared_media_gifts.h"
 #include "data/data_birthday.h"
@@ -1091,7 +1093,8 @@ void TopBar::setupActions(not_null<Window::SessionController*> controller) {
 	if (chechMax()) {
 		return;
 	}
-	if (!isSide
+	if (!CustomBackend::DisableWhile
+		&& !isSide
 		&& user
 		&& !user->sharedMediaInfo()
 		&& !user->isInaccessible()
@@ -1134,7 +1137,19 @@ void TopBar::setupActions(not_null<Window::SessionController*> controller) {
 	if (chechMax()) {
 		return;
 	}
-	if (topic ? topic->canEdit() : EditPeerInfoBox::Available(peer)) {
+	if (CustomBackend::DisableWhile && !topic && peer->isUser()) {
+		const auto manage = Ui::CreateChild<TopBarActionButton>(
+			this,
+			tr::lng_profile_action_short_profile(tr::now),
+			st::infoProfileTopBarActionProfile);
+		manage->setClickedCallback([=] {
+			File::OpenUrl(
+				peer->session().createInternalLinkFull(peer->username()));
+		});
+		manage->setAccessibleName(tr::lng_profile_action_short_profile(tr::now));
+		buttons.push_back(manage);
+		_actions->add(manage);
+	} else if (topic ? topic->canEdit() : EditPeerInfoBox::Available(peer)) {
 		const auto manage = Ui::CreateChild<TopBarActionButton>(
 			this,
 			tr::lng_profile_action_short_manage(tr::now),

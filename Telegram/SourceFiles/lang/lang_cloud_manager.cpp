@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "lang/lang_cloud_manager.h"
 
+#include "custom_backend/native_language_adapter.h"
+#include "custom_backend/native_runtime.h"
 #include "lang/lang_instance.h"
 #include "lang/lang_file_parser.h"
 #include "lang/lang_text_entity.h"
@@ -213,6 +215,13 @@ mtpRequestId CloudManager::packRequestId(Pack pack) const {
 }
 
 void CloudManager::requestLangPackDifference(Pack pack) {
+	if (CustomBackend::Enabled()) {
+		// The pack is compiled into this client; an MTProto request for its
+		// difference would never be answered, and an unanswered one keeps
+		// packRequestId() non-zero - which is exactly what made
+		// restartAfterSwitch() postpone the restart forever.
+		return;
+	}
 	if (!_api) {
 		return;
 	}
@@ -305,6 +314,14 @@ void CloudManager::applyLangPackDifference(
 }
 
 void CloudManager::requestLanguageList() {
+	if (CustomBackend::Enabled()) {
+		auto languages = CustomBackend::Language::List();
+		if (_languages != languages) {
+			_languages = std::move(languages);
+			_languageListChanged.fire({});
+		}
+		return;
+	}
 	if (!_api) {
 		_languagesRequestId = -1;
 		return;
@@ -433,6 +450,12 @@ void CloudManager::requestLanguageAndSwitch(
 }
 
 void CloudManager::sendSwitchingToLanguageRequest() {
+	if (CustomBackend::Enabled()) {
+		if (!CustomBackend::Language::Switch({ _switchingToLanguageId })) {
+			Ui::show(Ui::MakeInformBox(tr::lng_language_not_found()));
+		}
+		return;
+	}
 	if (!_api) {
 		_switchingToLanguageRequest = -1;
 		return;
@@ -473,7 +496,12 @@ void CloudManager::sendSwitchingToLanguageRequest() {
 void CloudManager::switchToLanguage(const Language &data) {
 	if (_langpack.id() == data.id && data.id != u"#custom"_q) {
 		return;
-	} else if (!_api) {
+	}
+	if (CustomBackend::Enabled() && data.id != u"#custom"_q) {
+		CustomBackend::Language::Switch(data);
+		return;
+	}
+	if (!_api) {
 		return;
 	}
 

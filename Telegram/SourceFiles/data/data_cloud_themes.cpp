@@ -7,6 +7,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_cloud_themes.h"
 
+#include "custom_backend/native_chat_themes_adapter.h"
+#include "custom_backend/native_runtime.h"
+
 #include "api/api_premium.h"
 #include "window/themes/window_theme.h"
 #include "window/themes/window_themes_chat.h"
@@ -512,6 +515,10 @@ void CloudThemes::refreshChatThemes() {
 	if (_chatThemesRequestId) {
 		return;
 	}
+	if (CustomBackend::Enabled()) {
+		CustomBackend::ChatThemes::Request(_session);
+		return;
+	}
 	_chatThemesRequestId = _session->api().request(MTPaccount_GetChatThemes(
 		MTP_long(_chatThemesHash)
 	)).done([=](const MTPaccount_Themes &result) {
@@ -589,6 +596,14 @@ rpl::producer<std::optional<CloudTheme>> CloudThemes::themeForTokenValue(
 }
 
 void CloudThemes::myGiftThemesLoadMore(bool reload) {
+	if (CustomBackend::Enabled()) {
+		// Unique gifts are a Telegram concept with no FoxMes counterpart, and
+		// an unanswered account.getUniqueGiftChatThemes would leave
+		// myGiftThemesReady() false forever - which is what the theme picker
+		// waits on before it draws anything at all.
+		CustomBackend::ChatThemes::Request(_session);
+		return;
+	}
 	if (reload && !_myGiftThemesTokens.empty()) {
 		_session->api().request(base::take(_myGiftThemesRequestId)).cancel();
 	}

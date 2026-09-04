@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_download_manager.h"
 
+#include "custom_backend/native_message_data_adapter.h"
+#include "custom_backend/native_runtime.h"
 #include "data/data_session.h"
 #include "data/data_photo.h"
 #include "data/data_document.h"
@@ -867,7 +869,12 @@ void DownloadManager::resolve(
 		check();
 	};
 	for (auto &[peer, perPeer] : prepared) {
-		if (const auto channelId = peerToChannel(peer)) {
+		if (CustomBackend::Enabled()) {
+			CustomBackend::ResolveDownloadedMessages(
+				session,
+				perPeer.ids,
+				requestFinished);
+		} else if (const auto channelId = peerToChannel(peer)) {
 			session->api().request(MTPchannels_GetMessages(
 				MTP_inputChannel(
 					MTP_long(channelId.bare),

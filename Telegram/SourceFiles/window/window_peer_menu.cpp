@@ -7,10 +7,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/window_peer_menu.h"
 
+#include "custom_backend/native_runtime.h"
+#include "custom_backend/native_wallpaper_adapter.h"
+#include "custom_backend/native_scheduled_adapter.h"
+#include "custom_backend/native_bridge.h"
+#include "custom_backend/native_message_actions_adapter.h"
 #include "base/call_delayed.h"
+#include "core/file_utilities.h"
 #include "menu/menu_check_item.h"
 #include "menu/menu_mark_as_read.h"
 #include "boxes/about_box.h"
+#include "boxes/background_box.h"
 #include "boxes/share_box.h"
 #include "boxes/star_gift_box.h"
 #include "chat_helpers/compose/compose_show.h"
@@ -442,6 +449,23 @@ void TogglePinnedThread(
 
 	owner->setChatPinned(entry, FilterId(), isPinned);
 	if (const auto history = entry->asHistory()) {
+		if (CustomBackend::Enabled()) {
+			if (const auto bridge = CustomBackend::BridgeFor(&owner->session())) {
+				bridge->setChatPinned(history, isPinned, [=](bool success) {
+					if (!success) {
+						return;
+					}
+					owner->notifyPinnedDialogsOrderUpdated();
+					if (onToggled) {
+						onToggled();
+					}
+				});
+				if (isPinned) {
+					controller->content()->dialogsToUp();
+				}
+				return;
+			}
+		}
 		const auto flags = isPinned
 			? MTPmessages_ToggleDialogPin::Flag::f_pinned
 			: MTPmessages_ToggleDialogPin::Flag(0);
@@ -930,6 +954,14 @@ void Filler::addBlockUser() {
 		return;
 	}
 	const auto window = _controller;
+	if (CustomBackend::Enabled()) {
+		_addAction(tr::lng_profile_block_user(tr::now), [=] {
+			const auto &session = user->session();
+			File::OpenUrl(session.createInternalLinkFull(
+				session.user()->username() + u"/settings/blocked"_q));
+		}, &st::menuIconBlock);
+		return;
+	}
 	const auto blockText = [](not_null<UserData*> user) {
 		return user->isBlocked()
 			? ((user->isBot() && !user->isSupport())
@@ -1058,6 +1090,9 @@ void Filler::addDirectMessages() {
 }
 
 void Filler::addExportChat() {
+	if (CustomBackend::DisableWhile) {
+		return;
+	}
 	if (!_peer->canExportChatHistory()) {
 		return;
 	}
@@ -1144,6 +1179,9 @@ void Filler::addShareContact() {
 }
 
 void Filler::addEditContact() {
+	if (CustomBackend::DisableWhile) {
+		return;
+	}
 	const auto user = _peer->asUser();
 	if (!user || !user->isContact() || user->isSelf()) {
 		return;
@@ -1199,6 +1237,9 @@ void Filler::addNewMembers() {
 }
 
 void Filler::addDeleteContact() {
+	if (CustomBackend::DisableWhile) {
+		return;
+	}
 	const auto user = _peer->asUser();
 	if (!user || !user->isContact() || user->isSelf()) {
 		return;
@@ -1397,7 +1438,7 @@ SendMenu::Details Filler::createSendMenuDetails() const {
 }
 
 void Filler::addCreatePoll() {
-	if (skipCreateActions()) {
+	if (skipCreateActions() || (CustomBackend::DisableWhile && _peer->isSelf())) {
 		return;
 	}
 	const auto can = _topic
@@ -1433,6 +1474,9 @@ void Filler::addCreatePoll() {
 }
 
 void Filler::addCreateTodoList() {
+	if (CustomBackend::DisableWhile) {
+		return;
+	}
 	if (skipCreateActions()) {
 		return;
 	}
@@ -1480,7 +1524,9 @@ void Filler::addThemeEdit() {
 	const auto controller = _controller;
 	_addAction(
 		tr::lng_chat_theme_wallpaper(tr::now),
-		[=] { controller->toggleChooseChatTheme(user); },
+		[=] {
+			controller->toggleChooseChatTheme(user);
+		},
 		&st::menuIconChangeColors);
 }
 
@@ -1569,6 +1615,9 @@ void ShowDisableSharingBox(
 }
 
 void Filler::addToggleNoForwards() {
+	if (CustomBackend::DisableWhile) {
+		return;
+	}
 	const auto user = _peer->asUser();
 	if (!user
 		|| user->isInaccessible()
@@ -1649,6 +1698,9 @@ void Filler::addToggleNoForwards() {
 }
 
 void Filler::addTTLSubmenu(bool addSeparator) {
+	if (CustomBackend::DisableWhile) {
+		return;
+	}
 	if (_thread->asTopic() || !_peer || _peer->isMonoforum()) {
 		return; // #TODO later forum
 	}
@@ -3993,14 +4045,18 @@ base::weak_qptr<Ui::BoxContent> ShowSendNowMessagesBox(
 					MTP_int(session->scheduledMessages().lookupId(item)));
 			}
 		}
-		session->api().request(MTPmessages_SendScheduledMessages(
-			history->peer->input(),
-			MTP_vector<MTPint>(ids)
-		)).done([=](const MTPUpdates &result) {
-			session->api().applyUpdates(result);
-		}).fail([=](const MTP::Error &error) {
-			session->api().sendMessageFail(error, history->peer);
-		}).send();
+		if (CustomBackend::Enabled()) {
+			CustomBackend::Scheduled::SendNow(history->peer, ids);
+		} else {
+			session->api().request(MTPmessages_SendScheduledMessages(
+				history->peer->input(),
+				MTP_vector<MTPint>(ids)
+			)).done([=](const MTPUpdates &result) {
+				session->api().applyUpdates(result);
+			}).fail([=](const MTP::Error &error) {
+				session->api().sendMessageFail(error, history->peer);
+			}).send();
+		}
 		if (callback) {
 			callback();
 		}
@@ -4064,6 +4120,13 @@ void ToggleMessagePinned(
 		not_null<Window::SessionNavigation*> navigation,
 		FullMsgId itemId,
 		bool pin) {
+	// TogglePin returns false when the bridge is unavailable, and its contract
+	// says the caller must then run the upstream path. Returning unconditionally
+	// swallowed that case and left pinning silently doing nothing.
+	if (CustomBackend::Enabled()
+		&& CustomBackend::Actions::TogglePin(navigation, itemId, pin)) {
+		return;
+	}
 	const auto item = navigation->session().data().message(itemId);
 	if (!item || !item->canPin()) {
 		return;
@@ -4112,6 +4175,13 @@ void UnpinMessages(
 		not_null<Window::SessionNavigation*> navigation,
 		MessageIdsList items,
 		Fn<void()> onConfirmed) {
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Actions::UnpinMessages(
+			navigation,
+			std::move(items),
+			std::move(onConfirmed));
+		return;
+	}
 	const auto count = int(items.size());
 	if (!count) {
 		return;
@@ -4202,6 +4272,10 @@ void HidePinnedBar(
 void UnpinAllMessages(
 		not_null<Window::SessionNavigation*> navigation,
 		not_null<Data::Thread*> thread) {
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Actions::UnpinAll(navigation, thread);
+		return;
+	}
 	const auto weak = base::make_weak(thread);
 	const auto callback = crl::guard(navigation, [=](Fn<void()> &&close) {
 		close();
@@ -4707,6 +4781,13 @@ void ForwardToSelf(
 					.toCount = 1,
 					.singleMessage = (count == 1),
 					.to1 = session->user(),
+					// Upstream drops this phrase for premium accounts because
+					// SelfForwardsTagger shows its own toast with a tag
+					// selector instead. That selector needs saved reaction
+					// tags, which the bridge never fills (reactions in Saved
+					// Messages are tags, and myTags/tags stay empty), so
+					// suppressing here would leave no toast at all.
+					.toSelfWithPremiumIsEmpty = !CustomBackend::Enabled(),
 				})).current();
 				if (!phrase.empty()) {
 					show->showToast({

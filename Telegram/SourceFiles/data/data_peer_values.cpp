@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_forum_topic.h"
 #include "data/data_session.h"
 #include "data/data_message_reactions.h"
+#include "custom_backend/native_runtime.h"
 #include "main/main_session.h"
 #include "main/main_app_config.h"
 #include "ui/image/image_prepare.h"
@@ -417,6 +418,9 @@ rpl::producer<bool> CanManageGroupCallValue(not_null<PeerData*> peer) {
 }
 
 rpl::producer<bool> PeerPremiumValue(not_null<PeerData*> peer) {
+	if (CustomBackend::Enabled()) {
+		return rpl::single(true);
+	}
 	const auto user = peer->asUser();
 	if (!user) {
 		return rpl::single(false);
@@ -610,6 +614,28 @@ rpl::producer<QImage> PeerUserpicImageValue(
 }
 
 const AllowedReactions &PeerAllowedReactions(not_null<PeerData*> peer) {
+	const auto fallbackForCustomBackend = [&]() -> const AllowedReactions* {
+		if (!CustomBackend::Enabled()) {
+			return nullptr;
+		}
+		static const auto result = AllowedReactions{
+			.type = AllowedReactionsType::All,
+		};
+		const auto empty = [](const AllowedReactions &allowed) {
+			return (allowed.type == AllowedReactionsType::Some)
+				&& allowed.some.empty()
+				&& !allowed.paidEnabled;
+		};
+		if (const auto chat = peer->asChat()) {
+			return empty(chat->allowedReactions()) ? &result : nullptr;
+		} else if (const auto channel = peer->asChannel()) {
+			return empty(channel->allowedReactions()) ? &result : nullptr;
+		}
+		return nullptr;
+	};
+	if (const auto fallback = fallbackForCustomBackend()) {
+		return *fallback;
+	}
 	if (const auto chat = peer->asChat()) {
 		return chat->allowedReactions();
 	} else if (const auto channel = peer->asChannel()) {

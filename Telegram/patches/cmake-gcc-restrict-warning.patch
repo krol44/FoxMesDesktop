@@ -1,0 +1,12 @@
+diff --git a/options_linux.cmake b/options_linux.cmake
+index c5f9a95..2adcd83 100644
+--- a/options_linux.cmake
++++ b/options_linux.cmake
+@@ -24,6 +24,7 @@ INTERFACE
+     -Wno-array-bounds
+     -Wno-free-nonheap-object
+     -Wno-stringop-overflow
++    -Wno-restrict # Qt + LTO
+ )
+ 
+ target_link_options_if_exists(common_options

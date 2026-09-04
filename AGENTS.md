@@ -18,7 +18,7 @@ wsl.exe -d {distro} --cd /home/{user}/Telegram/tdesktop -- <command>
 - If a command behaves strangely from the PowerShell UNC working directory, retry the same command through `wsl.exe -d {distro} --cd /home/{user}/Telegram/tdesktop -- ...` before concluding the repository or command is broken.
 - Recursive searches and repo inspection are usually faster and more faithful through WSL, for example `wsl.exe -d {distro} --cd /home/{user}/Telegram/tdesktop -- rg ...`.
 - Do not assume the WSL host has the build toolchain installed directly. In this setup, WSL may not have `cmake`, while Windows may have `cmake`, and the configured `out/` tree may still target the Linux Docker toolchain. Do not run native Windows `cmake --build out` against a Linux/Docker build tree.
-- For WSL/Linux builds, use the Docker build entry point from the repository root: `Telegram/build/docker/centos_env/build_debug.sh`. The Docker daemon must be reachable from WSL; checking `docker info` is fine, but do not start a build unless the user asked for one.
+- For WSL/Linux builds, use the FoxMes entry point from the repository root: `Telegram/build/foxmes/build-linux.sh`. It builds Release through the same Docker environment and applies the submodule patches first. Do not use `Telegram/build/docker/centos_env/build_debug.sh` or `build.sh`: they are upstream scripts that skip `Telegram/patches/apply.sh`, so they silently produce a binary without our lib_ui fix, and the first one builds Debug, which this project does not use. The Docker daemon must be reachable from WSL; checking `docker info` is fine, but do not start a build unless the user asked for one.
 - Existing build outputs may be Linux binaries, for example `out/Debug/Telegram` as an ELF executable, not `Telegram.exe`. Verify the build tree before assuming which platform produced it.
 - Be careful with text file line endings. In a WSL/Linux checkout, files should remain LF-only unless the file already uses another convention. CRLF finishing applies only to native, non-WSL Windows runs/checkouts. Do not let PowerShell or Windows tools silently rewrite WSL files to CRLF. If a file becomes mixed, normalize it back to the convention appropriate for the current checkout, without adding a UTF-8 BOM.
 - When using the local `perform-task` skill from this WSL checkout, keep external AI task artifacts and edited project text files LF-only. Treat its Windows text-normalization phase as not applicable to WSL, except to record that line endings were checked and kept LF/no-BOM. Run CRLF normalization only in a native, non-WSL Windows checkout.
@@ -41,26 +41,100 @@ Dependencies are located relative to the repository: `../Libraries`, `../win64/L
 
 ### Build Commands
 
-**From repository root, run:**
+**On macOS, build and run only through the dev client script, from the
+repository root:**
 
 ```bash
-cmake --build out --config Debug --target Telegram
+./dev-client.sh
 ```
 
-That's it. The `out/` directory is already configured. The executable will be at `out/Debug/Telegram.exe`.
+It reconfigures `out/`, builds the `Telegram` target, and launches the bundle
+against the local fxl-api. `./dev-client.sh prod` runs the same build against
+the production URL baked into the binary.
 
-**From WSL, run through the Linux Docker build environment:**
+The two profiles keep separate state. `FOXMES_URL` marks a dev run
+(`CustomBackend::DevProfileSuffix()` in `custom_backend/dev_profile.h`), and
+that run gets its own working directory - `~/Library/Application
+Support/FoxMes-dev/` instead of `FoxMes/` - plus its own `FoxMesDesktop-dev`
+QSettings store. Dev and prod logins therefore no longer evict each other, and
+both clients can run at the same time. A release build compiles the suffix out
+along with the endpoint override, so it always uses the production paths.
+
+**Always Release, never Debug.** `dev-client.sh` defaults to
+`BUILD_CONFIG=Release`, and that is the configuration this project uses - full
+stop. Do not build Debug "just to check that it compiles": the Xcode generator
+keeps a separate object directory per configuration, so a Debug build shares
+nothing with the Release tree and only makes the user's next `./dev-client.sh`
+recompile everything from cold. Do not pass `--config Debug` to `cmake --build`,
+and do not suggest `BUILD_CONFIG=Debug` as a shortcut.
+
+Prefer running `./dev-client.sh` over invoking `cmake --build` by hand, so the
+configure step, the target, and the configuration always agree with what the
+user runs.
+
+**From WSL or Linux, run the FoxMes Docker entry point:**
 
 ```bash
-Telegram/build/docker/centos_env/build_debug.sh
+Telegram/build/foxmes/build-linux.sh
 ```
 
-**Important:** When running cmake from a shell that doesn't support `cd`, use quoted absolute paths:
+Not the upstream `Telegram/build/docker/centos_env/*.sh` scripts: they never
+call `Telegram/patches/apply.sh`, so the binary comes out without the lib_ui
+fix and nothing warns about it. `Telegram/build/build.sh` is the upstream
+release pipeline and exits immediately here - it requires Telegram's private
+`DesktopPrivate` repository, which this checkout does not have.
+
+**Important:** When running cmake from a shell that doesn't support `cd`, use
+quoted absolute paths:
 ```bash
-cmake --build "l:\Telegram\tx64\out" --config Debug --target Telegram
+cmake --build "l:\Telegram\tx64\out" --config Release --target Telegram
 ```
 
-**Never build Release** - it's extremely heavy and not needed for testing changes.
+### Patches inside submodules
+
+`Telegram/patches/` holds diffs against submodule working trees, applied by
+`Telegram/patches/apply.sh` at the start of every build - `dev-client.sh` and
+all three `Telegram/build/foxmes/build-*` entry points call it, and
+`build-windows.ps1` inlines the same git commands because that runner has no
+bash. The script is idempotent and fails the build when a patch no longer
+applies; it never skips silently.
+
+Why patches and not a fork: all 36 submodules point at repositories we do not
+own, `git submodule update` discards anything modified in their working trees,
+and upstream tdesktop moves the `lib_ui` pointer about every other day (227
+commits touched it in the last year). Vendoring the library into this
+repository, or maintaining a fork of it, would both turn that churn into
+manual conflict resolution on every upstream merge.
+
+To change a patched file, edit it in the submodule, then regenerate:
+
+```bash
+(cd Telegram/lib_ui && git diff -- ui/animated_icon.cpp) \
+  > Telegram/patches/lib_ui-animated-icon-webm.patch
+```
+
+Current patches:
+
+- `lib_ui-animated-icon-webm.patch` - `Ui::AnimatedIcon` decided the animation
+  had ended from `generator->count()` alone, so any generator that reports 0
+  (the documented "unknown", which is what `FFmpeg::FrameGenerator` returns for
+  WebM, whose frame count is not in the container) stopped on the very first
+  tick: `_animationCurrentIndex >= 0 - 1` is true immediately. It now falls
+  back to `Frame::last`, the flag that exists for exactly this case and that
+  nothing read. Lottie behaviour is unchanged. Upstream never hits this because
+  Telegram's reaction appear/select assets are `.tgs`, and the WebM that does
+  reach a strip (a custom emoji reaction) is only a placeholder until
+  `StripEmoji` swaps in the real `Ui::Text::CustomEmoji`. Bridge reactions make
+  WebM the permanent strip renderer, which turns the latent bug into a
+  permanently frozen icon.
+
+**Builds are expensive here.** Touching a widely included header
+(`data/stickers/data_custom_emoji.h` has 127+ direct includers) rebuilds most
+of the project. Prefer changes confined to `.cpp` files, and warn the user
+before a change that must touch a hot header. Release builds are arm64-only
+(`CMAKE_OSX_ARCHITECTURES=arm64`); a local universal build compiles every
+translation unit twice and is worth avoiding unless you are testing the fat
+binary itself.
 
 ## Platform-Specific Requirements
 
@@ -170,8 +244,9 @@ user to close that checkout's Telegram/debugger before rebuilding.
 
 ## Best Practices
 
-1. **Always use Debug builds** - Release builds are extremely heavy
-2. **Don't build Release configuration** - it's too heavy for testing
+1. **Always build Release** - it is the only configuration this project uses
+2. **Always build and run through `./dev-client.sh`** - never hand-roll a
+   `cmake --build` with a different configuration than the one it uses
 
 ## Debug-Only Code
 

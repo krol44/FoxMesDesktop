@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/delete_messages_box.h"
 
+#include "custom_backend/native_runtime.h"
 #include "apiwrap.h"
 #include "base/unixtime.h"
 #include "core/application.h"
@@ -237,6 +238,27 @@ void DeleteMessagesBox::prepare() {
 				appendDetails({
 					tr::lng_delete_for_me_hint(tr::now, lt_count, count)
 				});
+			}
+		}
+	}
+	if (CustomBackend::Enabled()) {
+		const auto peer = _wipeHistoryPeer
+			? _wipeHistoryPeer
+			: checkFromSinglePeer();
+		if (peer && (peer->isUser() || peer->isSelf())) {
+			if (!_revoke) {
+				_revoke.create(
+					this,
+					tr::lng_delete_for_everyone_check(tr::now),
+					true,
+					st::defaultBoxCheckbox);
+			}
+			_revoke->setChecked(
+				true,
+				Ui::Checkbox::NotifyAboutChange::DontNotify);
+			_revoke->setDisabled(true);
+			if (_revokeRemember) {
+				_revokeRemember->hide(anim::type::instant);
 			}
 		}
 	}

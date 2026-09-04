@@ -23,6 +23,33 @@ namespace Ui::Text {
 class CustomEmoji;
 } // namespace Ui::Text
 
+class HistoryItem;
+
+namespace Main {
+class Session;
+} // namespace Main
+
+namespace Data {
+class Reactions;
+} // namespace Data
+
+namespace CustomBackend::Reactions {
+// FoxMes bridge seam: fills the default reaction lists from the bridge
+// catalog and sends chosen reactions. Declared before Data::Reactions so the
+// class can grant friendship; no FoxMes state lives in this header.
+void ApplyDefault(
+	not_null<Main::Session*> session,
+	not_null<Data::Reactions*> reactions);
+void SendChosen(
+	not_null<Main::Session*> session,
+	not_null<::HistoryItem*> item);
+// Drops every process-lifetime cache keyed by raw DocumentData* (the
+// documents themselves die with the owning Data::Session): must run once
+// per session teardown, or the next login's BuildAvailableReactions() hands
+// out dangling pointers left over from the previous one.
+void ClearSessionCaches();
+} // namespace CustomBackend::Reactions
+
 namespace Data {
 
 class SavedSublist;
@@ -372,6 +399,17 @@ private:
 
 	rpl::lifetime _lifetime;
 
+	// Minimal bridge seam: the FoxMes custom_backend fills the default lists
+	// through this function; no state or business logic beyond it.
+	// Fully qualified, and Data::Reactions especially: the declarator names a
+	// function inside namespace CustomBackend::Reactions, and MSVC looks the
+	// parameter types up there first, where "Reactions" resolves to that
+	// namespace rather than to this class - "illegal use of namespace
+	// identifier". GCC and clang pick the injected-class-name instead, which is
+	// why this compiled everywhere except Windows.
+	friend void CustomBackend::Reactions::ApplyDefault(
+		not_null<Main::Session*> session,
+		not_null<Data::Reactions*> reactions);
 };
 
 struct RecentReaction {

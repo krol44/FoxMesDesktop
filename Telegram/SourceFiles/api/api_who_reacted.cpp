@@ -6,6 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "api/api_who_reacted.h"
+#include "custom_backend/native_runtime.h"
+#include "custom_backend/native_who_read_adapter.h"
 
 #include "api/api_global_privacy.h"
 #include "history/history_item.h"
@@ -285,6 +287,8 @@ struct State {
 		const auto context = PreparedContextAt(weak.get(), session);
 		auto &entry = context->cacheRead(item);
 		if (entry.requestId) {
+		} else if (CustomBackend::Enabled()) {
+			entry.data = Peers{ CustomBackend::WhoRead::Readers(item) };
 		} else if (const auto user = item->history()->peer->asUser()) {
 			entry.requestId = session->api().request(
 				MTPmessages_GetOutboxReadDate(
@@ -357,6 +361,25 @@ struct State {
 	return result;
 }
 
+// Shapes the bridge answer into the private type this file resolves into;
+// every decision about who reacted stays in custom_backend.
+[[nodiscard]] PeersWithReactions FromBridgeReactors(
+		not_null<HistoryItem*> item,
+		const ReactionId &reaction) {
+	auto reactors = CustomBackend::WhoRead::Reactors(item, reaction);
+	auto result = PeersWithReactions{
+		.fullReactionsCount = reactors.fullCount,
+	};
+	result.list.reserve(reactors.list.size());
+	for (auto &one : reactors.list) {
+		result.list.push_back(PeerWithReaction{
+			.peerWithDate = { .peer = one.peer, .dateReacted = true },
+			.reaction = std::move(one.reaction),
+		});
+	}
+	return result;
+}
+
 [[nodiscard]] rpl::producer<PeersWithReactions> WhoReactedIds(
 		not_null<HistoryItem*> item,
 		const ReactionId &reaction,
@@ -369,7 +392,9 @@ struct State {
 		}
 		const auto context = PreparedContextAt(weak.get(), session);
 		auto &entry = context->cacheReacted(item, reaction);
-		if (!entry.requestId) {
+		if (CustomBackend::Enabled()) {
+			entry.data = FromBridgeReactors(item, reaction);
+		} else if (!entry.requestId) {
 			using Flag = MTPmessages_GetMessageReactionsList::Flag;
 			entry.requestId = session->api().request(
 				MTPmessages_GetMessageReactionsList(

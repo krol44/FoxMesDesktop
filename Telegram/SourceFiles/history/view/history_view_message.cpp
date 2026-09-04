@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_message.h"
 
+#include "custom_backend/native_runtime.h"
 #include "api/api_suggest_post.h"
 #include "api/api_transcribes.h"
 #include "base/options.h"
@@ -5472,7 +5473,7 @@ void Message::validateFromNameText(PeerData *from) const {
 			from->name(),
 			Ui::NameTextOptions());
 	}
-	if (from->isPremium()
+	if ((!CustomBackend::DisableWhile && from->isPremium())
 		|| (from->isChannel()
 			&& from->emojiStatusId()
 			&& from != history()->peer)) {

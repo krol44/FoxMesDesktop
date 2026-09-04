@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/openssl_help.h"
 #include "base/unixtime.h"
 #include "base/platform/base_platform_info.h"
+#include "custom_backend/native_runtime.h"
 
 #include <ksandbox.h>
 #include <zlib.h>
@@ -1013,6 +1014,11 @@ void SessionPrivate::restartNow() {
 }
 
 void SessionPrivate::connectToServer(bool afterConfig) {
+	if (CustomBackend::Enabled()) {
+		// FoxMes bridge: all data goes through fxl-api, never connect to
+		// Telegram DCs.
+		return;
+	}
 	if (afterConfig && (!_testConnections.empty() || _connection)) {
 		return;
 	}

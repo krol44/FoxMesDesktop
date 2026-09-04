@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_self_destruct.h"
 #include "apiwrap.h"
 #include "boxes/peer_list_controllers.h"
+#include "custom_backend/native_runtime.h"
 #include "data/data_changes.h"
 #include "data/data_chat.h"
 #include "data/data_peer.h"
@@ -553,6 +554,12 @@ const auto kMeta = BuildHelper({
 	.title = &tr::lng_settings_ttl_title,
 	.icon = &st::menuIconTTL,
 }, [](SectionBuilder &builder) {
+	// Search must not offer rows of a section that cannot be reached: the
+	// auto-delete period is fixed by the backend while the bridge is on.
+	if (CustomBackend::DisableWhile) {
+		return;
+	}
+
 	builder.add(nullptr, [] {
 		return SearchEntry{
 			.id = u"auto-delete/period"_q,

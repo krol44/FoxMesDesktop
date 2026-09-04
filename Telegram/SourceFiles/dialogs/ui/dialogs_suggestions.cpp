@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/peer_list_box.h"
 #include "core/application.h"
 #include "core/ui_integration.h"
+#include "custom_backend/native_runtime.h"
 #include "data/components/recent_peers.h"
 #include "data/components/top_peers.h"
 #include "data/stickers/data_custom_emoji.h"
@@ -2322,6 +2323,10 @@ std::vector<Suggestions::Key> Suggestions::TabKeysFor(
 	};
 	if (Core::App().downloadManager().empty()) {
 		result.erase(ranges::find(result, Key{ Tab::Downloads }));
+	}
+	if (CustomBackend::Enabled()) {
+		result.erase(ranges::find(result, Key{ Tab::Apps }));
+		result.erase(ranges::find(result, Key{ Tab::Posts }));
 	}
 	return result;
 }

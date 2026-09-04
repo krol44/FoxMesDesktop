@@ -6,6 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "core/local_url_handlers.h"
+#include "custom_backend/native_deep_link.h"
+#include "custom_backend/native_runtime.h"
 
 #include "core/deep_links/deep_links_router.h"
 #include "api/api_confirm_phone.h"
@@ -2172,6 +2174,9 @@ bool InternalPassportOrOAuthLink(const QString &url) {
 }
 
 bool StartUrlRequiresActivate(const QString &url) {
+	if (CustomBackend::Enabled()) {
+		return CustomBackend::DeepLinks::StartUrlRequiresActivate(url);
+	}
 	return Core::App().passcodeLocked() || !InternalPassportLink(url);
 }
 

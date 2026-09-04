@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "calls/calls_instance.h"
 #include "core/application.h"
 #include "core/click_handler_types.h"
+#include "custom_backend/native_runtime.h"
 #include "data/data_changes.h"
 #include "data/data_document_media.h"
 #include "data/data_folder.h"
@@ -384,8 +385,8 @@ MainMenu::MainMenu(
 	parentResized();
 
 	_telegram->setMarkedText(tr::link(
-		u"Telegram Desktop"_q,
-		u"https://desktop.telegram.org"_q));
+		u"FoxMes Desktop"_q,
+		u"https://fxl.ru"_q));
 	_telegram->setLinksTrusted();
 	// The canary version is too long for the "Version {version}" form.
 	_version->setMarkedText(
@@ -403,7 +404,8 @@ MainMenu::MainMenu(
 		.append(tr::link(tr::lng_menu_about(tr::now), 2))); // Link 2.
 	_version->setLink(
 		1,
-		std::make_shared<UrlClickHandler>(Core::App().changelogLink()));
+		std::make_shared<UrlClickHandler>(
+			u"https://github.com/krol44/FoxMesDesktop"_q));
 	_version->setLink(
 		2,
 		std::make_shared<LambdaClickHandler>([=] {
@@ -417,7 +419,9 @@ MainMenu::MainMenu(
 		moveBadge();
 	}, lifetime());
 	_badge->setPremiumClickCallback([=] {
-		chooseEmojiStatus();
+		if (!CustomBackend::DisableWhile) {
+			chooseEmojiStatus();
+		}
 	});
 
 	_controller->session().downloaderTaskFinished(
@@ -628,6 +632,10 @@ void MainMenu::setupAccountsToggle() {
 }
 
 void MainMenu::setupSetEmojiStatus() {
+	if (CustomBackend::DisableWhile) {
+		_setEmojiStatus->hide();
+		return;
+	}
 	_setEmojiStatus->overrideLinkClickHandler([=] {
 		chooseEmojiStatus();
 	});
@@ -670,8 +678,12 @@ void MainMenu::setupMenu() {
 				st::mainMenuButton,
 				{ &st::menuIconProfile })
 		)->setClickedCallback([=] {
-			controller->showSection(
-				Info::Stories::Make(controller->session().user()));
+			if (CustomBackend::DisableWhile) {
+				controller->showPeerInfo(controller->session().user());
+			} else {
+				controller->showSection(
+					Info::Stories::Make(controller->session().user()));
+			}
 		});
 
 		SetupMenuBots(_menu, controller);
@@ -680,36 +692,38 @@ void MainMenu::setupMenu() {
 			object_ptr<Ui::PlainShadow>(_menu),
 			{ 0, st::mainMenuSkip, 0, st::mainMenuSkip });
 
-		AddMyChannelsBox(addAction(
-			tr::lng_create_group_title(),
-			{ &st::menuIconGroups }
-		), controller, true)->addClickHandler([=](Qt::MouseButton which) {
-			if (which == Qt::LeftButton) {
-				controller->showNewGroup();
-			}
-		});
+		if (!CustomBackend::DisableWhile) {
+			AddMyChannelsBox(addAction(
+				tr::lng_create_group_title(),
+				{ &st::menuIconGroups }
+			), controller, true)->addClickHandler([=](Qt::MouseButton which) {
+				if (which == Qt::LeftButton) {
+					controller->showNewGroup();
+				}
+			});
 
-		AddMyChannelsBox(addAction(
-			tr::lng_create_channel_title(),
-			{ &st::menuIconChannel }
-		), controller, false)->addClickHandler([=](Qt::MouseButton which) {
-			if (which == Qt::LeftButton) {
-				controller->showNewChannel();
-			}
-		});
+			AddMyChannelsBox(addAction(
+				tr::lng_create_channel_title(),
+				{ &st::menuIconChannel }
+			), controller, false)->addClickHandler([=](Qt::MouseButton which) {
+				if (which == Qt::LeftButton) {
+					controller->showNewChannel();
+				}
+			});
 
-		addAction(
-			tr::lng_menu_contacts(),
-			{ &st::menuIconUserShow }
-		)->setClickedCallback([=] {
-			controller->show(PrepareContactsBox(controller));
-		});
-		addAction(
-			tr::lng_menu_calls(),
-			{ &st::menuIconPhone }
-		)->setClickedCallback([=] {
-			::Calls::ShowCallsBox(controller);
-		});
+			addAction(
+				tr::lng_menu_contacts(),
+				{ &st::menuIconUserShow }
+			)->setClickedCallback([=] {
+				controller->show(PrepareContactsBox(controller));
+			});
+			addAction(
+				tr::lng_menu_calls(),
+				{ &st::menuIconPhone }
+			)->setClickedCallback([=] {
+				::Calls::ShowCallsBox(controller);
+			});
+		}
 		addAction(
 			tr::lng_saved_messages(),
 			{ &st::menuIconSavedMessages }

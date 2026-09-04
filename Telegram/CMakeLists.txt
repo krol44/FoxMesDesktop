@@ -62,6 +62,15 @@ endif()
 
 set_target_properties(Telegram PROPERTIES AUTOMOC ON)
 
+# WebSockets is required by the FoxMes live-updates bridge.
+find_package(Qt${QT_VERSION_MAJOR} COMPONENTS WebSockets REQUIRED)
+
+set_target_properties(Telegram PROPERTIES
+    OUTPUT_NAME "${FOXMES_APP_NAME}"
+    MACOSX_BUNDLE_BUNDLE_NAME "${FOXMES_APP_NAME}"
+    MACOSX_BUNDLE_GUI_IDENTIFIER "${FOXMES_APP_ID}"
+)
+
 target_link_libraries(Telegram
 PRIVATE
     tdesktop::lib_fido2
@@ -101,13 +110,79 @@ PRIVATE
     desktop-app::external_xxhash
 )
 
+target_link_libraries(Telegram PRIVATE Qt${QT_VERSION_MAJOR}::WebSockets)
+target_compile_definitions(Telegram PRIVATE
+    FOXMES_ALLOW_ENDPOINT_OVERRIDE=$<BOOL:${FOXMES_ALLOW_ENDPOINT_OVERRIDE}>
+    FOXMES_HAS_QT_WEBSOCKETS=1
+)
+
 if (NOT DESKTOP_APP_DISABLE_SWIFT6)
     telegram_add_apple_swift_runtime(Telegram)
+endif()
+
+if (APPLE)
+    target_link_options(Telegram PRIVATE "$<$<CONFIG:Debug>:-Wl,-S>")
+    nice_target_sources(Telegram ${src_loc} PRIVATE custom_backend/token_store.mm)
+    target_link_libraries(Telegram PRIVATE "-framework Security")
+else()
+    nice_target_sources(Telegram ${src_loc} PRIVATE custom_backend/token_store_stub.cpp)
 endif()
 
 target_precompile_headers(Telegram PRIVATE $<$<COMPILE_LANGUAGE:CXX,OBJCXX>:${src_loc}/stdafx.h>)
 nice_target_sources(Telegram ${src_loc}
 PRIVATE
+    custom_backend/api_client.cpp
+    custom_backend/api_client.h
+    custom_backend/dev_profile.h
+    custom_backend/github_update.cpp
+    custom_backend/github_update.h
+    custom_backend/live_updates_connection.cpp
+    custom_backend/live_updates_connection.h
+    custom_backend/native_deep_link.cpp
+    custom_backend/native_deep_link.h
+     custom_backend/native_runtime.cpp
+     custom_backend/native_runtime.h
+    custom_backend/token_store.h
+    custom_backend/native_bridge.cpp
+    custom_backend/native_bridge.h
+    custom_backend/native_history_loader.cpp
+    custom_backend/native_history_loader.h
+    custom_backend/native_delete_adapter.cpp
+    custom_backend/native_delete_adapter.h
+    custom_backend/native_chat_state_adapter.cpp
+    custom_backend/native_chat_state_adapter.h
+    custom_backend/native_send_files_adapter.cpp
+    custom_backend/native_send_files_adapter.h
+    custom_backend/native_reactions_adapter.cpp
+    custom_backend/native_reactions_adapter.h
+    custom_backend/native_scheduled_adapter.cpp
+    custom_backend/native_scheduled_adapter.h
+    custom_backend/native_who_read_adapter.cpp
+    custom_backend/native_who_read_adapter.h
+    custom_backend/native_search_adapter.cpp
+    custom_backend/native_search_adapter.h
+    custom_backend/native_shared_media_adapter.cpp
+    custom_backend/native_shared_media_adapter.h
+    custom_backend/native_peer_adapter.cpp
+    custom_backend/native_peer_adapter.h
+    custom_backend/native_message_actions_adapter.cpp
+    custom_backend/native_message_actions_adapter.h
+    custom_backend/native_message_data_adapter.cpp
+    custom_backend/native_message_data_adapter.h
+    custom_backend/native_web_page_adapter.cpp
+    custom_backend/native_web_page_adapter.h
+    custom_backend/native_wallpaper_adapter.cpp
+    custom_backend/native_wallpaper_adapter.h
+    custom_backend/native_gifs_adapter.cpp
+    custom_backend/native_gifs_adapter.h
+    custom_backend/native_stickers_adapter.cpp
+    custom_backend/native_stickers_adapter.h
+    custom_backend/native_language_adapter.cpp
+    custom_backend/native_language_adapter.h
+    custom_backend/native_chat_themes_adapter.cpp
+    custom_backend/native_chat_themes_adapter.h
+    intro/intro_custom_login.cpp
+    intro/intro_custom_login.h
     ${style_files}
 
     api/api_attached_stickers.cpp
@@ -2262,7 +2337,6 @@ elseif (APPLE)
         target_link_libraries(Telegram PRIVATE desktop-app::external_iconv)
     endif()
 
-    target_link_frameworks(Telegram PRIVATE CoreBluetooth)
     target_link_frameworks_weak(Telegram PRIVATE UserNotifications)
 
     set(icons_path ${CMAKE_CURRENT_SOURCE_DIR}/Telegram/Images.xcassets)
@@ -2353,9 +2427,9 @@ else()
 endif()
 
 if (build_macstore)
-    set(bundle_identifier "org.telegram.desktop")
+    set(bundle_identifier "${FOXMES_APP_ID}")
     set(bundle_entitlements "Telegram Lite.entitlements")
-    set(output_name "Telegram Lite")
+    set(output_name "FoxMes")
     target_link_options(Telegram
     PRIVATE
         -F${libs_loc}/breakpad/src/client/mac/build/Release
@@ -2371,12 +2445,12 @@ if (build_macstore)
     )
 else()
     if (CMAKE_GENERATOR STREQUAL Xcode)
-        set(bundle_identifier "com.tdesktop.Telegram$<$<CONFIG:Debug>:Debug>")
+        set(bundle_identifier "${FOXMES_APP_ID}$<$<CONFIG:Debug>:Debug>")
     else()
-        set(bundle_identifier "com.tdesktop.Telegram")
+        set(bundle_identifier "${FOXMES_APP_ID}")
     endif()
     set(bundle_entitlements "Telegram.entitlements")
-    set(output_name "Telegram")
+    set(output_name "FoxMes")
 endif()
 
 if (CMAKE_GENERATOR STREQUAL Xcode)
@@ -2600,30 +2674,30 @@ elseif (build_winstore)
     )
 endif()
 
-if (LINUX AND DESKTOP_APP_USE_PACKAGED)
+if (LINUX)
     include(GNUInstallDirs)
-    configure_file("../lib/xdg/org.telegram.desktop.service" "${CMAKE_CURRENT_BINARY_DIR}/org.telegram.desktop.service" @ONLY)
-    configure_file("../lib/xdg/org.telegram.desktop.metainfo.xml" "${CMAKE_CURRENT_BINARY_DIR}/org.telegram.desktop.metainfo.xml" @ONLY)
-    generate_appstream_changelog(Telegram "${CMAKE_SOURCE_DIR}/changelog.txt" "${CMAKE_CURRENT_BINARY_DIR}/org.telegram.desktop.metainfo.xml")
+    configure_file("../lib/xdg/org.telegram.desktop.service" "${CMAKE_CURRENT_BINARY_DIR}/${FOXMES_APP_ID}.service" @ONLY)
+    configure_file("../lib/xdg/org.telegram.desktop.metainfo.xml" "${CMAKE_CURRENT_BINARY_DIR}/${FOXMES_APP_ID}.metainfo.xml" @ONLY)
+    generate_appstream_changelog(Telegram "${CMAKE_SOURCE_DIR}/changelog.txt" "${CMAKE_CURRENT_BINARY_DIR}/${FOXMES_APP_ID}.metainfo.xml")
     install(TARGETS Telegram RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" BUNDLE DESTINATION "${CMAKE_INSTALL_BINDIR}")
-    install(FILES "Resources/art/icon16.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/16x16/apps" RENAME "org.telegram.desktop.png")
-    install(FILES "Resources/art/icon16@2x.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/16x16@2/apps" RENAME "org.telegram.desktop.png")
-    install(FILES "Resources/art/icon32.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/32x32/apps" RENAME "org.telegram.desktop.png")
-    install(FILES "Resources/art/icon32@2x.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/32x32@2/apps" RENAME "org.telegram.desktop.png")
-    install(FILES "Resources/art/icon48.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/48x48/apps" RENAME "org.telegram.desktop.png")
-    install(FILES "Resources/art/icon48@2x.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/48x48@2/apps" RENAME "org.telegram.desktop.png")
-    install(FILES "Resources/art/icon64.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/64x64/apps" RENAME "org.telegram.desktop.png")
-    install(FILES "Resources/art/icon64@2x.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/64x64@2/apps" RENAME "org.telegram.desktop.png")
-    install(FILES "Resources/art/icon128.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/128x128/apps" RENAME "org.telegram.desktop.png")
-    install(FILES "Resources/art/icon128@2x.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/128x128@2/apps" RENAME "org.telegram.desktop.png")
-    install(FILES "Resources/art/icon256.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/256x256/apps" RENAME "org.telegram.desktop.png")
-    install(FILES "Resources/art/icon256@2x.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/256x256@2/apps" RENAME "org.telegram.desktop.png")
-    install(FILES "Resources/art/icon512.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/512x512/apps" RENAME "org.telegram.desktop.png")
-    install(FILES "Resources/art/icon512@2x.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/512x512@2/apps" RENAME "org.telegram.desktop.png")
-    install(FILES "Resources/icons/tray_monochrome.svg" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/symbolic/apps" RENAME "org.telegram.desktop-symbolic.svg")
-    install(FILES "Resources/icons/tray_monochrome_attention.svg" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/symbolic/apps" RENAME "org.telegram.desktop-attention-symbolic.svg")
-    install(FILES "Resources/icons/tray_monochrome_mute.svg" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/symbolic/apps" RENAME "org.telegram.desktop-mute-symbolic.svg")
-    install(FILES "../lib/xdg/org.telegram.desktop.desktop" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/applications")
-    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/org.telegram.desktop.service" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/dbus-1/services")
-    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/org.telegram.desktop.metainfo.xml" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/metainfo")
+    install(FILES "Resources/art/icon16.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/16x16/apps" RENAME "${FOXMES_APP_ID}.png")
+    install(FILES "Resources/art/icon16@2x.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/16x16@2/apps" RENAME "${FOXMES_APP_ID}.png")
+    install(FILES "Resources/art/icon32.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/32x32/apps" RENAME "${FOXMES_APP_ID}.png")
+    install(FILES "Resources/art/icon32@2x.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/32x32@2/apps" RENAME "${FOXMES_APP_ID}.png")
+    install(FILES "Resources/art/icon48.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/48x48/apps" RENAME "${FOXMES_APP_ID}.png")
+    install(FILES "Resources/art/icon48@2x.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/48x48@2/apps" RENAME "${FOXMES_APP_ID}.png")
+    install(FILES "Resources/art/icon64.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/64x64/apps" RENAME "${FOXMES_APP_ID}.png")
+    install(FILES "Resources/art/icon64@2x.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/64x64@2/apps" RENAME "${FOXMES_APP_ID}.png")
+    install(FILES "Resources/art/icon128.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/128x128/apps" RENAME "${FOXMES_APP_ID}.png")
+    install(FILES "Resources/art/icon128@2x.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/128x128@2/apps" RENAME "${FOXMES_APP_ID}.png")
+    install(FILES "Resources/art/icon256.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/256x256/apps" RENAME "${FOXMES_APP_ID}.png")
+    install(FILES "Resources/art/icon256@2x.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/256x256@2/apps" RENAME "${FOXMES_APP_ID}.png")
+    install(FILES "Resources/art/icon512.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/512x512/apps" RENAME "${FOXMES_APP_ID}.png")
+    install(FILES "Resources/art/icon512@2x.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/512x512@2/apps" RENAME "${FOXMES_APP_ID}.png")
+    install(FILES "Resources/icons/tray_monochrome.svg" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/symbolic/apps" RENAME "${FOXMES_APP_ID}-symbolic.svg")
+    install(FILES "Resources/icons/tray_monochrome_attention.svg" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/symbolic/apps" RENAME "${FOXMES_APP_ID}-attention-symbolic.svg")
+    install(FILES "Resources/icons/tray_monochrome_mute.svg" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/symbolic/apps" RENAME "${FOXMES_APP_ID}-mute-symbolic.svg")
+    install(FILES "../lib/xdg/org.telegram.desktop.desktop" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/applications" RENAME "${FOXMES_APP_ID}.desktop")
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${FOXMES_APP_ID}.service" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/dbus-1/services")
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${FOXMES_APP_ID}.metainfo.xml" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/metainfo")
 endif()

@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/update_checker.h"
 #include "core/sandbox.h"
 #include "core/version.h"
+#include "custom_backend/dev_profile.h"
 #include "base/concurrent_timer.h"
 #include "base/options.h"
 
@@ -214,7 +215,7 @@ void ComputeInstallationTag() {
 
 bool MoveLegacyAlphaFolder(const QString &folder, const QString &file) {
 	const auto was = cExeDir() + folder;
-	const auto now = cExeDir() + u"TelegramForcePortable"_q;
+	const auto now = cExeDir() + u"FoxMesForcePortable"_q;
 	if (QDir(was).exists() && !QDir(now).exists()) {
 		const auto oldFile = was + "/tdata/" + file;
 		const auto newFile = was + "/tdata/alpha";
@@ -235,8 +236,8 @@ bool MoveLegacyAlphaFolder(const QString &folder, const QString &file) {
 }
 
 bool MoveLegacyAlphaFolder() {
-	if (!MoveLegacyAlphaFolder(u"TelegramAlpha_data"_q, u"alpha"_q)
-		|| !MoveLegacyAlphaFolder(u"TelegramBeta_data"_q, u"beta"_q)) {
+	if (!MoveLegacyAlphaFolder(u"FoxMesAlpha_data"_q, u"alpha"_q)
+		|| !MoveLegacyAlphaFolder(u"FoxMesBeta_data"_q, u"beta"_q)) {
 		return false;
 	}
 	return true;
@@ -247,7 +248,7 @@ bool CheckPortableVersionFolder() {
 		return false;
 	}
 
-	const auto portable = cExeDir() + u"TelegramForcePortable"_q;
+	const auto portable = cExeDir() + u"FoxMesForcePortable"_q;
 	QFile key(portable + u"/tdata/alpha"_q);
 	if (cAlphaVersion()) {
 		Assert(*AlphaPrivateKey != 0);
@@ -336,7 +337,10 @@ void Launcher::init() {
 	prepareSettings();
 	initQtMessageLogging();
 
-	QApplication::setApplicationName(u"TelegramDesktop"_q);
+	QApplication::setApplicationName(u"FoxMes"_q);
+	QApplication::setApplicationDisplayName(u"FoxMes Desktop"_q);
+	QApplication::setOrganizationDomain(u"fxl.ru"_q);
+	QApplication::setOrganizationName(u"Foxtail"_q);
 
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
 	// fallback session management is useless for tdesktop since it doesn't have
@@ -439,6 +443,17 @@ int Launcher::exec() {
 }
 
 bool Launcher::validateCustomWorkingDir() {
+	if (!customWorkingDir()) {
+		// A dev run keeps its own tdata next to the production one, so that
+		// running dev-client.sh and dev-client.sh prod in turn stops evicting
+		// each other's login. An explicit -workdir still wins.
+		const auto suffix = CustomBackend::DevProfileSuffix();
+		if (!suffix.isEmpty()) {
+			_customWorkingDir = QDir(cWorkingDir()).absolutePath()
+				+ suffix
+				+ '/';
+		}
+	}
 	if (customWorkingDir()) {
 		if (_customWorkingDir == cWorkingDir()) {
 			_customWorkingDir = QString();

@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/pin_messages_box.h"
 
 #include "apiwrap.h"
+#include "custom_backend/native_message_actions_adapter.h"
+#include "custom_backend/native_runtime.h"
 #include "data/data_chat.h"
 #include "data/data_user.h"
 #include "lang/lang_keys.h"
@@ -100,6 +102,17 @@ void PinMessageBox(
 
 	auto pinMessage = [=] {
 		if (state->requestId) {
+			return;
+		}
+		if (CustomBackend::Enabled()) {
+			// Marker, not a real mtpRequestId: it keeps the re-entry guard
+			// above working while the bridge request is in flight, the same
+			// way HistoryWidget marks its bridge-routed history loads.
+			state->requestId = -1;
+			CustomBackend::Actions::PinFromBox(
+				box,
+				item,
+				!state->pinForPeer || state->pinForPeer->checked());
 			return;
 		}
 

@@ -3,6 +3,7 @@
 
 # Ensure diffs have LF endings
 *.diff text eol=lf
+*.patch text eol=lf
 *.bat text eol=crlf
 
 # Ensure lottie animations are treated as binary files

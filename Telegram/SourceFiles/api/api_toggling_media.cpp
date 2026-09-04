@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_toggling_media.h"
 
 #include "apiwrap.h"
+#include "custom_backend/native_gifs_adapter.h"
+#include "custom_backend/native_runtime.h"
 #include "data/data_document.h"
 #include "data/data_file_origin.h"
 #include "data/data_session.h"
@@ -108,6 +110,10 @@ void ToggleSavedGif(
 		Data::FileOrigin origin,
 		bool saved) {
 	if (saved && !document->isGifv()) {
+		return;
+	}
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Gifs::Toggle(document, origin, saved);
 		return;
 	}
 	auto done = [=] {

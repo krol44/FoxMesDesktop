@@ -6,6 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "api/api_messages_search.h"
+#include "custom_backend/native_runtime.h"
+#include "custom_backend/native_search_adapter.h"
 
 #include "apiwrap.h"
 #include "data/data_channel.h"
@@ -82,6 +84,7 @@ MessagesSearch::MessagesSearch(not_null<History*> history)
 }
 
 MessagesSearch::~MessagesSearch() {
+	CustomBackend::Search::CancelMessages(this);
 	_history->owner().histories().cancelRequest(
 		base::take(_searchInHistoryRequest));
 }
@@ -93,13 +96,26 @@ void MessagesSearch::searchMessages(Request request) {
 }
 
 void MessagesSearch::searchMore() {
-	if (_searchInHistoryRequest || _requestId) {
+	if (_searchInHistoryRequest
+		|| _requestId
+		|| CustomBackend::Search::MessagesPending(this)) {
 		return;
 	}
 	searchRequest();
 }
 
 void MessagesSearch::searchRequest() {
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Search::RequestMessages(
+			this,
+			_history,
+			_request.query,
+			RequestToToken(_request),
+			[=](FoundMessages found) {
+				_messagesFounds.fire(std::move(found));
+			});
+		return;
+	}
 	const auto nextToken = RequestToToken(_request);
 	if (!_offsetId) {
 		const auto it = _cacheOfStartByToken.find(nextToken);

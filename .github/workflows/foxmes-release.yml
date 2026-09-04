@@ -1,0 +1,488 @@
+name: FoxMes Desktop release
+
+on:
+  workflow_dispatch:
+    inputs:
+      only_cache:
+        description: Build the dependencies, populate the caches and stop.
+        type: boolean
+        default: false
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: foxmes-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Bump to force a dependency rebuild without editing prepare.py.
+  FOXMES_DEPS_REVISION: '1'
+  FOXMES_VERSION: 1.4.1
+  FOXMES_VERSION_CODE: '1004001'
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+      - name: Validate product metadata and tag
+        shell: bash
+        run: |
+          python3 Telegram/build/foxmes/verify-source.py
+          test "$(awk '$1 == "AppVersion" { print $2 }' Telegram/build/version)" = "$FOXMES_VERSION_CODE"
+          test "$(awk '$1 == "AppVersionStr" { print $2 }' Telegram/build/version)" = "$FOXMES_VERSION"
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            test "$GITHUB_REF_NAME" = "v$FOXMES_VERSION"
+          fi
+
+  windows:
+    needs: validate
+    runs-on: windows-2025
+    steps:
+      # The runner's git defaults to core.autocrlf=true. Neither lib_ui nor
+      # cmake carries a .gitattributes, so their sources would be checked out
+      # with CRLF while Telegram/patches/*.patch stays LF (see .gitattributes),
+      # and git apply would fail to match a single context line. Must run
+      # before the checkout that writes those working trees.
+      - name: Check out submodules with LF endings
+        shell: cmd
+        run: git config --global core.autocrlf false
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+      # The MSVC toolset belongs in the cache key, and this is the reason: the
+      # pin further down keeps prepare.py and MSBuild on one toolset within a
+      # run, but says nothing about a Qt restored from a cache that was built
+      # under an older runner image with a different default. That is exactly
+      # the unresolved __std_rotate / libcpmt.lib failure this job already hit
+      # once, and it would come back as a cache bug - silent, and three hours
+      # from the point of failure. In the key it simply misses and rebuilds.
+      - name: Resolve the dependency roots and cache key
+        shell: bash
+        env:
+          DEPS_DIGEST: "${{ hashFiles('Telegram/build/prepare/prepare.py', 'Telegram/build/qt_version.py') }}"
+        run: |
+          set -euo pipefail
+          TBUILD="$(cd "$GITHUB_WORKSPACE/.." && pwd -W)"
+          echo "TBUILD=$TBUILD" >> "$GITHUB_ENV"
+          # x64 dependencies live in Libraries/win64, not Libraries.
+          echo "LibrariesPath=$TBUILD/Libraries/win64" >> "$GITHUB_ENV"
+
+          vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+          test -x "$vswhere" || { echo "vswhere.exe was not found."; exit 1; }
+          vspath="$("$vswhere" -latest -products '*' -property installationPath | tr -d '\r')"
+          test -n "$vspath" || { echo "No Visual Studio installation was found."; exit 1; }
+          # Under Ninja both prepare.py and the app compile with the cl.exe
+          # VsDevCmd puts on PATH, so they agree by construction - this only
+          # decides which toolset that is. The v143 file is read rather than
+          # the instance default because it is what the existing dependency
+          # caches were built with (14.44); switching to the default would
+          # invalidate every one of them for no gain.
+          build_dir="$(cygpath -u "$vspath")/VC/Auxiliary/Build"
+          toolset_file="$build_dir/Microsoft.VCToolsVersion.v143.default.txt"
+          test -f "$toolset_file" || toolset_file="$build_dir/Microsoft.VCToolsVersion.default.txt"
+          test -f "$toolset_file" || { echo "No toolset version file under $build_dir."; exit 1; }
+          echo "Toolset version file: $toolset_file"
+          toolset="$(tr -d ' \r\n' < "$toolset_file")"
+          test -n "$toolset" || { echo "$toolset_file is empty."; exit 1; }
+          echo "Caching against MSVC toolset $toolset"
+
+          { echo "$DEPS_DIGEST"; echo "$FOXMES_DEPS_REVISION"; echo "$toolset"; } \
+            > "$RUNNER_TEMP/cache_key.txt"
+          echo "CACHE_KEY=$(sha256sum "$RUNNER_TEMP/cache_key.txt" | cut -d' ' -f1)" >> "$GITHUB_ENV"
+
+      # msys64, jom, NuGet and the python venv, none of which depend on the
+      # MSVC toolset, so this one keeps its prefix fallback.
+      - name: Restore the ThirdParty cache
+        id: tp-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.TBUILD }}/ThirdParty
+          key: Windows-x64-third-party-${{ env.CACHE_KEY }}
+          restore-keys: Windows-x64-third-party-
+
+      # Split from Qt with negative globs, upstream's arrangement: two entries
+      # neither of which is enormous, and Qt re-keyable on its own. The
+      # cache_keys markers are split the same way so each entry carries only
+      # the stage markers whose outputs it actually holds - otherwise a restore
+      # of one entry would tell prepare.py to skip stages the other entry owns.
+      - name: Restore the Libraries cache
+        id: libs-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.LibrariesPath }}/*
+            !${{ env.LibrariesPath }}/cache_keys
+            !${{ env.LibrariesPath }}/[qQ]t[_-]*
+            ${{ env.LibrariesPath }}/cache_keys/*
+            !${{ env.LibrariesPath }}/cache_keys/[qQ]t[_-]*
+          key: Windows-x64-libs-${{ env.CACHE_KEY }}
+          restore-keys: Windows-x64-libs-
+
+      # Deliberately no restore-keys. A prefix restore would hand back a Qt
+      # built with a different MSVC toolset; prepare.py would skip it because
+      # the markers match, and the link would fail hours later. Better to miss
+      # and rebuild than to restore something that cannot be linked.
+      - name: Restore the Qt cache
+        id: qt-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.LibrariesPath }}/[qQ]t[_-]*
+            ${{ env.LibrariesPath }}/cache_keys/[qQ]t[_-]*
+          key: Windows-x64-qt-${{ env.CACHE_KEY }}
+
+      - name: Build unsigned Windows packages
+        shell: cmd
+        env:
+          FOXMES_PRUNE_LIBRARIES: '1'
+          ONLY_CACHE_ARG: ${{ github.event.inputs.only_cache == 'true' && '-OnlyCache' || '' }}
+        run: |
+          set "VSPATH="
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath`) do set "VSPATH=%%i"
+          if not defined VSPATH (echo No Visual Studio installation was found.& exit /b 1)
+          rem Both halves of this job - prepare.py's dependencies and the app -
+          rem now build with Ninja, so both take the cl.exe VsDevCmd puts on
+          rem PATH and cannot disagree the way they did when the app went
+          rem through MSBuild and its "-T v143" toolset: Qt compiled against the
+          rem 14.51 STL, the app linked 14.44, and every Qt-using executable
+          rem failed on __std_rotate and friends.
+          rem This pin now only chooses which toolset PATH gets. It reads the
+          rem v143 file to stay on 14.44, the version the existing dependency
+          rem caches hold; reading rather than hardcoding keeps it working when
+          rem the image moves either version.
+          set "VCTOOLSETFILE=%VSPATH%\VC\Auxiliary\Build\Microsoft.VCToolsVersion.v143.default.txt"
+          if not exist "%VCTOOLSETFILE%" set "VCTOOLSETFILE=%VSPATH%\VC\Auxiliary\Build\Microsoft.VCToolsVersion.default.txt"
+          echo Toolset version file: %VCTOOLSETFILE%
+          if not exist "%VCTOOLSETFILE%" (echo No toolset version file was found.& exit /b 1)
+          set "VCTOOLSET="
+          for /f "usebackq tokens=1" %%v in ("%VCTOOLSETFILE%") do set "VCTOOLSET=%%v"
+          if not defined VCTOOLSET (echo The default toolset file is empty.& exit /b 1)
+          echo Pinning both build systems to MSVC toolset %VCTOOLSET%.
+          call "%VSPATH%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 -vcvars_ver=%VCTOOLSET% || exit /b 1
+          rem Fail now, not three hours into the dependencies, if VsDevCmd did
+          rem not actually honour -vcvars_ver.
+          if not "%VCToolsVersion%"=="%VCTOOLSET%" (echo Toolset mismatch: VsDevCmd selected "%VCToolsVersion%" but MSBuild will use "%VCTOOLSET%".& exit /b 1)
+          rem prepare.py aborts with "Make sure to run from Native Tools Command
+          rem Prompt" unless Platform is exactly x86, x64 or arm64, and VS 2026's
+          rem VsDevCmd does not leave it in that shape. This job only ever builds
+          rem x64, which is what configure.bat below is told as well.
+          set "Platform=x64"
+          echo Platform=%Platform% VSCMD_ARG_TGT_ARCH=%VSCMD_ARG_TGT_ARCH%
+          rem Fail here rather than hours later if VsDevCmd did not actually put
+          rem the C++ toolchain on PATH.
+          where cl || exit /b 1
+          rem Handed to build-windows.ps1 so it can check, after CMake has
+          rem configured, that MSBuild resolved the same compiler.
+          set "FOXMES_EXPECTED_TOOLSET=%VCTOOLSET%"
+          powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File Telegram\build\foxmes\build-windows.ps1 %ONLY_CACHE_ARG%
+      # Same reasoning as the macOS job: actions/cache would only save on a
+      # fully successful job, so a link failure after the dependencies were
+      # built would throw away an hour and a half of them. build-windows.ps1
+      # drops this marker once the tree is built and pruned.
+      - name: Note whether the dependencies completed
+        if: always()
+        id: deps
+        shell: bash
+        run: |
+          if [ -f "$RUNNER_TEMP/foxmes-deps-complete" ]; then
+            echo "ok=1" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Save the ThirdParty cache
+        if: always() && steps.deps.outputs.ok == '1' && steps.tp-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.TBUILD }}/ThirdParty
+          key: Windows-x64-third-party-${{ env.CACHE_KEY }}
+
+      - name: Save the Libraries cache
+        if: always() && steps.deps.outputs.ok == '1' && steps.libs-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.LibrariesPath }}/*
+            !${{ env.LibrariesPath }}/cache_keys
+            !${{ env.LibrariesPath }}/[qQ]t[_-]*
+            ${{ env.LibrariesPath }}/cache_keys/*
+            !${{ env.LibrariesPath }}/cache_keys/[qQ]t[_-]*
+          key: Windows-x64-libs-${{ env.CACHE_KEY }}
+
+      - name: Save the Qt cache
+        if: always() && steps.deps.outputs.ok == '1' && steps.qt-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.LibrariesPath }}/[qQ]t[_-]*
+            ${{ env.LibrariesPath }}/cache_keys/[qQ]t[_-]*
+          key: Windows-x64-qt-${{ env.CACHE_KEY }}
+
+      - name: Upload Windows packages
+        if: ${{ github.event.inputs.only_cache != 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: foxmes-windows
+          path: artifacts/windows/*
+          if-no-files-found: error
+
+  macos:
+    needs: validate
+    # macos-15 is Apple Silicon, and that is a requirement rather than a
+    # preference: the build runs its own code generators during compilation
+    # (Telegram/cmake/generate_lang.cmake, COMMAND codegen_lang) and
+    # CMAKE_OSX_ARCHITECTURES applies to every target, host tools included. An
+    # arm64 codegen binary cannot execute on an x86_64 runner, so arm64-only
+    # would die at the first generated file. Building natively also stops the
+    # cross-compile the Intel runner was doing for the arm64 slice.
+    runs-on: macos-15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+      - name: Install build prerequisites
+        shell: bash
+        run: brew install automake libtool meson nasm ninja pkg-config
+
+      # prepare.py chdirs four levels up, so Libraries and ThirdParty are
+      # siblings of the checkout rather than inside it. Moving the checkout to
+      # a subdirectory the way upstream does would relocate artifacts/macos/*
+      # and break the upload contract, so the parent is resolved here instead
+      # and the cache paths point at it.
+      #
+      # The CPU count belongs in the key for a non-obvious reason: prepare.py
+      # hashes MAKE_THREADS_CNT (-j<cpu_count>) into every stage key. If the
+      # runner image ever changes its core count, a cache saved under a
+      # count-independent key would still restore, every stage would come out
+      # stale, and no new cache could ever replace it - keys are immutable. In
+      # the key, a core-count change simply misses once and then re-seeds.
+      - name: Resolve the dependency root and cache key
+        shell: bash
+        env:
+          DEPS_DIGEST: "${{ hashFiles('Telegram/build/prepare/prepare.py', 'Telegram/build/qt_version.py') }}"
+        run: |
+          set -euo pipefail
+          echo "TBUILD=$(dirname "$GITHUB_WORKSPACE")" >> "$GITHUB_ENV"
+          {
+            echo "$DEPS_DIGEST"
+            echo "$FOXMES_DEPS_REVISION"
+            sysctl -n hw.ncpu
+          } > "$RUNNER_TEMP/cache_key.txt"
+          echo "CACHE_KEY=$(shasum -a 256 "$RUNNER_TEMP/cache_key.txt" | cut -d' ' -f1)" >> "$GITHUB_ENV"
+
+      # restore/save rather than actions/cache, and the reason is not style.
+      # actions/cache declares its save step as post-if: success(), so a job
+      # that fails anywhere - a bad assertion after a perfectly good build -
+      # throws away every hour of dependencies it just produced. That has now
+      # happened twice. Saving is tied to the dependency step instead, which is
+      # the thing the cache actually contains.
+      - name: Restore the dependency cache
+        id: deps-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.TBUILD }}/Libraries
+            ${{ env.TBUILD }}/ThirdParty
+          key: macOS-arm64-libs-${{ env.CACHE_KEY }}
+          restore-keys: macOS-arm64-libs-
+
+      # Pruned here rather than in the workflow so the ordering cannot drift:
+      # the tree has to shrink after prepare.py and before the app build. That
+      # ordering matters less for cache size than it looks - the post-job save
+      # runs at the end either way - and more because the app build needs the
+      # ~20 GB the Qt build tree is holding, and because a failed app build
+      # still triggers the save, which would otherwise upload the full tree.
+      - name: Build dependencies
+        id: deps
+        shell: bash
+        env:
+          FOXMES_PRUNE_LIBRARIES: '1'
+        run: bash Telegram/build/foxmes/build-macos.sh deps
+
+      # Runs even when a later step fails, and is skipped when the restore was
+      # an exact hit, because a key that already exists cannot be written again.
+      - name: Save the dependency cache
+        if: always() && steps.deps.outcome == 'success' && steps.deps-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.TBUILD }}/Libraries
+            ${{ env.TBUILD }}/ThirdParty
+          key: macOS-arm64-libs-${{ env.CACHE_KEY }}
+
+      - name: Build unsigned macOS package
+        if: ${{ github.event.inputs.only_cache != 'true' }}
+        shell: bash
+        run: bash Telegram/build/foxmes/build-macos.sh app
+
+      - name: Upload macOS package
+        if: ${{ github.event.inputs.only_cache != 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: foxmes-macos
+          path: artifacts/macos/*
+          if-no-files-found: error
+
+  linux:
+    needs: validate
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      # write, not read: when the image for this exact tag has not been
+      # published yet the job builds it and pushes it, so the next release pulls
+      # it instead of repeating two hours of work.
+      packages: write
+    env:
+      # Combined with the content hash below, this names one exact image. Bump
+      # it by hand if the DEBUG/LTO render flags in build-linux.sh ever change:
+      # those alter the image but are invisible to hashFiles.
+      CENTOS_ENV_REVISION: '1'
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+
+      # Same expression as the publishing workflow, deliberately duplicated
+      # rather than shared: there is no way to import a value between
+      # workflows, and a content hash computed a second way is a content hash
+      # that will eventually disagree.
+      - name: Resolve the centos_env image reference
+        shell: bash
+        env:
+          DIGEST: "${{ hashFiles('Telegram/build/docker/centos_env/Dockerfile', 'Telegram/build/docker/centos_env/gen_dockerfile.py', 'Telegram/build/docker/centos_env/pyproject.toml', 'Telegram/build/docker/centos_env/poetry.lock') }}"
+        run: |
+          set -euo pipefail
+          repo="$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          echo "FOXMES_CENTOS_ENV_IMAGE=ghcr.io/$repo/centos_env:$CENTOS_ENV_REVISION-$DIGEST" >> "$GITHUB_ENV"
+
+      - name: Log in to ghcr.io
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '${{ secrets.GITHUB_TOKEN }}' \
+            | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
+
+      - name: Install build and validation prerequisites
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes appstream desktop-file-utils pipx
+          pipx install poetry
+      # The image compiles through ccache and build-linux.sh bind-mounts this
+      # directory into the container, but on a throwaway runner it starts empty
+      # every time, so the app's ~59 minutes were paid in full on every run.
+      # The key carries the run id so each run writes a fresh entry; the prefix
+      # fallback is what actually restores the previous one.
+      - name: Restore the Linux compiler cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/foxmes-ccache
+          key: Linux-ccache-${{ github.run_id }}
+          restore-keys: Linux-ccache-
+
+      - name: Build Linux packages
+        id: build
+        shell: bash
+        env:
+          FOXMES_CCACHE_DIR: ${{ runner.temp }}/foxmes-ccache
+        run: bash Telegram/build/foxmes/build-linux.sh
+
+      # Saved from the default branch only. A cache written by a tag run is
+      # scoped to that tag's ref and could never be read again, so uploading
+      # gigabytes from one would cost minutes and buy nothing - while still
+      # counting against the repository's 10 GB.
+      - name: Save the Linux compiler cache
+        if: always() && steps.build.outcome == 'success' && github.ref_name == github.event.repository.default_branch
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/foxmes-ccache
+          key: Linux-ccache-${{ github.run_id }}
+      - name: Validate Linux package metadata
+        shell: bash
+        run: |
+          desktop-file-validate out/FoxMes.AppDir/usr/share/applications/ru.fxl.foxMes.desktop
+          appstreamcli validate --no-net out/FoxMes.AppDir/usr/share/metainfo/ru.fxl.foxMes.metainfo.xml
+          artifacts/linux/FoxMes-1.4.1-linux-x86_64.AppImage --appimage-extract >/dev/null
+          ldd out/FoxMes.AppDir/usr/bin/FoxMes | tee /tmp/foxmes-ldd.txt
+          ! grep -q 'not found' /tmp/foxmes-ldd.txt
+      # The Linux app build still runs on a seeding run: compiling is what fills
+      # the ccache. Only the upload is skipped, so nothing downstream expects an
+      # artifact that was never produced.
+      - name: Upload Linux packages
+        if: ${{ github.event.inputs.only_cache != 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: foxmes-linux
+          path: artifacts/linux/*
+          if-no-files-found: error
+
+  provenance:
+    if: ${{ github.event.inputs.only_cache != 'true' }}
+    needs: [windows, macos, linux]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Check out release tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Download platform packages
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          pattern: foxmes-*
+          path: release
+          merge-multiple: true
+      - name: Create version manifest and checksums
+        shell: bash
+        run: |
+          python3 Telegram/build/foxmes/make-release-manifest.py release
+          cd release
+          sha256sum --check --strict SHA256SUMS
+      - name: Attest release artifacts
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-path: release/*
+      # Redundant with this job's own if:, and kept anyway so the rule stays
+      # "every upload carries the guard" - a rule with no exceptions is one the
+      # audit can check without special cases.
+      - name: Upload complete release set
+        if: ${{ github.event.inputs.only_cache != 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: foxmes-release
+          path: release/*
+          if-no-files-found: error
+
+  publish:
+    if: github.ref_type == 'tag'
+    needs: provenance
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Check out release notes
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Download complete release set
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          name: foxmes-release
+          path: release
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release create "$GITHUB_REF_NAME" release/* \
+            --verify-tag \
+            --title "FoxMes Desktop $FOXMES_VERSION" \
+            --notes-file Telegram/build/foxmes/release-notes.md

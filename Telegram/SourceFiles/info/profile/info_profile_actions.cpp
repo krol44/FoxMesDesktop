@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "info/profile/info_profile_actions.h"
 
+#include "custom_backend/native_runtime.h"
 #include "api/api_blocked_peers.h"
 #include "api/api_chat_participants.h"
 #include "api/api_credits.h"
@@ -1715,20 +1716,22 @@ Section DetailsFiller::makeInfo() {
 				user->session().createInternalLinkFull(username)));
 		}, usernameLine.text->lifetime());
 
-		const auto qrButton = Ui::CreateChild<Ui::IconButton>(
-			usernameLine.text->parentWidget(),
-			st::infoProfileLabeledButtonQr);
-		qrButton->setAccessibleName(tr::lng_group_invite_context_qr(tr::now));
-		UsernamesValue(_peer) | rpl::on_next([=](const auto &u) {
-			qrButton->setVisible(!u.empty());
-		}, qrButton->lifetime());
-		const auto rightSkip = st::infoProfileLabeledButtonQrRightSkip;
-		fitLabelToButton(qrButton, usernameLine.text, rightSkip);
-		fitLabelToButton(qrButton, usernameLine.subtext, rightSkip);
-		qrButton->setClickedCallback([=, show = controller->uiShow()] {
-			Ui::DefaultShowFillPeerQrBoxCallback(show, user);
-			return false;
-		});
+		if (!CustomBackend::DisableWhile) {
+			const auto qrButton = Ui::CreateChild<Ui::IconButton>(
+				usernameLine.text->parentWidget(),
+				st::infoProfileLabeledButtonQr);
+			qrButton->setAccessibleName(tr::lng_group_invite_context_qr(tr::now));
+			UsernamesValue(_peer) | rpl::on_next([=](const auto &u) {
+				qrButton->setVisible(!u.empty());
+			}, qrButton->lifetime());
+			const auto rightSkip = st::infoProfileLabeledButtonQrRightSkip;
+			fitLabelToButton(qrButton, usernameLine.text, rightSkip);
+			fitLabelToButton(qrButton, usernameLine.subtext, rightSkip);
+			qrButton->setClickedCallback([=, show = controller->uiShow()] {
+				Ui::DefaultShowFillPeerQrBoxCallback(show, user);
+				return false;
+			});
+		}
 
 		if (!user->isBot()) {
 			tracker.track(result->add(
@@ -2901,6 +2904,9 @@ void ActionsFiller::addShareContactAction(not_null<UserData*> user) {
 }
 
 void ActionsFiller::addEditContactAction(not_null<UserData*> user) {
+	if (CustomBackend::DisableWhile) {
+		return;
+	}
 	const auto controller = _controller->parentController();
 	const auto edit = [=] {
 		if (controller->showFrozenError()) {
@@ -2917,6 +2923,9 @@ void ActionsFiller::addEditContactAction(not_null<UserData*> user) {
 }
 
 void ActionsFiller::addDeleteContactAction(not_null<UserData*> user) {
+	if (CustomBackend::DisableWhile) {
+		return;
+	}
 	const auto controller = _controller->parentController();
 	AddActionButton(
 		_wrap,
@@ -3163,7 +3172,10 @@ void ActionsFiller::fillUserActions(not_null<UserData*> user) {
 		_wrap->add(CreateSkipWidget(_wrap, st::infoBlockButtonSkip));
 		addReportAction();
 	}
-	if (!user->isSelf() && !user->isSupport() && !user->isVerifyCodes()) {
+	if (!user->isSelf()
+			&& !user->isSupport()
+			&& !user->isVerifyCodes()
+			&& !CustomBackend::Enabled()) {
 		addBlockAction(user);
 	}
 }

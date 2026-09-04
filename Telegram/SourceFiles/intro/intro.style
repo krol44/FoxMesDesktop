@@ -85,6 +85,15 @@ introNextButton: RoundButton(defaultActiveButton) {
 		font: font(boxFontSize semibold);
 	}
 }
+introFoxMesCodeButton: RoundButton(defaultLightButton) {
+	width: 220px;
+	height: 34px;
+	radius: 6px;
+	textTop: 8px;
+	style: TextStyle(semiboldTextStyle) {
+		font: font(boxFontSize semibold);
+	}
+}
 introFragmentIcon: icon{{ "fragment", activeButtonFg }};
 introFragmentIconOver: icon{{ "fragment", activeButtonFgOver }};
 introFragmentButton: RoundButton(introNextButton) {

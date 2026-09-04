@@ -7,6 +7,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "dialogs/dialogs_widget.h"
 
+#include "custom_backend/github_update.h"
+#include "custom_backend/native_runtime.h"
+#include "custom_backend/native_search_adapter.h"
+
 #include "base/call_delayed.h"
 #include "base/qt/qt_key_modifiers.h"
 #include "base/options.h"
@@ -62,6 +66,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "chat_helpers/message_field.h"
 #include "core/application.h"
+#include "core/file_utilities.h"
 #include "core/ui_integration.h"
 #include "core/update_checker.h"
 #include "core/shortcuts.h"
@@ -646,17 +651,19 @@ Widget::Widget(
 		[=] { searchCursorMoved(); },
 		Qt::QueuedConnection); // So getLastText() works already.
 
-	if (!Core::UpdaterDisabled()) {
-		Core::UpdateChecker checker;
-		rpl::merge(
-			rpl::single(rpl::empty),
-			checker.isLatest(),
-			checker.failed(),
-			checker.ready()
-		) | rpl::on_next([=] {
-			checkUpdateStatus();
-		}, lifetime());
+	if (!Core::UpdateCheckAvailable()) {
+		return;
 	}
+	Core::UpdateChecker checker;
+	rpl::merge(
+		rpl::single(rpl::empty),
+		checker.isLatest(),
+		checker.failed(),
+		checker.ready(),
+		CustomBackend::Updates::AvailableEvents() | rpl::to_empty
+	) | rpl::on_next([=] {
+		checkUpdateStatus();
+	}, lifetime());
 
 	_cancelSearch->setClickedCallback([=] {
 		cancelSearch({ .jumpBackToSearchedChat = true });
@@ -2535,14 +2542,18 @@ QPixmap Widget::grabForFolderSlideAnimation() {
 }
 
 void Widget::checkUpdateStatus() {
-	Expects(!Core::UpdaterDisabled());
+	if (!Core::UpdateCheckAvailable()) {
+		return;
+	}
 
 	if (_layout == Layout::Child) {
 		return;
 	}
 
 	using Checker = Core::UpdateChecker;
-	if (Checker().state() == Checker::State::Ready) {
+	const auto state = Checker().state();
+	if (state == Checker::State::Ready
+		|| CustomBackend::Updates::IsAvailable()) {
 		if (_updateTelegram) {
 			return;
 		}
@@ -2555,8 +2566,13 @@ void Widget::checkUpdateStatus() {
 			true);
 		_updateTelegram->show();
 		_updateTelegram->setClickedCallback([] {
-			Core::checkReadyUpdate();
-			Core::Restart();
+			const auto checker = Checker();
+			if (checker.state() == Checker::State::Ready) {
+				Core::checkReadyUpdate();
+				Core::Restart();
+			} else {
+				CustomBackend::Updates::OpenReleasePage();
+			}
 		});
 		if (_connecting) {
 			_connecting->raise();
@@ -3105,7 +3121,22 @@ bool Widget::search(bool inCache, SearchRequestDelay delay) {
 		process->full = false;
 		_migratedProcess.full = false;
 		cancelSearchRequest();
-		if (inPeer) {
+		if (CustomBackend::Enabled()) {
+			const auto type = SearchRequestType{
+				.start = true,
+				.peer = (inPeer != nullptr),
+			};
+			process->requestId = CustomBackend::Search::SearchInChats(
+				&session(),
+				_searchQuery,
+				inPeer,
+				0,
+				[=](MTPmessages_Messages result, mtpRequestId requestId) {
+					if (process->requestId == requestId) {
+						searchReceived(type, result, process);
+					}
+				});
+		} else if (inPeer) {
 			const auto topic = searchInTopic();
 			auto &histories = session().data().histories();
 			const auto type = Data::Histories::RequestType::History;
@@ -3317,7 +3348,22 @@ void Widget::searchMore() {
 		|| _searchTimer.isActive()) {
 		return;
 	} else if (!process->full) {
-		if (const auto peer = searchInPeer()) {
+		if (CustomBackend::Enabled()) {
+			const auto type = SearchRequestType{
+				.start = !process->lastId,
+				.peer = (searchInPeer() != nullptr),
+			};
+			process->requestId = CustomBackend::Search::SearchInChats(
+				&session(),
+				_searchQuery,
+				searchInPeer(),
+				process->lastId.bare,
+				[=](MTPmessages_Messages result, mtpRequestId requestId) {
+					if (process->requestId == requestId) {
+						searchReceived(type, result, process);
+					}
+				});
+		} else if (const auto peer = searchInPeer()) {
 			auto &histories = session().data().histories();
 			const auto topic = searchInTopic();
 			const auto type = Data::Histories::RequestType::History;

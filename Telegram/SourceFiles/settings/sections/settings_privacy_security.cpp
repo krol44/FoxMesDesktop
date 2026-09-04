@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/sections/settings_privacy_security.h"
 
+#include "custom_backend/native_runtime.h"
 #include "settings/settings_common_session.h"
 
 #include "api/api_authorizations.h"
@@ -603,30 +604,34 @@ void BuildSecuritySection(
 
 	session->api().cloudPassword().reload();
 
-	auto ttlLabel = rpl::combine(
-		session->api().selfDestruct().periodDefaultHistoryTTL(),
-		tr::lng_settings_ttl_after_off()
-	) | rpl::map([](int ttl, const QString &none) {
-		return ttl ? Ui::FormatTTL(ttl) : none;
-	});
+	// The auto-delete period is fixed by the backend while the bridge is on,
+	// so the row is hidden here and its search entry is not registered either.
+	if (!CustomBackend::DisableWhile) {
+		auto ttlLabel = rpl::combine(
+			session->api().selfDestruct().periodDefaultHistoryTTL(),
+			tr::lng_settings_ttl_after_off()
+		) | rpl::map([](int ttl, const QString &none) {
+			return ttl ? Ui::FormatTTL(ttl) : none;
+		});
 
-	builder.addButton({
-		.id = u"security/ttl"_q,
-		.title = tr::lng_settings_ttl_title(),
-		.icon = { &st::menuIconTTL },
-		.label = std::move(ttlLabel),
-		.onClick = [showOther] {
-			showOther(GlobalTTLId());
-		},
-		.keywords = { u"ttl"_q, u"auto-delete"_q, u"timer"_q },
-	});
+		builder.addButton({
+			.id = u"security/ttl"_q,
+			.title = tr::lng_settings_ttl_title(),
+			.icon = { &st::menuIconTTL },
+			.label = std::move(ttlLabel),
+			.onClick = [showOther] {
+				showOther(GlobalTTLId());
+			},
+			.keywords = { u"ttl"_q, u"auto-delete"_q, u"timer"_q },
+		});
 
-	builder.add([session, updateTrigger = rpl::duplicate(updateTrigger)](const WidgetContext &ctx) mutable {
-		std::move(updateTrigger) | rpl::on_next([=] {
-			session->api().selfDestruct().reload();
-		}, ctx.container->lifetime());
-		return SectionBuilder::WidgetToAdd{};
-	});
+		builder.add([session, updateTrigger = rpl::duplicate(updateTrigger)](const WidgetContext &ctx) mutable {
+			std::move(updateTrigger) | rpl::on_next([=] {
+				session->api().selfDestruct().reload();
+			}, ctx.container->lifetime());
+			return SectionBuilder::WidgetToAdd{};
+		});
+	}
 
 	auto passcodeHas = rpl::single(rpl::empty) | rpl::then(
 		session->domain().local().localPasscodeChanged()
@@ -1159,6 +1164,10 @@ void BuildConfirmationExtensions(SectionBuilder &builder) {
 }
 
 void BuildPrivacySecuritySectionContent(SectionBuilder &builder) {
+	if (CustomBackend::Enabled()) {
+		return;
+	}
+
 	auto updateOnTick = rpl::single(
 	) | rpl::then(base::timer_each(kUpdateTimeout));
 	const auto trigger = [&] {

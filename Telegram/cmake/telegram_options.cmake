@@ -1,40 +1,13 @@
-# This file is part of Telegram Desktop,
-# the official desktop application for the Telegram messaging service.
+# OpenMessenger custom-server fork of Telegram Desktop.
+# Upstream: telegramdesktop/tdesktop, GPLv3.
 #
-# For license and copyright information please follow this link:
-# https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+# The stock file requires Telegram API credentials at configure time.
+# This fork never starts Core::Launcher / MTProto at runtime, so credentials
+# are deliberately replaced with non-secret compile-time placeholders.
 
 option(TDESKTOP_API_TEST "Use test API credentials." OFF)
-set(TDESKTOP_API_ID "0" CACHE STRING "Provide 'api_id' for the Telegram API access.")
-set(TDESKTOP_API_HASH "" CACHE STRING "Provide 'api_hash' for the Telegram API access.")
-
-if (TDESKTOP_API_TEST)
-    set(TDESKTOP_API_ID 17349)
-    set(TDESKTOP_API_HASH 344583e45741c457fe1862106095a5eb)
-endif()
-
-if (TDESKTOP_API_ID STREQUAL "0" OR TDESKTOP_API_HASH STREQUAL "")
-    message(FATAL_ERROR
-    " \n"
-    " PROVIDE: -D TDESKTOP_API_ID=[API_ID] -D TDESKTOP_API_HASH=[API_HASH]\n"
-    " \n"
-    " > To build your version of Telegram Desktop you're required to provide\n"
-    " > your own 'api_id' and 'api_hash' for the Telegram API access.\n"
-    " >\n"
-    " > How to obtain your 'api_id' and 'api_hash' is described here:\n"
-    " > https://core.telegram.org/api/obtaining_api_id\n"
-    " >\n"
-    " > If you're building the application not for deployment,\n"
-    " > but only for test purposes you can use TEST ONLY credentials,\n"
-    " > which are very limited by the Telegram API server:\n"
-    " >\n"
-    " > api_id: 17349\n"
-    " > api_hash: 344583e45741c457fe1862106095a5eb\n"
-    " >\n"
-    " > Your users will start getting internal server errors on login\n"
-    " > if you deploy an app using those 'api_id' and 'api_hash'.\n"
-    " ")
-endif()
+set(TDESKTOP_API_ID "1" CACHE STRING "Unused in OpenMessenger custom-server mode." FORCE)
+set(TDESKTOP_API_HASH "00000000000000000000000000000000" CACHE STRING "Unused in OpenMessenger custom-server mode." FORCE)
 
 if (DESKTOP_APP_DISABLE_AUTOUPDATE)
     target_compile_definitions(Telegram PRIVATE TDESKTOP_DISABLE_AUTOUPDATE)

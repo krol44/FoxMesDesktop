@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "mtproto/mtp_instance.h"
+#include "custom_backend/native_runtime.h"
 
 #include "mtproto/details/mtproto_dcenter.h"
 #include "mtproto/details/mtproto_rsa_public_key.h"
@@ -511,6 +512,11 @@ rpl::producer<DcId> Instance::Private::mainDcIdValue() const {
 }
 
 void Instance::Private::requestConfig() {
+	if (CustomBackend::Enabled()) {
+		// FoxMes bridge: no MTProto transport, no config requests to
+		// Telegram (including SpecialConfigRequest via DoH/Firebase).
+		return;
+	}
 	if (_configLoader || isKeysDestroyer()) {
 		return;
 	}
@@ -541,6 +547,10 @@ void Instance::Private::badConfigurationError() {
 }
 
 void Instance::Private::syncHttpUnixtime() {
+	if (CustomBackend::Enabled()) {
+		// FoxMes bridge: no external time sync via SpecialConfigRequest.
+		return;
+	}
 	if (base::unixtime::http_valid() || _httpUnixtimeLoader) {
 		return;
 	}

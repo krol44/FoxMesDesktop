@@ -17,6 +17,25 @@ class Session;
 } // namespace Main
 
 namespace Data {
+class ScheduledMessages;
+} // namespace Data
+
+namespace CustomBackend::Scheduled {
+// FoxMes bridge seam: under the bridge the scheduled list is the server-side
+// reminder queue, not messages.getScheduledHistory. Declared before
+// Data::ScheduledMessages so the class can grant friendship; no FoxMes state
+// lives in this header.
+//
+// full tells a reloaded page from a live event: a page is authoritative and
+// drops whatever it does not mention, while an event only adds and updates.
+void Apply(
+	not_null<Data::ScheduledMessages*> messages,
+	not_null<History*> history,
+	const QVector<MTPMessage> &list,
+	bool full);
+} // namespace CustomBackend::Scheduled
+
+namespace Data {
 
 struct MessagesSlice;
 
@@ -94,6 +113,20 @@ private:
 	rpl::event_stream<not_null<History*>> _updates;
 
 	rpl::lifetime _lifetime;
+
+	// Minimal bridge seam: the FoxMes custom_backend fills this list from the
+	// reminder queue through this function; no state or business logic beyond
+	// it lives here.
+	// Qualified for the same reason as the one in data_message_reactions.h.
+	// Nothing collides here today - the namespace is CustomBackend::Scheduled,
+	// not ScheduledMessages - but the lookup rule is the same, so spelling the
+	// types out removes the whole class of failure rather than relying on the
+	// names staying different.
+	friend void CustomBackend::Scheduled::Apply(
+		not_null<Data::ScheduledMessages*> messages,
+		not_null<::History*> history,
+		const QVector<MTPMessage> &list,
+		bool full);
 
 };
 

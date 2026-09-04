@@ -69,6 +69,11 @@ public:
 	[[nodiscard]] auto resolve(DocumentId documentId)
 		-> rpl::producer<not_null<DocumentData*>, rpl::empty_error>;
 
+	// FoxMes bridge seam: announces a document that was built locally
+	// instead of fetched, so loaders parked in the resolve state can finish.
+	// Under the bridge request() has no transport to resolve them with.
+	void resolveLocalDocument(not_null<DocumentData*> document);
+
 	[[nodiscard]] std::unique_ptr<Ui::CustomEmoji::Loader> createLoader(
 		not_null<DocumentData*> document,
 		SizeTag tag,

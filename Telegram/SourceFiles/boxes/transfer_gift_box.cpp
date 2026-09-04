@@ -7,6 +7,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/transfer_gift_box.h"
 
+#include "custom_backend/native_chat_themes_adapter.h"
+#include "custom_backend/native_runtime.h"
+
 #include "apiwrap.h"
 #include "api/api_cloud_password.h"
 #include "api/api_credits.h"
@@ -1101,6 +1104,10 @@ void SendPeerThemeChangeRequest(
 		const QString &token,
 		const std::shared_ptr<Data::UniqueGift> &unique,
 		bool locallySet) {
+	if (CustomBackend::Enabled()) {
+		CustomBackend::ChatThemes::Save(peer, token);
+		return;
+	}
 	const auto api = &peer->session().api();
 
 	api->request(MTPmessages_SetChatWallPaper(

@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/ringtones_box.h"
 #include "boxes/peer_list_box.h"
 #include "core/application.h"
+#include "custom_backend/native_runtime.h"
 #include "data/notify/data_peer_notify_volume.h"
 #include "boxes/peer_list_controllers.h"
 #include "data/notify/data_notify_settings.h"
@@ -469,63 +470,78 @@ void SetupChecks(
 		widgets->sound = sound;
 	}
 
-	const auto toneWrap = soundInner->add(
-		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
-			container,
-			object_ptr<Ui::VerticalLayout>(container)));
-	toneWrap->toggleOn(sound->toggledValue());
-	toneWrap->finishAnimating();
+	// Ringtones come from MTProto (account.getSavedRingtones) and have no
+	// FoxMes counterpart: the picker would list nothing and its request
+	// would never be answered. The sound on/off switch above stays - that
+	// part the bridge persists as sound_none.
+	if (!CustomBackend::DisableWhile) {
+		const auto toneWrap = soundInner->add(
+			object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+				container,
+				object_ptr<Ui::VerticalLayout>(container)));
+		toneWrap->toggleOn(sound->toggledValue());
+		toneWrap->finishAnimating();
 
-	const auto toneInner = toneWrap->entity();
-	const auto toneLabel = toneInner->lifetime(
-	).make_state<rpl::event_stream<QString>>();
-	const auto toneValue = [=] {
-		const auto sound = settings->defaultSettings(type).sound();
-		return sound.value_or(Data::NotifySound());
-	};
-	const auto label = [=] {
-		const auto now = toneValue();
-		return !now.id
-			? tr::lng_ringtones_box_default(tr::now)
-			: ExtractRingtoneName(session->data().document(now.id));
-	};
-	settings->defaultUpdates(
-		Notify::User
-	) | rpl::on_next([=] {
-		toneLabel->fire(label());
-	}, toneInner->lifetime());
-	session->api().ringtones().listUpdates(
-	) | rpl::on_next([=] {
-		toneLabel->fire(label());
-	}, toneInner->lifetime());
+		const auto toneInner = toneWrap->entity();
+		const auto toneLabel = toneInner->lifetime(
+		).make_state<rpl::event_stream<QString>>();
+		const auto toneValue = [=] {
+			const auto sound = settings->defaultSettings(type).sound();
+			return sound.value_or(Data::NotifySound());
+		};
+		const auto label = [=] {
+			const auto now = toneValue();
+			return !now.id
+				? tr::lng_ringtones_box_default(tr::now)
+				: ExtractRingtoneName(session->data().document(now.id));
+		};
+		settings->defaultUpdates(
+			Notify::User
+		) | rpl::on_next([=] {
+			toneLabel->fire(label());
+		}, toneInner->lifetime());
+		session->api().ringtones().listUpdates(
+		) | rpl::on_next([=] {
+			toneLabel->fire(label());
+		}, toneInner->lifetime());
 
-	const auto tone = AddButtonWithLabel(
-		toneInner,
-		tr::lng_notification_tone(),
-		toneLabel->events_starting_with(label()),
-		st::settingsButton,
-		{ &st::menuIconSoundOn });
-
-	if (widgets) {
-		widgets->tone = tone;
-	}
-
-	{
-		auto controller = DefaultRingtonesVolumeController(session, type);
-		Ui::AddRingtonesVolumeSlider(
+		const auto tone = AddButtonWithLabel(
 			toneInner,
-			rpl::single(true),
-			VolumeSubtitle(type),
-			Data::VolumeController{
-				.volume = base::take(controller.volume),
-				.saveVolume = [=](ushort volume) {
-					Core::App().notifications().playSound(
-						session,
-						toneValue().id,
-						0.01 * volume);
-					controller.saveVolume(volume);
-				},
-			});
+			tr::lng_notification_tone(),
+			toneLabel->events_starting_with(label()),
+			st::settingsButton,
+			{ &st::menuIconSoundOn });
+
+		if (widgets) {
+			widgets->tone = tone;
+		}
+
+		{
+			auto controller = DefaultRingtonesVolumeController(session, type);
+			Ui::AddRingtonesVolumeSlider(
+				toneInner,
+				rpl::single(true),
+				VolumeSubtitle(type),
+				Data::VolumeController{
+					.volume = base::take(controller.volume),
+					.saveVolume = [=](ushort volume) {
+						Core::App().notifications().playSound(
+							session,
+							toneValue().id,
+							0.01 * volume);
+						controller.saveVolume(volume);
+					},
+				});
+		}
+
+		tone->setClickedCallback([=] {
+			controller->show(Box(RingtonesBox, session, toneValue(), [=](
+					Data::NotifySound sound) {
+				settings->defaultUpdate(type, {}, {}, sound);
+			}, Data::VolumeController{
+				DefaultRingtonesVolumeController(session, type).volume,
+			}));
+		});
 	}
 
 	enabled->toggledValue(
@@ -546,15 +562,6 @@ void SetupChecks(
 		const auto value = Data::NotifySound{ .none = !enabled };
 		settings->defaultUpdate(type, {}, {}, value);
 	}, sound->lifetime());
-
-	tone->setClickedCallback([=] {
-		controller->show(Box(RingtonesBox, session, toneValue(), [=](
-				Data::NotifySound sound) {
-			settings->defaultUpdate(type, {}, {}, sound);
-		}, Data::VolumeController{
-			DefaultRingtonesVolumeController(session, type).volume,
-		}));
-	});
 }
 
 void SetupExceptions(
@@ -678,13 +685,16 @@ void BuildNotificationsTypeContent(SectionBuilder &builder, Notify type) {
 		};
 	});
 
-	builder.add(nullptr, [] {
-		return SearchEntry{
-			.id = u"notifications/type/tone"_q,
-			.title = tr::lng_notification_tone(tr::now),
-			.keywords = { u"tone"_q, u"ringtone"_q, u"notification"_q },
-		};
-	});
+	// The tone row is not built under the bridge: search must not offer it.
+	if (!CustomBackend::DisableWhile) {
+		builder.add(nullptr, [] {
+			return SearchEntry{
+				.id = u"notifications/type/tone"_q,
+				.title = tr::lng_notification_tone(tr::now),
+				.keywords = { u"tone"_q, u"ringtone"_q, u"notification"_q },
+			};
+		});
+	}
 
 	builder.addSkip();
 	builder.addDivider();

@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "apiwrap.h"
 #include "api/api_ringtones.h"
+#include "custom_backend/native_runtime.h"
 #include "base/unixtime.h"
 #include "core/application.h"
 #include "data/data_changes.h"
@@ -661,6 +662,12 @@ rpl::producer<> NotifySettings::defaultUpdates(
 }
 
 void NotifySettings::loadExceptions() {
+	if (CustomBackend::Enabled()) {
+		// Exceptions are tracked locally through updateException(); the
+		// MTProto request would never be answered and would keep its
+		// _exceptionsRequestId slot busy forever.
+		return;
+	}
 	for (auto i = 0; i != kDefaultNotifyTypes; ++i) {
 		if (_exceptionsRequestId[i]) {
 			continue;

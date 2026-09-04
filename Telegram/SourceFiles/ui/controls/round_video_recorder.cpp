@@ -858,7 +858,10 @@ void RoundVideoRecorder::Private::initCircularTextAdd() {
 	constexpr auto kCircularTextStartAngle = 125;
 	constexpr auto kCircularTextEndAngle = 145;
 	const auto image = CircularTextImage(
-		u"Telegram"_q.toUpper(),
+		// The site the product belongs to, not the app name: this text is
+		// burned into a video that leaves the app, so it has to point back at
+		// something a viewer can open.
+		u"fxl.ru"_q,
 		kSide,
 		kSide,
 		kCircularTextRadius,

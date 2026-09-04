@@ -9,6 +9,7 @@ cmake_minimum_required(VERSION 3.25...3.31)
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 include(cmake/validate_special_target.cmake)
+include(Telegram/cmake/foxmes.cmake)
 include(cmake/version.cmake)
 desktop_app_parse_version(Telegram/build/version)
 
@@ -16,11 +17,11 @@ if (NOT DEFINED CMAKE_CONFIGURATION_TYPES)
     set(configuration_types_init 1)
 endif()
 
-project(Telegram
+project(${FOXMES_APP_NAME}
     LANGUAGES C CXX
     VERSION ${desktop_app_version_cmake}
-    DESCRIPTION "Official Telegram Desktop messenger"
-    HOMEPAGE_URL "https://desktop.telegram.org"
+    DESCRIPTION "${FOXMES_APP_DISPLAY_NAME}"
+    HOMEPAGE_URL "${FOXMES_HOMEPAGE}"
 )
 
 if (APPLE)

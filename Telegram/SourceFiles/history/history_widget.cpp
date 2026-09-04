@@ -104,6 +104,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_item_helpers.h" // GetErrorForSending.
+#include "custom_backend/native_history_loader.h"
+#include "custom_backend/native_runtime.h"
+#include "custom_backend/native_send_files_adapter.h"
 #include "history/history_drag_area.h"
 #include "history/history_inner_widget.h"
 #include "history/history_item_components.h"
@@ -4790,6 +4793,22 @@ void HistoryWidget::firstLoadMessages() {
 	if (!_history || _firstLoadRequest) {
 		return;
 	}
+	_firstLoadRequest = -1; // Not a real mtpRequestId.
+	if (CustomBackend::WidgetHistoryRequest(
+			&session(),
+			_history,
+			_showAtMsgId,
+			Data::LoadDirection::Around,
+			crl::guard(this, [=] {
+				if (_firstLoadRequest != -1) {
+					return;
+				}
+				_firstLoadRequest = 0;
+				historyLoaded();
+			}))) {
+		return;
+	}
+	_firstLoadRequest = 0;
 
 	auto from = _history;
 	auto offsetId = MsgId();
@@ -4873,6 +4892,22 @@ void HistoryWidget::loadMessages() {
 	const auto from = loadMigrated ? _migrated : _history;
 	if (from->loadedAtTop()) {
 		return;
+	}
+
+	if (!loadMigrated) {
+		_preloadRequest = -1; // Not a real mtpRequestId.
+		if (CustomBackend::WidgetHistoryRequest(
+				&session(),
+				_history,
+				from->minMsgId(),
+				Data::LoadDirection::Before,
+				crl::guard(this, [=] {
+					_preloadRequest = 0;
+					preloadHistoryIfNeeded();
+				}))) {
+			return;
+		}
+		_preloadRequest = 0;
 	}
 
 	const auto offsetId = from->minMsgId();
@@ -4970,6 +5005,25 @@ void HistoryWidget::loadMessagesDown() {
 		return;
 	}
 
+	if (!loadMigrated) {
+		_preloadDownRequest = -1; // Not a real mtpRequestId.
+		if (CustomBackend::WidgetHistoryRequest(
+				&session(),
+				_history,
+				from->maxMsgId(),
+				Data::LoadDirection::After,
+				crl::guard(this, [=] {
+					_preloadDownRequest = 0;
+					preloadHistoryIfNeeded();
+					if (_history->loadedAtBottom()) {
+						checkActivation();
+					}
+				}))) {
+			return;
+		}
+		_preloadDownRequest = 0;
+	}
+
 	const auto loadCount = kMessagesPerPage;
 	auto addOffset = -loadCount;
 	auto offsetId = from->maxMsgId();
@@ -5034,6 +5088,24 @@ void HistoryWidget::delayedShowAt(
 		).arg(_history->inboxReadTillId().bare
 		).arg(Logs::b(_history->loadedAtBottom())
 		).arg(showAtMsgId.bare));
+
+	_delayedShowAtRequest = -1; // Not a real mtpRequestId.
+	if (CustomBackend::WidgetHistoryRequest(
+			&session(),
+			_history,
+			showAtMsgId,
+			Data::LoadDirection::Around,
+			crl::guard(this, [=] {
+				if (_delayedShowAtRequest != -1) {
+					return;
+				}
+				_delayedShowAtRequest = 0;
+				setMsgId(_delayedShowAtMsgId, _delayedShowAtMsgParams);
+				historyLoaded();
+			}))) {
+		return;
+	}
+	_delayedShowAtRequest = 0;
 
 	auto from = _history;
 	auto offsetId = MsgId();
@@ -9932,10 +10004,13 @@ bool HistoryWidget::sendExistingDocument(
 		}
 	}
 
-	Api::SendExistingDocument(
-		std::move(messageToSend),
-		document,
-		localId);
+	if (!CustomBackend::Enabled()
+		|| !CustomBackend::SendExistingDocument(document, messageToSend.action)) {
+		Api::SendExistingDocument(
+			std::move(messageToSend),
+			document,
+			localId);
+	}
 
 	if (_autocomplete && _autocomplete->stickersShown()) {
 		clearFieldText();

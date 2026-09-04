@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/sections/settings_main.h"
 
+#include "custom_backend/native_runtime.h"
 #include "settings/settings_common_session.h"
 
 #include "api/api_cloud_password.h"
@@ -165,7 +166,9 @@ Cover::Cover(
 , _name(this, st::infoProfileCover.name)
 , _phone(this, st::defaultFlatLabel, st::popupMenuWithIcons)
 , _username(this, st::infoProfileMegagroupCover.status) {
-	_user->updateFull();
+	if (!CustomBackend::Enabled()) {
+		_user->updateFull();
+	}
 
 	_name->setSelectable(true);
 	_name->setContextCopyText(tr::lng_profile_copy_fullname(tr::now));
@@ -193,7 +196,9 @@ Cover::Cover(
 	setupChildGeometry();
 
 	_userpic->setVideoAllowed(true);
-	_userpic->switchChangePhotoOverlay(_user->isSelf(), [=](
+	_userpic->switchChangePhotoOverlay(
+		_user->isSelf() && !CustomBackend::DisableWhile,
+		[=](
 			Ui::UserpicButton::ChosenImage chosen) {
 		auto &image = chosen.image;
 		_userpic->showCustom(base::duplicate(image));
@@ -221,18 +226,20 @@ Cover::Cover(
 		refreshNameGeometry(width());
 	}, _name->lifetime());
 
-	_qrButton.create(this, st::infoProfileLabeledButtonQr);
-	_qrButton->setAccessibleName(tr::lng_group_invite_context_qr(tr::now));
-	_qrButton->setClickedCallback([=, show = controller->uiShow()] {
-		Ui::DefaultShowFillPeerQrBoxCallback(show, _user);
-	});
-	Info::Profile::UsernamesValue(
-		_user
-	) | rpl::on_next([=](const auto &usernames) {
-		_qrButton->setVisible(!usernames.empty());
-		refreshNameGeometry(width());
-		refreshQrButtonGeometry(width());
-	}, _qrButton->lifetime());
+	if (!CustomBackend::Enabled()) {
+		_qrButton.create(this, st::infoProfileLabeledButtonQr);
+		_qrButton->setAccessibleName(tr::lng_group_invite_context_qr(tr::now));
+		_qrButton->setClickedCallback([=, show = controller->uiShow()] {
+			Ui::DefaultShowFillPeerQrBoxCallback(show, _user);
+		});
+		Info::Profile::UsernamesValue(
+			_user
+		) | rpl::on_next([=](const auto &usernames) {
+			_qrButton->setVisible(!usernames.empty());
+			refreshNameGeometry(width());
+			refreshQrButtonGeometry(width());
+		}, _qrButton->lifetime());
+	}
 }
 
 Cover::~Cover() = default;
@@ -365,7 +372,7 @@ void BuildSectionButtons(SectionBuilder &builder) {
 	const auto controller = builder.controller();
 	const auto showOther = builder.showOther();
 
-	if (!session->supportMode()) {
+	if (!session->supportMode() && !CustomBackend::Enabled()) {
 		builder.addSectionButton({
 			.title = tr::lng_settings_my_account(),
 			.targetSection = InformationId(),
@@ -381,21 +388,14 @@ void BuildSectionButtons(SectionBuilder &builder) {
 		.keywords = { u"alerts"_q, u"sounds"_q, u"badge"_q },
 	});
 
-	builder.addSectionButton({
-		.title = tr::lng_settings_section_privacy(),
-		.targetSection = PrivacySecurityId(),
-		.icon = { &st::menuIconLock },
-		.keywords = { u"security"_q, u"passcode"_q, u"password"_q, u"2fa"_q },
-	});
+	if (!CustomBackend::Enabled()) {
+		builder.addSectionButton({
+			.title = tr::lng_settings_section_privacy(),
+			.targetSection = PrivacySecurityId(),
+			.icon = { &st::menuIconLock },
+			.keywords = { u"security"_q, u"passcode"_q, u"password"_q, u"2fa"_q },
+		});
 
-	builder.addSectionButton({
-		.title = tr::lng_settings_section_chat_settings(),
-		.targetSection = ChatId(),
-		.icon = { &st::menuIconChatBubble },
-		.keywords = { u"themes"_q, u"appearance"_q, u"stickers"_q },
-	});
-
-	{ // Folders
 		const auto preload = [=] {
 			session->data().chatsFilters().requestSuggested();
 		};
@@ -430,18 +430,27 @@ void BuildSectionButtons(SectionBuilder &builder) {
 	}
 
 	builder.addSectionButton({
+		.title = tr::lng_settings_section_chat_settings(),
+		.targetSection = ChatId(),
+		.icon = { &st::menuIconChatBubble },
+		.keywords = { u"themes"_q, u"appearance"_q, u"background"_q },
+	});
+
+	builder.addSectionButton({
 		.title = tr::lng_settings_advanced(),
 		.targetSection = AdvancedId(),
 		.icon = { &st::menuIconManage },
 		.keywords = { u"performance"_q, u"proxy"_q, u"experimental"_q },
 	});
 
-	builder.addSectionButton({
-		.title = tr::lng_settings_section_devices(),
-		.targetSection = CallsId(),
-		.icon = { &st::menuIconUnmute },
-		.keywords = { u"sessions"_q, u"calls"_q },
-	});
+	if (!CustomBackend::Enabled()) {
+		builder.addSectionButton({
+			.title = tr::lng_settings_section_devices(),
+			.targetSection = CallsId(),
+			.icon = { &st::menuIconUnmute },
+			.keywords = { u"sessions"_q, u"calls"_q },
+		});
+	}
 
 	builder.addButton({
 		.id = u"main/power"_q,
@@ -495,6 +504,10 @@ void BuildInterfaceScale(SectionBuilder &builder) {
 }
 
 void BuildPremiumSection(SectionBuilder &builder) {
+	if (CustomBackend::Enabled()) {
+		return;
+	}
+
 	const auto session = builder.session();
 	const auto controller = builder.controller();
 	const auto showOther = builder.showOther();
@@ -574,6 +587,10 @@ void BuildPremiumSection(SectionBuilder &builder) {
 }
 
 void BuildHelpSection(SectionBuilder &builder) {
+	if (CustomBackend::Enabled()) {
+		return;
+	}
+
 	builder.addDivider();
 	builder.addSkip();
 
@@ -608,6 +625,10 @@ void BuildHelpSection(SectionBuilder &builder) {
 }
 
 void BuildValidationSuggestions(SectionBuilder &builder) {
+	if (CustomBackend::Enabled()) {
+		return;
+	}
+
 	builder.add([](const WidgetContext &ctx) {
 		const auto controller = ctx.controller.get();
 		const auto showOther = ctx.showOther;
@@ -663,7 +684,7 @@ void Main::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
 			Core::App().domain().addActivated(MTP::Environment{});
 		}, &st::menuIconAddAccount);
 	}
-	if (!controller()->session().supportMode()) {
+	if (!controller()->session().supportMode() && !CustomBackend::Enabled()) {
 		addAction(
 			tr::lng_settings_information(tr::now),
 			[=] { showOther(InformationId()); },
@@ -738,13 +759,15 @@ void Main::setupContent() {
 
 	Ui::ResizeFitChild(this, content);
 
-	session->api().cloudPassword().reload();
-	session->api().reloadContactSignupSilent();
-	session->api().sensitiveContent().reload();
-	session->api().globalPrivacy().reload();
-	session->api().premium().reload();
-	session->data().cloudThemes().refresh();
-	session->faqSuggestions().request();
+	if (!CustomBackend::Enabled()) {
+		session->api().cloudPassword().reload();
+		session->api().reloadContactSignupSilent();
+		session->api().sensitiveContent().reload();
+		session->api().globalPrivacy().reload();
+		session->api().premium().reload();
+		session->data().cloudThemes().refresh();
+		session->faqSuggestions().request();
+	}
 }
 
 void Main::showFinished() {

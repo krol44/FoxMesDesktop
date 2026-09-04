@@ -5,9 +5,12 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
+#include "core/deep_links/deep_links_settings.h"
+
 #include "core/deep_links/deep_links_router.h"
 
 #include "apiwrap.h"
+#include "custom_backend/native_runtime.h"
 #include "base/binary_guard.h"
 #include "boxes/add_contact_box.h"
 #include "boxes/gift_credits_box.h"
@@ -272,6 +275,12 @@ Result ShowAutoDeleteSetCustom(const Context &ctx) {
 	if (!ctx.controller) {
 		return Result::NeedsAuth;
 	}
+	// The plain "privacy/auto-delete" route is filtered by the router, this
+	// one opens the section itself and has to repeat the same check.
+	if (!IsSupportedSettingsSection(::Settings::GlobalTTLId())) {
+		ctx.controller->showSettings(::Settings::MainId());
+		return Result::Handled;
+	}
 	ctx.controller->setHighlightControlId(u"auto-delete/set-custom"_q);
 	ctx.controller->showSettings(::Settings::GlobalTTLId());
 	return Result::Handled;
@@ -366,6 +375,24 @@ Result ShowPrivacyBox(
 }
 
 } // namespace
+
+bool IsSupportedSettingsSection(::Settings::Type section) {
+	if (!CustomBackend::Enabled()) {
+		return true;
+	}
+	return section != ::Settings::InformationId()
+		&& section != ::Settings::NotificationsId()
+		&& section != ::Settings::PrivacySecurityId()
+		&& section != ::Settings::BlockedPeersId()
+		&& section != ::Settings::WebsitesId()
+		&& section != ::Settings::GlobalTTLId()
+		&& section != ::Settings::PremiumId()
+		&& section != ::Settings::CreditsId()
+		&& section != ::Settings::CurrencyId()
+		&& section != ::Settings::BusinessId()
+		&& section != ::Settings::CallsId()
+		&& section != ::Settings::SessionsId();
+}
 
 void RegisterSettingsHandlers(Router &router) {
 	router.add(u"settings"_q, {

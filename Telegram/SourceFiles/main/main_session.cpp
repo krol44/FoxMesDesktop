@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "main/main_session.h"
+#include "custom_backend/native_runtime.h"
 
 #include "apiwrap.h"
 #include "api/api_peer_colors.h"
@@ -176,10 +177,20 @@ Session::Session(
 , _saveSettingsTimer([=] { saveSettings(); }) {
 	Expects(_settings != nullptr);
 
-	_api->requestTermsUpdate();
-	_api->requestFullPeer(_user);
+	if (CustomBackend::Enabled()) {
+		// Account::_session is assigned only after Main::Session
+		// constructor has returned, so start the REST bridge later.
+		crl::on_main(this, [=] {
+			CustomBackend::AttachSession(this);
+		});
+	} else {
+		_api->requestTermsUpdate();
+		_api->requestFullPeer(_user);
+	}
 
-	_api->instance().setUserPhone(_user->phone());
+	if (!CustomBackend::Enabled()) {
+		_api->instance().setUserPhone(_user->phone());
+	}
 
 	// Load current userpic and keep it loaded.
 	_user->loadUserpic();
@@ -256,9 +267,11 @@ Session::Session(
 	Spellchecker::Start(this);
 #endif // TDESKTOP_DISABLE_SPELLCHECK
 
-	_api->requestNotifySettings(MTP_inputNotifyUsers());
-	_api->requestNotifySettings(MTP_inputNotifyChats());
-	_api->requestNotifySettings(MTP_inputNotifyBroadcasts());
+	if (!CustomBackend::Enabled()) {
+		_api->requestNotifySettings(MTP_inputNotifyUsers());
+		_api->requestNotifySettings(MTP_inputNotifyChats());
+		_api->requestNotifySettings(MTP_inputNotifyBroadcasts());
+	}
 
 	Core::App().downloadManager().trackSession(this);
 
@@ -310,6 +323,7 @@ void Session::finishLogout() {
 }
 
 Session::~Session() {
+	CustomBackend::DetachSession(this);
 	unlockTerms();
 	data().clear();
 	ClickHandler::clearActive();
@@ -345,6 +359,14 @@ rpl::producer<> Session::downloaderTaskFinished() const {
 }
 
 bool Session::premium() const {
+	if (CustomBackend::Enabled()) {
+		// FoxMes has no subscription tier: every premium-gated feature is
+		// simply available. This is the imperative half of that - the
+		// reactive readers (premiumPossibleValue(), Data::AmPremiumValue and
+		// the ~48 call sites behind it) watch the self user's Premium flag
+		// instead, which NativeBridge sets for the same reason.
+		return true;
+	}
 	return _user->isPremium();
 }
 
@@ -530,6 +552,9 @@ void Session::addWindow(not_null<Window::SessionController*> controller) {
 	) | rpl::map([=](Dialogs::Key chat) {
 		return chat.peer();
 	}) | rpl::distinct_until_changed());
+	if (CustomBackend::Enabled()) {
+		CustomBackend::TrackWindow(this, controller);
+	}
 }
 
 bool Session::uploadsInProgress() const {

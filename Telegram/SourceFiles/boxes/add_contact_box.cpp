@@ -6,6 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/add_contact_box.h"
+#include "custom_backend/native_runtime.h"
+#include "custom_backend/native_peer_adapter.h"
 
 #include "lang/lang_keys.h"
 #include "base/call_delayed.h"
@@ -724,6 +726,9 @@ void GroupInfoBox::createGroup(
 		base::weak_qptr<Ui::BoxContent> selectUsersBox,
 		const QString &title,
 		const std::vector<not_null<PeerData*>> &users) {
+	// FoxMes bridge does not support group creation; the entry points are
+	// hidden while CustomBackend::DisableWhile is set, so this only runs on
+	// the upstream MTProto path.
 	if (_creationRequestId) {
 		return;
 	}
@@ -822,6 +827,9 @@ void GroupInfoBox::submit() {
 void GroupInfoBox::createChannel(
 		const QString &title,
 		const QString &description) {
+	// FoxMes bridge does not support channel creation; the entry points are
+	// hidden while CustomBackend::DisableWhile is set, so this only runs on
+	// the upstream MTProto path.
 	Expects(!_creationRequestId);
 
 	using Flag = MTPchannels_CreateChannel::Flag;
@@ -1655,6 +1663,32 @@ void EditNameBox::save() {
 	if (first.isEmpty()) {
 		first = last;
 		last = QString();
+	}
+	if (CustomBackend::Enabled()) {
+		const auto weak = base::make_weak(this);
+		const auto accepted = CustomBackend::Peers::UpdateProfileName(
+			_user,
+			first,
+			last,
+			[weak, first, last](QString error) {
+				const auto strong = weak.get();
+				if (!strong) return;
+			strong->_requestId = 0;
+			if (!error.isEmpty()) {
+				strong->_first->setFocus();
+				strong->_first->showError();
+				return;
+			}
+			strong->_user->setName(
+				TextUtilities::SingleLine(first),
+				TextUtilities::SingleLine(last),
+				QString(),
+				TextUtilities::SingleLine(strong->_user->username()));
+			strong->closeBox();
+		});
+		if (!accepted) return;
+		_requestId = -1;
+		return;
 	}
 	_sentName = first;
 	auto flags = MTPaccount_UpdateProfile::Flag::f_first_name

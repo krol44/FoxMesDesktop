@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "base/call_delayed.h"
 #include "base/base_file_utilities.h"
+#include "custom_backend/native_runtime.h"
 #include "base/qthelp_url.h"
 #include "base/random.h"
 #include "base/timer_rpl.h"
@@ -3008,7 +3009,7 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 			attach(false);
 		}, &st::menuIconFile);
 	}
-	if (peer->canCreatePolls(false)) {
+	if (peer->canCreatePolls(false) && !CustomBackend::Enabled()) {
 		++minimal;
 		raw->addAction(tr::lng_polls_menu_item(tr::now), [=] {
 			const auto action = actionFactory();
@@ -3027,7 +3028,7 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 				sendMenuDetails());
 		}, &st::menuIconCreatePoll);
 	}
-	if (peer->canCreateTodoLists(false)) {
+	if (peer->canCreateTodoLists(false) && !CustomBackend::Enabled()) {
 		++minimal;
 		raw->addAction(tr::lng_todo_menu_item(tr::now), [=] {
 			const auto action = actionFactory();
@@ -3044,7 +3045,8 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 		}, &st::menuIconCreateTodoList);
 	}
 	if (Iv::Editor::CanAuthorRichMessages(&controller->session())
-		&& Data::CanSendAnyOf(peer, ChatRestriction::SendOther, false)) {
+		&& Data::CanSendAnyOf(peer, ChatRestriction::SendOther, false)
+		&& !CustomBackend::Enabled()) {
 		raw->addAction(tr::lng_article_menu_item(tr::now), [=] {
 			const auto action = actionFactory();
 			const auto details = sendMenuDetails();
@@ -3112,7 +3114,14 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 	const auto onclick = ChatHelpers::ShowPanelOnClick();
 	if (!actions) {
 		return nullptr;
-	} else if (actions <= minimal && !onclick) {
+	} else if (actions <= minimal
+			&& !onclick
+			&& !CustomBackend::Enabled()) {
+		// FoxMes bridge: this heuristic collapses the menu into a single
+		// direct action when nothing beyond the basic file pickers is
+		// available. Under the bridge that is the normal case (poll,
+		// checklist and article are out of scope), so the menu must still
+		// open to let the user choose between photo/document/music.
 		return nullptr;
 	}
 	return result;

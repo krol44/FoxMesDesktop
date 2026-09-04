@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/background_box.h"
 
+#include "custom_backend/native_runtime.h"
+#include "custom_backend/native_wallpaper_adapter.h"
 #include "lang/lang_keys.h"
 #include "ui/effects/round_checkbox.h"
 #include "ui/image/image.h"
@@ -294,6 +296,14 @@ bool BackgroundBox::chosenDefaultForPeer(
 }
 
 void BackgroundBox::chosen(const Data::WallPaper &paper) {
+	if (CustomBackend::Enabled()
+		&& CustomBackend::Wallpapers::ChooseNoBackground(
+			_controller,
+			_forPeer,
+			paper)) {
+		closeBox();
+		return;
+	}
 	if (chosenDefaultForPeer(paper)) {
 		if (!hasDefaultForPeer()) {
 			const auto reset = crl::guard(this, [=](Fn<void()> close) {
@@ -334,16 +344,20 @@ void BackgroundBox::chosen(const Data::WallPaper &paper) {
 }
 
 void BackgroundBox::resetForPeer() {
-	const auto api = &_controller->session().api();
-	api->request(MTPmessages_SetChatWallPaper(
-		MTP_flags(0),
-		_forPeer->input(),
-		MTPInputWallPaper(),
-		MTPWallPaperSettings(),
-		MTPint()
-	)).done([=](const MTPUpdates &result) {
-		api->applyUpdates(result);
-	}).send();
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Wallpapers::ResetForPeer(_forPeer);
+	} else {
+		const auto api = &_controller->session().api();
+		api->request(MTPmessages_SetChatWallPaper(
+			MTP_flags(0),
+			_forPeer->input(),
+			MTPInputWallPaper(),
+			MTPWallPaperSettings(),
+			MTPint()
+		)).done([=](const MTPUpdates &result) {
+			api->applyUpdates(result);
+		}).send();
+	}
 
 	const auto weak = base::make_weak(this);
 	_forPeer->setWallPaper({});
@@ -364,11 +378,15 @@ void BackgroundBox::removePaper(const Data::WallPaper &paper) {
 			weak->_inner->removePaper(paper);
 		}
 		session->data().removeWallpaper(paper);
-		session->api().request(MTPaccount_SaveWallPaper(
-			paper.mtpInput(session),
-			MTP_bool(true),
-			paper.mtpSettings()
-		)).send();
+		if (CustomBackend::Enabled()) {
+			CustomBackend::Wallpapers::Remove(session, paper);
+		} else {
+			session->api().request(MTPaccount_SaveWallPaper(
+				paper.mtpInput(session),
+				MTP_bool(true),
+				paper.mtpSettings()
+			)).send();
+		}
 	};
 	_controller->show(Ui::MakeConfirmBox({
 		.text = tr::lng_background_sure_delete(),
@@ -434,6 +452,12 @@ BackgroundBox::Inner::Inner(
 void BackgroundBox::Inner::requestPapers() {
 	if (forChannel()) {
 		_session->data().cloudThemes().refreshChatThemes();
+		return;
+	}
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Wallpapers::RequestGallery(_session, crl::guard(this, [=] {
+			updatePapers();
+		}));
 		return;
 	}
 	_api.request(MTPaccount_GetWallPapers(
@@ -584,6 +608,27 @@ void BackgroundBox::Inner::updatePapers() {
 		}) | ranges::to_vector;
 		pushCustomPapers();
 		sortPapers();
+		if (CustomBackend::Enabled()
+			&& !ranges::any_of(_papers, [](const Paper &paper) {
+				return CustomBackend::Wallpapers::IsNoBackground(paper.data);
+			})) {
+			// "No background" - the theme paints its own flat background and
+			// nothing is drawn over it. Upstream has no such tile because a
+			// Telegram account always has a wallpaper; here it is how an
+			// account, or one chat, goes back to having none.
+			//
+			// Skipped when one is already there: for a chat pushCustomPapers()
+			// puts the account background in front as the "reset" tile, and if
+			// the account itself has no background that tile IS this one. Two
+			// of them would be two cells with the same paper id, which is what
+			// the selection and the current-paper mark are keyed on.
+			//
+			// Inserted after sortPapers() on purpose: the sort ranks papers by
+			// how default they are and would not keep this one in front.
+			_papers.insert(
+				begin(_papers),
+				Paper{ CustomBackend::Wallpapers::NoBackgroundPaper() });
+		}
 	}
 	resizeToContentAndPreload();
 }

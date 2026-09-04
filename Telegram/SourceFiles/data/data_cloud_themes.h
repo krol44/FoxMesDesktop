@@ -21,6 +21,21 @@ class Controller;
 } // namespace Window
 
 namespace Data {
+class CloudThemes;
+struct CloudTheme;
+} // namespace Data
+
+namespace CustomBackend::ChatThemes {
+// FoxMes bridge seam: under the bridge the chat theme catalog is compiled into
+// the client, not fetched with account.getChatThemes. Declared before
+// Data::CloudThemes so the class can grant friendship; no FoxMes state lives
+// in this header.
+void Apply(
+	not_null<Data::CloudThemes*> themes,
+	std::vector<Data::CloudTheme> list);
+} // namespace CustomBackend::ChatThemes
+
+namespace Data {
 
 struct UniqueGift;
 class DocumentMedia;
@@ -155,6 +170,18 @@ private:
 	mtpRequestId _chatThemesRequestId = 0;
 	std::vector<CloudTheme> _chatThemes;
 	rpl::event_stream<> _chatThemesUpdates;
+
+	// Minimal bridge seam: the FoxMes custom_backend fills the chat theme
+	// catalog through this function; no state or business logic beyond it
+	// lives here.
+	// Qualified: the declarator names a function in another namespace, so GCC
+	// looks the parameter types up in CustomBackend::ChatThemes, where the
+	// sibling struct CloudTheme is not visible. CloudThemes resolves either way
+	// as the injected-class-name, but spelling both out keeps the signature
+	// identical to the declaration above.
+	friend void CustomBackend::ChatThemes::Apply(
+		not_null<Data::CloudThemes*> themes,
+		std::vector<Data::CloudTheme> list);
 
 	mtpRequestId _myGiftThemesRequestId = 0;
 	base::flat_map<uint64, CloudTheme> _giftThemes;

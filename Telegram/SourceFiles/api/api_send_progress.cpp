@@ -6,6 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "api/api_send_progress.h"
+#include "custom_backend/native_runtime.h"
+#include "custom_backend/native_bridge.h"
 
 #include "main/main_session.h"
 #include "history/history.h"
@@ -109,6 +111,14 @@ bool SendProgressManager::updated(const Key &key, bool doing) {
 }
 
 void SendProgressManager::send(const Key &key, int progress) {
+	if (CustomBackend::Enabled()) {
+		if (key.type == SendProgressType::Typing) {
+			if (const auto bridge = CustomBackend::BridgeFor(_session)) {
+				bridge->sendTyping(key.history);
+			}
+		}
+		return;
+	}
 	if (skipRequest(key)) {
 		return;
 	}

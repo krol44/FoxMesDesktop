@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "main/main_account.h"
+#include "custom_backend/native_runtime.h"
 
 #include "base/platform/base_platform_info.h"
 #include "core/application.h"
@@ -528,6 +529,16 @@ bool Account::checkForNewSession(const MTP::Response &message) {
 }
 
 void Account::logOut() {
+	if (CustomBackend::Enabled()) {
+		LOG(("FoxMes: ignored internal Account::logOut()."));
+		return;
+	}
+	// Telegram internals may call logOut() when our synthetic session
+	// has no valid Telegram MTProto authorization.
+	//
+	// OpenMessenger authentication is independent REST auth, so this
+	// must NOT invalidate our REST access/refresh tokens.
+
 	if (_loggingOut) {
 		return;
 	}
@@ -540,11 +551,20 @@ void Account::logOut() {
 	}
 }
 
+void Account::foxmesLoggedOut() {
+	_loggingOut = true;
+	loggedOut();
+}
+
 bool Account::loggingOut() const {
 	return _loggingOut;
 }
 
 void Account::forcedLogOut() {
+	if (CustomBackend::Enabled()) {
+		LOG(("FoxMes: ignored MTProto forcedLogOut()."));
+		return;
+	}
 	if (sessionExists()) {
 		loggedOut();
 		resetAuthorizationKeys();

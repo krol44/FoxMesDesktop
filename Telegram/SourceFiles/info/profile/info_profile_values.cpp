@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "info/profile/info_profile_values.h"
 
+#include "custom_backend/native_runtime.h"
 #include "api/api_chat_participants.h"
 #include "apiwrap.h"
 #include "info/profile/info_profile_phone_menu.h"
@@ -722,6 +723,9 @@ rpl::producer<BadgeType> BadgeValueFromFlags(Peer peer) {
 			Flag::Verified | Flag::Scam | Flag::Fake),
 		Data::PeerPremiumValue(peer)
 	) | rpl::map([=](base::flags<Flag> value, bool premium) {
+		if (CustomBackend::DisableWhile) {
+			premium = false;
+		}
 		return (value & Flag::Scam)
 			? BadgeType::Scam
 			: (value & Flag::Fake)

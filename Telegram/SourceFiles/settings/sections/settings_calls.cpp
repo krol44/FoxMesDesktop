@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/sections/settings_calls.h"
 
+#include "custom_backend/native_runtime.h"
 #include "api/api_authorizations.h"
 #include "apiwrap.h"
 #include "base/timer.h"
@@ -430,6 +431,10 @@ void BuildOtherSection(SectionBuilder &builder) {
 void BuildCallsSectionContent(
 		SectionBuilder &builder,
 		rpl::variable<bool> *testingMicrophone = nullptr) {
+	if (CustomBackend::Enabled()) {
+		return;
+	}
+
 	BuildOutputSection(builder);
 	BuildInputSection(builder, testingMicrophone);
 	BuildCallDevicesSection(builder);

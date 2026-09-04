@@ -18,6 +18,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item_components.h"
 #include "history/history_item_helpers.h"
 #include "apiwrap.h"
+#include "custom_backend/native_runtime.h"
+#include "custom_backend/native_scheduled_adapter.h"
 
 namespace Data {
 namespace {
@@ -486,6 +488,10 @@ Data::MessagesSlice ScheduledMessages::list(
 }
 
 void ScheduledMessages::request(not_null<History*> history) {
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Scheduled::Request(history);
+		return;
+	}
 	const auto peer = history->peer;
 	if (peer->isBroadcast() && !Data::CanSendAnything(peer)) {
 		return;
