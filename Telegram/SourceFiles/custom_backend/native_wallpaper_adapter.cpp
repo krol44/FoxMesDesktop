@@ -7,6 +7,8 @@ This file is part of FoxMes Desktop.
 #include "custom_backend/api_client.h"
 #include "custom_backend/native_bridge.h"
 #include "custom_backend/native_runtime.h"
+#include "core/application.h"
+#include "core/core_settings.h"
 #include "data/data_document.h"
 #include "data/data_peer.h"
 #include "data/data_session.h"
@@ -15,6 +17,7 @@ This file is part of FoxMes Desktop.
 #include "window/window_session_controller.h"
 #include "styles/style_layers.h"
 #include "window/themes/window_theme.h"
+#include "window/themes/window_themes_embedded.h"
 
 #include <QtCore/QBuffer>
 #include <QtCore/QJsonArray>
@@ -161,6 +164,110 @@ base::flat_map<not_null<Main::Session*>, State> &States() {
 	return paper
 		.withBlurred(state.value("blurred").toBool())
 		.withPatternIntensity(state.value("intensity").toInt());
+}
+
+// One of the colour schemes compiled into the desktop, named the way the
+// server names it in the first-run look.
+struct AppearanceTheme {
+	QString path;
+	// Night in the sense the theme picker uses: the two light schemes are the
+	// day ones, everything else flips the app into night mode.
+	bool night = false;
+};
+
+// Resolved through the upstream catalog rather than by spelling the resource
+// paths out here: those paths are already written down once, and a second copy
+// would drift from the first.
+[[nodiscard]] std::optional<AppearanceTheme> ThemeNamed(const QString &name) {
+	using Type = Window::Theme::EmbeddedType;
+	const auto type = [&]() -> std::optional<Type> {
+		if (name == u"classic"_q) {
+			return Type::Default;
+		} else if (name == u"day"_q) {
+			return Type::DayBlue;
+		} else if (name == u"tinted"_q) {
+			return Type::Night;
+		} else if (name == u"night"_q) {
+			return Type::NightGreen;
+		}
+		return std::nullopt;
+	}();
+	if (!type) {
+		return std::nullopt;
+	}
+	for (const auto &scheme : Window::Theme::EmbeddedThemes()) {
+		if (scheme.type == *type) {
+			return AppearanceTheme{
+				scheme.path,
+				(*type != Type::Default) && (*type != Type::DayBlue),
+			};
+		}
+	}
+	return std::nullopt;
+}
+
+// The look a fresh setup gets. The server says what it is; this says whether it
+// may still be applied - not to an account that has already had it, and not to
+// an install that already shows a theme or a wallpaper somebody chose. A
+// default is what you get before you choose, never something that overrules a
+// choice.
+void ApplyAppearanceDefault(
+		not_null<Main::Session*> session,
+		const QJsonObject &appearance) {
+	if (appearance.isEmpty() || AppearanceDefaultApplied(session)) {
+		return;
+	}
+	const auto theme = ThemeNamed(appearance.value("theme").toString());
+	if (!theme) {
+		// A name this build has no scheme for. Leaving the install alone beats
+		// guessing, and no mark is written: a later build will know the name.
+		return;
+	}
+	const auto background = Window::Theme::Background();
+	const auto &object = background->themeObject();
+	// "Untouched" in the same terms upstream uses in
+	// ChatBackground::isNonDefaultThemeOrBackground(): out of the box the day
+	// side has no theme file and the built-in wallpaper, and the night side -
+	// which the client picks by itself when the desktop is dark - has the
+	// night theme and the background that theme carries.
+	const auto untouched = !object.cloud.id
+		&& (Window::Theme::IsNightMode()
+			? ((object.pathAbsolute == Window::Theme::NightThemePath())
+				&& Data::IsThemeWallPaper(background->paper()))
+			: (object.pathAbsolute.isEmpty()
+				&& Data::IsDefaultWallPaper(background->paper())));
+	if (!untouched) {
+		return;
+	}
+	auto &settings = Core::App().settings();
+	if (settings.systemDarkModeEnabled()) {
+		// Following the desktop would undo the look the moment the system
+		// theme changed, and ChatBackground::nightModeChangeAllowed() refuses
+		// the switch outright while it is on. Upstream turns it off in the
+		// same breath when the user picks a scheme by hand
+		// (ToggleNightModeWithConfirmation); there is nobody to confirm with
+		// on a first run, and what is being applied is the account default
+		// rather than a guess about the desktop.
+		settings.setSystemDarkModeEnabled(false);
+		Core::App().saveSettingsDelayed();
+	}
+	// Exactly the pair the theme picker performs (settings_chat.cpp): the
+	// scheme is applied inside a theme test, and KeepApplied() is what writes
+	// it to disk instead of reverting it.
+	if (Window::Theme::IsNightMode() == theme->night) {
+		Window::Theme::ApplyDefaultWithPath(theme->path);
+	} else {
+		Window::Theme::ToggleNightMode(theme->path);
+	}
+	Window::Theme::KeepApplied();
+	if (appearance.value("wallpaper_none").toBool()
+		&& !Data::IsThemeWallPaper(background->paper())) {
+		// No picture at all, which for a chat means the background the theme
+		// carries. A scheme that ships one has already landed there, so this
+		// only covers the schemes that do not.
+		background->set(Data::ThemeWallPaper());
+	}
+	RememberAppearanceDefaultApplied(session);
 }
 
 } // namespace
@@ -452,9 +559,12 @@ bool ChooseNoBackground(
 }
 
 void RequestDefault(not_null<Main::Session*> session) {
-	if (!BridgeFor(session)) {
-		return;
-	}
+	// Deliberately not guarded on BridgeFor(): this is called from the
+	// NativeBridge constructor, and the bridge is only registered once that
+	// constructor returns - the guard that used to be here made the whole
+	// request a no-op, so neither the account default nor the first-run look
+	// ever reached the client. Nothing below needs the bridge; the REST client
+	// is per session and answers with an error when there is no token.
 	const auto weak = base::make_weak(session);
 	ClientFor(session).defaultWallpaper([weak](
 			QJsonDocument doc,
@@ -465,6 +575,10 @@ void RequestDefault(not_null<Main::Session*> session) {
 			return;
 		}
 		const auto state = doc.object();
+		// Before the wallpaper below and independent of it: the server answers
+		// a look only while the account has no wallpaper of its own, so the
+		// two are never both present.
+		ApplyAppearanceDefault(strong, state.value("appearance").toObject());
 		if (!state.value("wallpaper").isObject()) {
 			// An explicit null means "no default"; the local background is
 			// left as it is rather than reset, because the user may have

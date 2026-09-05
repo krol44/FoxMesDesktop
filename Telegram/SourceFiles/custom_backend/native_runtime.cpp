@@ -358,6 +358,22 @@ void SaveDefaultNotifyCache(
 	storage.sync();
 }
 
+bool AppearanceDefaultApplied(Main::Session *session) {
+	const auto id = SessionUserId(session);
+	// No account to remember it against, so nothing may be applied: a look
+	// forced now would be forced again on every start.
+	return (id <= 0)
+		|| Settings().value(Prefix(id) + u"/appearance_default"_q).toBool();
+}
+
+void RememberAppearanceDefaultApplied(Main::Session *session) {
+	const auto id = SessionUserId(session);
+	if (id <= 0) return;
+	auto settings = Settings();
+	settings.setValue(Prefix(id) + u"/appearance_default"_q, true);
+	settings.sync();
+}
+
 QJsonObject LoadReadJournal(Main::Session *session) {
 	const auto id = SessionUserId(session);
 	if (id <= 0) return {};

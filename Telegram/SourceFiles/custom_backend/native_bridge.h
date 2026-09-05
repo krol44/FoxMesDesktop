@@ -397,6 +397,13 @@ public:
 	[[nodiscard]] std::vector<ChatReader> readersThrough(
 		History *history,
 		qint64 messageId) const;
+	// Applies one user DTO onto the native peer: name, loaded status, avatar.
+	// Public because every adapter that receives users of its own (peer
+	// search) has to go through the same parsing - a second copy of it is how
+	// a peer ends up with a name but no avatar. `contact` is the address book
+	// flag and belongs only to somebody the account really knows: upstream
+	// lists a contact without a chat in the local half of the search results.
+	void ensureUser(const QJsonObject &user, bool contact = false);
 
 private:
     [[nodiscard]] ApiClient &client() const;
@@ -420,7 +427,6 @@ private:
     void applyChatSettingsPatch(const QJsonObject &data);
     void loadCachedChats();
     void finishInitialLoadIfReady();
-    void ensureUser(const QJsonObject &user, bool contact = false);
     HistoryItem *applyMessage(
         History *history,
         const QJsonObject &message,
@@ -476,6 +482,11 @@ private:
     // default makes every unmuted peer read as muted.
     void applyDefaultNotifySettings(qint64 muteUntil, bool soundNone);
     void loadDefaultNotifySettings();
+    // Re-reads the caller's own profile from GET /me. The cached DTO is the
+    // one stored at login, and self is deliberately absent from the members of
+    // every chat, so a name or an avatar changed anywhere else (the web
+    // profile page, another device) reaches this client through nothing else.
+    void refreshSelf();
     void applyDefaultNotifySettingsPayload(const QJsonObject &settings);
     void applyNotificationSettings(
         PeerData *peer,
@@ -657,6 +668,13 @@ private:
 	std::unordered_map<qint64, std::unordered_map<qint64, qint64>>
 		_presenceObservedAt;
 	std::unordered_set<Window::SessionController*> _trackedWindows;
+	// Which tracked windows are focused right now. Kept here rather than read
+	// from MainWindow::isActive(): that flag is refreshed by a timer
+	// (Window::Controller::updateIsActiveFocus, onlineFocusTimeout of a
+	// second), so at the moment windowActiveValue() reports the change it
+	// still holds the previous answer - presence computed from it was always
+	// one activation behind.
+	std::unordered_map<Window::SessionController*, bool> _windowActive;
 	qint64 _presenceChatId = 0;
 	std::unordered_set<qint64> _pendingEdits;
 	std::unordered_set<qint64> _pendingDeletes;

@@ -21,8 +21,8 @@ concurrency:
 env:
   # Bump to force a dependency rebuild without editing prepare.py.
   FOXMES_DEPS_REVISION: '1'
-  FOXMES_VERSION: 1.4.3
-  FOXMES_VERSION_CODE: '1004003'
+  FOXMES_VERSION: 1.4.4
+  FOXMES_VERSION_CODE: '1004004'
 
 jobs:
   validate:
@@ -414,7 +414,7 @@ jobs:
         run: |
           desktop-file-validate out/FoxMes.AppDir/usr/share/applications/ru.fxl.foxMes.desktop
           appstreamcli validate --no-net out/FoxMes.AppDir/usr/share/metainfo/ru.fxl.foxMes.metainfo.xml
-          artifacts/linux/FoxMes-1.4.3-linux-x86_64.AppImage --appimage-extract >/dev/null
+          artifacts/linux/FoxMes-1.4.4-linux-x86_64.AppImage --appimage-extract >/dev/null
           ldd out/FoxMes.AppDir/usr/bin/FoxMes | tee /tmp/foxmes-ldd.txt
           ! grep -q 'not found' /tmp/foxmes-ldd.txt
       # The Linux app build still runs on a seeding run: compiling is what fills

@@ -119,6 +119,14 @@ void SaveChatsCache(Main::Session *session, const QByteArray &json);
 // across a restart.
 [[nodiscard]] QJsonObject LoadDefaultNotifyCache(Main::Session *session);
 void SaveDefaultNotifyCache(Main::Session *session, const QJsonObject &settings);
+
+// Whether this account has already been given the first-run look the server
+// describes (GET /wallpaper -> "appearance"). Remembered per account and per
+// install, because the colour theme is a setting of this install that the
+// server never hears about: without the mark, every start would undo a theme
+// the user picked afterwards.
+[[nodiscard]] bool AppearanceDefaultApplied(Main::Session *session);
+void RememberAppearanceDefaultApplied(Main::Session *session);
 // Durable read intent is deliberately stored outside the auth context. A 401
 // clears tokens and pauses the journal, but the intent must survive re-auth.
 [[nodiscard]] QJsonObject LoadReadJournal(Main::Session *session);

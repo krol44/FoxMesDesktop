@@ -958,6 +958,11 @@ NativeBridge::NativeBridge(Main::Session *session)
         // duplicating the field parsing (and missing the avatar) here.
         ensureUser(me, false);
     }
+    // The cached DTO above is only as fresh as the last login: nothing else
+    // carries self, because the members of a chat deliberately exclude the
+    // caller. So an avatar uploaded on the web profile page, or a name changed
+    // on another device, is invisible here until this answers.
+    refreshSelf();
     // Before loadCachedChats(): defaults never arrive over MTProto under the
     // bridge, and an unknown default makes every unmuted peer read as muted.
     // The cached value is applied synchronously so the setting does not blink
@@ -1458,6 +1463,24 @@ void NativeBridge::ensureUser(const QJsonObject &user, bool contact) {
 		Data::PeerUpdate::Flag::Photo);
 }
 
+void NativeBridge::refreshSelf() {
+	const auto weak = QPointer<NativeBridge>(this);
+	client().me([weak](QJsonDocument doc, QString error, int) {
+		if (!weak || !error.isEmpty() || !doc.isObject()) {
+			return;
+		}
+		const auto user = doc.object();
+		if (user.value("id").toVariant().toLongLong() <= 0) {
+			return;
+		}
+		// Remembered as well as applied: the cache is what seeds self on the
+		// next cold start, and a stale one there would blank the avatar this
+		// just brought in until the answer arrives again.
+		RememberUser(weak->_session, user);
+		weak->ensureUser(user, false);
+	});
+}
+
 void NativeBridge::loadContacts() {
 	_contactsDone = true;
 	finishInitialLoadIfReady();
@@ -1905,15 +1928,22 @@ void NativeBridge::trackWindow(Window::SessionController *controller) {
 			weak->updatePresence();
 		}
 	}, controller->lifetime());
+	// The value is remembered, not just used as a trigger: it starts with the
+	// window's current state and changes the moment Qt says so, which is what
+	// presence has to follow. MainWindow::isActive() answers from a flag a
+	// timer updates a second later, so reading it from here would report the
+	// state the window had before this very change.
 	controller->widget()->windowActiveValue(
-	) | rpl::on_next([weak](bool) {
+	) | rpl::on_next([weak, controller](bool active) {
 		if (weak) {
+			weak->_windowActive[controller] = active;
 			weak->updatePresence();
 		}
 	}, controller->lifetime());
 	controller->lifetime().add([weak, controller] {
 		if (weak) {
 			weak->_trackedWindows.erase(controller);
+			weak->_windowActive.erase(controller);
 			weak->updatePresence();
 		}
 	});
@@ -1923,7 +1953,8 @@ void NativeBridge::trackWindow(Window::SessionController *controller) {
 void NativeBridge::updatePresence() {
 	auto chatId = qint64(0);
 	for (const auto &controller : _session->windows()) {
-		if (!controller->widget()->isActive()) {
+		const auto i = _windowActive.find(controller);
+		if (i == _windowActive.end() || !i->second) {
 			continue;
 		}
 		if (const auto history = controller->activeChatCurrent().history()) {
@@ -5660,6 +5691,13 @@ void NativeBridge::handleEvent(const QJsonObject &event) {
 		}
 		reloadChats();
 	} else if (type == u"user.updated"_q || type == u"user.created"_q) {
+		if (data.value("id").toVariant().toLongLong() == client().meId()) {
+			// Self arrives here whenever the profile changes anywhere else -
+			// the server sends the event to every participant of the changed
+			// user's chats, and that includes the user. Storing it keeps the
+			// cold-start seed in step with what is on screen.
+			RememberUser(_session, data);
+		}
 		ensureUser(data, true);
 		_contactsDone = true;
 		finishInitialLoadIfReady();

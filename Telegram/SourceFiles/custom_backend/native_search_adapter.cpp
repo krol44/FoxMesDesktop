@@ -72,17 +72,29 @@ void SearchPeers(
 				const auto id = object.value("id").toVariant().toLongLong();
 				if (id <= 0) continue;
 				const auto user = session->data().user(UserId(id));
-				user->setName(
-					object.value("display_name").toString(),
-					QString(),
-					QString(),
-					object.value("username").toString());
-				// Upstream drops updates for a peer it does not consider
-				// loaded, including the contact flag set right below.
-				if (!user->isLoaded()) {
-					user->setLoadedStatus(PeerData::LoadedStatus::Normal);
+				if (const auto bridge = BridgeFor(session)) {
+					// The same applier every other peer goes through, so a
+					// person found by search arrives with the avatar the DTO
+					// carries instead of initials.
+					//
+					// Not as a contact: a search hit is somebody the account
+					// has never talked to, and upstream lists a contact
+					// without a chat in the local half of the search - which
+					// showed the same person twice, once above the global
+					// results and once in them.
+					bridge->ensureUser(object, false);
+				} else {
+					user->setName(
+						object.value("display_name").toString(),
+						QString(),
+						QString(),
+						object.value("username").toString());
+					// Upstream drops updates for a peer it does not consider
+					// loaded.
+					if (!user->isLoaded()) {
+						user->setLoadedStatus(PeerData::LoadedStatus::Normal);
+					}
 				}
-				user->setIsContact(true);
 				parsed.peers.push_back(user);
 			}
 		}

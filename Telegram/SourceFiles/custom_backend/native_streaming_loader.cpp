@@ -270,9 +270,12 @@ void Loader::send(int64 offset, int retries) {
 	AllowDownloadTls(reply, auth);
 
 	_sent[offset] = Request{ .reply = reply, .retries = retries };
-	QObject::connect(reply, &QNetworkReply::finished, reply, [=] {
+	// Guarded, not just bound to the reply: the connection outlives this loader
+	// whenever a reply is answered after the loader is gone, and the handler
+	// touches nothing but the loader.
+	QObject::connect(reply, &QNetworkReply::finished, reply, crl::guard(this, [=] {
 		finished(offset, reply);
-	});
+	}));
 }
 
 void Loader::finished(int64 offset, not_null<QNetworkReply*> reply) {
@@ -313,13 +316,27 @@ void Loader::finished(int64 offset, not_null<QNetworkReply*> reply) {
 		failed(offset);
 		return;
 	}
+	// Firing a part can destroy this loader synchronously: the Reader owns the
+	// loader and is itself destroyed from inside the fire when the part
+	// completes a download somebody is waiting on - deleting the message being
+	// played is one way there. Upstream says as much where it consumes the
+	// stream (media_streaming_reader.cpp). So nothing may touch the loader
+	// after a fire without proving it is still alive.
+	const auto weak = base::make_weak(this);
 	_parts.fire({ offset, std::move(bytes) });
-	sendNext();
+	if (weak) {
+		sendNext();
+	}
 }
 
 void Loader::failed(int64 offset) {
+	// Same re-entrancy as in finished(): a failed part tears the playback down,
+	// and the loader can be gone by the time the fire returns.
+	const auto weak = base::make_weak(this);
 	_parts.fire({ LoadedPart::kFailedOffset });
-	sendNext();
+	if (weak) {
+		sendNext();
+	}
 }
 
 rpl::producer<LoadedPart> Loader::parts() const {
