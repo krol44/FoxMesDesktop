@@ -66,8 +66,8 @@ set_target_properties(Telegram PROPERTIES AUTOMOC ON)
 find_package(Qt${QT_VERSION_MAJOR} COMPONENTS WebSockets REQUIRED)
 
 set_target_properties(Telegram PROPERTIES
-    OUTPUT_NAME "${FOXMES_APP_NAME}"
-    MACOSX_BUNDLE_BUNDLE_NAME "${FOXMES_APP_NAME}"
+    OUTPUT_NAME "${FOXMES_BUNDLE_NAME}"
+    MACOSX_BUNDLE_BUNDLE_NAME "${FOXMES_BUNDLE_NAME}"
     MACOSX_BUNDLE_GUI_IDENTIFIER "${FOXMES_APP_ID}"
 )
 
@@ -2431,7 +2431,7 @@ endif()
 if (build_macstore)
     set(bundle_identifier "${FOXMES_APP_ID}")
     set(bundle_entitlements "Telegram Lite.entitlements")
-    set(output_name "FoxMes")
+    set(output_name "${FOXMES_BUNDLE_NAME}")
     target_link_options(Telegram
     PRIVATE
         -F${libs_loc}/breakpad/src/client/mac/build/Release
@@ -2452,7 +2452,7 @@ else()
         set(bundle_identifier "${FOXMES_APP_ID}")
     endif()
     set(bundle_entitlements "Telegram.entitlements")
-    set(output_name "FoxMes")
+    set(output_name "${FOXMES_BUNDLE_NAME}")
 endif()
 
 if (CMAKE_GENERATOR STREQUAL Xcode)

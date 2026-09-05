@@ -868,13 +868,19 @@ public:
 	void process() override {
 		if (!_doc) return;
 
-		_waveform = audioCountWaveform(_loc, _data);
+		auto counted = audioCountWaveform(_loc, _data);
+		_waveform = std::move(counted.waveform);
+		_duration = counted.duration;
 		_wavemax = _waveform.empty()
 			? char(0)
 			: *ranges::max_element(_waveform);
 	}
 	void finish() override {
 		if (const auto voice = _doc ? _doc->voice() : nullptr) {
+			// The decoder read the length out anyway, and for a voice message
+			// that arrived without one this is the only place it can come
+			// from. Documents that came with a length keep it.
+			_doc->fillDurationFromContent(_duration);
 			if (!_waveform.isEmpty()) {
 				voice->waveform = _waveform;
 				voice->wavemax = _wavemax;
@@ -901,6 +907,7 @@ protected:
 	Core::FileLocation _loc;
 	QByteArray _data;
 	VoiceWaveform _waveform;
+	crl::time _duration = 0;
 	char _wavemax;
 
 };

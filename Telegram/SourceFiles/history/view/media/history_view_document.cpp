@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "lottie/lottie_icon.h"
 #include "storage/localstorage.h"
+#include "custom_backend/native_runtime.h"
 #include "main/main_session.h"
 #include "media/player/media_player_float.h" // Media::Player::RoundPainter.
 #include "media/audio/media_audio.h"
@@ -990,6 +991,29 @@ void Document::draw(
 			if (voiceData && voiceData->waveform.isEmpty()) {
 				if (loaded) {
 					Local::countVoiceWaveform(_dataMedia.get());
+				} else if (CustomBackend::Enabled()
+					&& _data->isVoiceMessage()
+					&& _data->status == FileReady
+					&& !_data->loading()
+					&& !_data->cancelled()
+					&& !_data->uploading()) {
+					// FoxMes bridge: fxl-web sends a voice message without a
+					// waveform, and the envelope cannot be recovered from
+					// anything but the file itself. Upstream never downloads
+					// one on its own - Data::AutoDownload::Should() refuses
+					// voice messages outright, because on Telegram the server
+					// always sends the waveform along - so the load has to be
+					// asked for here. It goes to the cache and not to the
+					// download folder (DocumentData::saveToCache() is true for
+					// every voice message under kMaxFileInMemory), and once it
+					// finishes countVoiceWaveform() above fills the envelope
+					// in. That the file is then already at hand also makes the
+					// first tap on play instant.
+					_data->save(
+						_realParent->fullId(),
+						QString(),
+						LoadFromCloudOrLocal,
+						true);
 				}
 			}
 		}
@@ -1708,7 +1732,9 @@ bool Document::updateStatusText() const {
 		}
 	}
 
-	if (statusSize != _statusSize) {
+	const auto duration = _data->hasDuration() ? _data->duration() : -1;
+	if (statusSize != _statusSize || duration != _statusDuration) {
+		_statusDuration = duration;
 		setStatusSize(statusSize, realDuration);
 	}
 	return showPause;

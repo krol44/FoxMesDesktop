@@ -443,14 +443,12 @@ void BuildSectionButtons(SectionBuilder &builder) {
 		.keywords = { u"performance"_q, u"proxy"_q, u"experimental"_q },
 	});
 
-	if (!CustomBackend::Enabled()) {
-		builder.addSectionButton({
-			.title = tr::lng_settings_section_devices(),
-			.targetSection = CallsId(),
-			.icon = { &st::menuIconUnmute },
-			.keywords = { u"sessions"_q, u"calls"_q },
-		});
-	}
+	builder.addSectionButton({
+		.title = tr::lng_settings_section_devices(),
+		.targetSection = CallsId(),
+		.icon = { &st::menuIconUnmute },
+		.keywords = { u"sessions"_q, u"calls"_q },
+	});
 
 	builder.addButton({
 		.id = u"main/power"_q,

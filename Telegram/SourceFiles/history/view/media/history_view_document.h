@@ -184,6 +184,14 @@ private:
 
 	mutable float64 _voiceHoverProgress = -1;
 
+	// The playback length the status text was last built from. It is not
+	// always the same one for the whole life of the bubble: a voice message
+	// that arrived without a length gets one from the file once it has been
+	// downloaded (Storage::CountWaveformTask), and the status size does not
+	// change at that point - the file was already loaded - so without this the
+	// row would keep showing the 00:00 it was laid out with.
+	mutable crl::time _statusDuration = -1;
+
 	bool _transcribedRound = false;
 
 };

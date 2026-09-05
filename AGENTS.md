@@ -52,13 +52,24 @@ It reconfigures `out/`, builds the `Telegram` target, and launches the bundle
 against the local fxl-api. `./dev-client.sh prod` runs the same build against
 the production URL baked into the binary.
 
-The two profiles keep separate state. `FOXMES_URL` marks a dev run
-(`CustomBackend::DevProfileSuffix()` in `custom_backend/dev_profile.h`), and
-that run gets its own working directory - `~/Library/Application
-Support/FoxMes-dev/` instead of `FoxMes/` - plus its own `FoxMesDesktop-dev`
-QSettings store. Dev and prod logins therefore no longer evict each other, and
-both clients can run at the same time. A release build compiles the suffix out
-along with the endpoint override, so it always uses the production paths.
+Both scripts configure with `FOXMES_LOCAL_BUILD=ON`
+(`Telegram/cmake/foxmes.cmake`), so a locally built client is a separate
+application from the release in `/Applications`: the bundle is
+`out/Release/FoxMes-local.app` and its identifier is `ru.fxl.foxMes-local`.
+That is not cosmetic on macOS - TCC keys a microphone or camera grant to the
+bundle identifier plus the code signature, and two ad-hoc signed bundles
+claiming `ru.fxl.foxMes` make the system refuse the second one without a
+prompt, which is what stopped a downloaded release from recording after a local
+build had been run. Release builds do not set the option and stay `FoxMes.app`
+/ `ru.fxl.foxMes`.
+
+The profiles keep separate state through `CustomBackend::ProfileSuffix()` in
+`custom_backend/dev_profile.h`: `FOXMES_URL` marks a dev run and gives it
+`~/Library/Application Support/FoxMes-dev/` plus a `FoxMesDesktop-dev`
+QSettings store, while a local build against production uses the `-local` pair.
+Dev, local-prod and the installed release therefore never evict each other's
+login, and all of them can run at the same time. A release build compiles both
+suffixes out, so it always uses the production paths.
 
 **Always Release, never Debug.** `dev-client.sh` defaults to
 `BUILD_CONFIG=Release`, and that is the configuration this project uses - full
@@ -89,6 +100,22 @@ quoted absolute paths:
 ```bash
 cmake --build "l:\Telegram\tx64\out" --config Release --target Telegram
 ```
+
+### Signing the macOS release
+
+`build-macos.sh` configures with `CODE_SIGNING_ALLOWED=NO` and then signs the
+bundle itself, ad-hoc (`codesign --sign -`), with `Telegram.entitlements` and
+the hardened runtime, before it builds the DMG. That step is not optional
+polish: Xcode's signing phase is the only thing that applies the entitlements,
+and a bundle without `com.apple.security.device.audio-input` cannot record a
+voice or video message - TCC refuses the microphone and the recorder closes the
+moment it opens. The script fails the build when the finished signature does
+not carry the audio and camera entitlements.
+
+Ad-hoc needs no certificate, no key and no Apple developer account; what it
+does not give is a stable identity, because it is the code hash. macOS
+therefore asks for microphone access again after every update, and only a
+Developer ID signature plus notarization would fix that.
 
 ### Patches inside submodules
 

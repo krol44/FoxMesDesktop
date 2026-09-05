@@ -1498,6 +1498,13 @@ void ApiWrap::markContentsRead(
 			markedIds.push_back(MTP_int(item->id));
 		}
 	}
+	if (CustomBackend::Enabled()) {
+		// The items above already cleared their own unread-media flag, and
+		// fxl-api has no endpoint for "the content of this message was read":
+		// the chat read boundary the bridge reports is the only thing that
+		// keeps a played voice message quiet after a history reload.
+		return;
+	}
 	if (!markedIds.isEmpty()) {
 		request(MTPmessages_ReadMessageContents(
 			MTP_vector<MTPint>(markedIds)
@@ -1515,6 +1522,9 @@ void ApiWrap::markContentsRead(
 
 void ApiWrap::markContentsRead(not_null<HistoryItem*> item) {
 	if (!item->markContentsRead(true) || !item->isRegular()) {
+		return;
+	} else if (CustomBackend::Enabled()) {
+		// Cleared locally above; see the overload for the whole set.
 		return;
 	}
 	const auto ids = MTP_vector<MTPint>(1, MTP_int(item->id));

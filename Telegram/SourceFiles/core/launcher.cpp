@@ -444,10 +444,11 @@ int Launcher::exec() {
 
 bool Launcher::validateCustomWorkingDir() {
 	if (!customWorkingDir()) {
-		// A dev run keeps its own tdata next to the production one, so that
-		// running dev-client.sh and dev-client.sh prod in turn stops evicting
-		// each other's login. An explicit -workdir still wins.
-		const auto suffix = CustomBackend::DevProfileSuffix();
+		// A dev run and a local build each keep their own tdata next to the
+		// production one, so that a locally built client and an installed
+		// release stop evicting each other's login. An explicit -workdir still
+		// wins.
+		const auto suffix = CustomBackend::ProfileSuffix();
 		if (!suffix.isEmpty()) {
 			_customWorkingDir = QDir(cWorkingDir()).absolutePath()
 				+ suffix

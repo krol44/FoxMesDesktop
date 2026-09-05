@@ -1,4 +1,4 @@
-FoxMes Desktop 1.4.2. This is the first cross-platform FoxMes Desktop release for Windows x64, macOS 13+ on Apple silicon, and Linux x86_64.
+FoxMes Desktop 1.4.3. This is the first cross-platform FoxMes Desktop release for Windows x64, macOS 13+ on Apple silicon, and Linux x86_64.
 
 The macOS package is arm64-only and will not run on an Intel Mac.
 

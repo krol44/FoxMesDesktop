@@ -8,7 +8,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$version = "1.4.2"
+$version = "1.4.3"
 $telegramRoot = Join-Path $SourceRoot "Telegram"
 $buildRoot = Join-Path $SourceRoot "out"
 # prepare.py puts x64 dependencies in Libraries\win64, a sibling of the
@@ -270,7 +270,7 @@ if (-not (Test-Path $executable)) { throw "FoxMes.exe was not produced." }
 # 2026-09-04, after a two-hour build.
 $versionInfo = (Get-Item $executable).VersionInfo
 if ("$($versionInfo.CompanyName)".Trim() -ne "Foxtail") { throw "Unexpected executable publisher." }
-if ($versionInfo.ProductVersion -notlike "1.4.2*") { throw "Unexpected executable version." }
+if ($versionInfo.ProductVersion -notlike "1.4.3*") { throw "Unexpected executable version." }
 
 # Emptied for the same reason the Linux and macOS scripts empty theirs: a
 # package left by an earlier version would otherwise be uploaded as part of
@@ -320,7 +320,7 @@ if ($observedVersion -ne $version) {
     throw "Unexpected installer version: '$($observedVersion)'."
 }
 if ((Get-AuthenticodeSignature $setup).Status -ne "NotSigned") {
-    throw "The version 1.4.2 installer must be unsigned."
+    throw "The version 1.4.3 installer must be unsigned."
 }
 
 $temporaryRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { $env:TEMP }

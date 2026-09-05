@@ -1920,6 +1920,15 @@ crl::time DocumentData::duration() const {
 	return std::max(_duration, crl::time());
 }
 
+void DocumentData::fillDurationFromContent(crl::time duration) {
+	// A zero counts as missing here and not as known: an attribute that says
+	// "0 seconds" is what an unset length looks like on the wire, and it is
+	// exactly the case this fills in.
+	if (duration > 0 && _duration <= 0) {
+		_duration = duration;
+	}
+}
+
 bool DocumentData::hasDuration() const {
 	return _duration >= 0;
 }

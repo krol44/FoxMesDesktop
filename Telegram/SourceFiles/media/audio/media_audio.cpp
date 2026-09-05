@@ -1556,10 +1556,24 @@ public:
 		peaks.reserve(Media::Player::kWaveformSamplesCount);
 
 		auto fmt = format();
+		// countbytes is a count of bytes, but the callback below runs once
+		// per sample value: one byte of the buffer for the 8 bit formats and
+		// two for the 16 bit ones, once per channel either way. Adding a flat
+		// kWaveformSamplesCount per call therefore only balanced out for the
+		// 8 bit formats; both 16 bit ones reached the end of the file having
+		// pushed half the peaks they owed. The waveform was not wrong, just
+		// half as long - and a short one is drawn short, because
+		// PaintWaveform() in history_view_document caps its bar count at the
+		// number of samples it is handed, so the envelope stopped in the
+		// middle of the bubble.
+		const auto valueBytes = (fmt == AL_FORMAT_MONO8
+			|| fmt == AL_FORMAT_STEREO8)
+			? 1
+			: 2;
 		auto peak = uint16(0);
 		auto callback = [&](uint16 sample) {
 			accumulate_max(peak, sample);
-			sumbytes += Media::Player::kWaveformSamplesCount;
+			sumbytes += Media::Player::kWaveformSamplesCount * valueBytes;
 			if (sumbytes >= countbytes) {
 				sumbytes -= countbytes;
 				peaks.push_back(peak);
@@ -1618,13 +1632,13 @@ private:
 
 } // namespace Media
 
-VoiceWaveform audioCountWaveform(
+CountedWaveform audioCountWaveform(
 		const Core::FileLocation &file,
 		const QByteArray &data) {
 	Media::FFMpegWaveformCounter counter(file, data);
 	const auto positionMs = crl::time(0);
 	if (counter.open(positionMs)) {
-		return counter.waveform();
+		return { counter.waveform(), counter.duration() };
 	}
-	return VoiceWaveform();
+	return CountedWaveform();
 }

@@ -397,7 +397,17 @@ bool audioCheckError();
 } // namespace Player
 } // namespace Media
 
-VoiceWaveform audioCountWaveform(const Core::FileLocation &file, const QByteArray &data);
+// The waveform of a voice file, plus the playback length the decoder had to
+// read out to build it. The duration is free here and not always known from
+// anywhere else: a FoxMes voice message sent from fxl-web carries no length
+// attribute at all, and the file itself is the only place left to ask.
+struct CountedWaveform {
+	VoiceWaveform waveform;
+	crl::time duration = 0;
+};
+[[nodiscard]] CountedWaveform audioCountWaveform(
+	const Core::FileLocation &file,
+	const QByteArray &data);
 
 namespace Media {
 namespace Audio {

@@ -21,8 +21,8 @@ concurrency:
 env:
   # Bump to force a dependency rebuild without editing prepare.py.
   FOXMES_DEPS_REVISION: '1'
-  FOXMES_VERSION: 1.4.2
-  FOXMES_VERSION_CODE: '1004002'
+  FOXMES_VERSION: 1.4.3
+  FOXMES_VERSION_CODE: '1004003'
 
 jobs:
   validate:
@@ -36,6 +36,9 @@ jobs:
         shell: bash
         run: |
           python3 Telegram/build/foxmes/verify-source.py
+          # Fails here, before hours of building, when changelog.txt has no
+          # entry for this version - the release notes are built from it.
+          python3 Telegram/build/foxmes/make-release-notes.py >/dev/null
           test "$(awk '$1 == "AppVersion" { print $2 }' Telegram/build/version)" = "$FOXMES_VERSION_CODE"
           test "$(awk '$1 == "AppVersionStr" { print $2 }' Telegram/build/version)" = "$FOXMES_VERSION"
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
@@ -411,7 +414,7 @@ jobs:
         run: |
           desktop-file-validate out/FoxMes.AppDir/usr/share/applications/ru.fxl.foxMes.desktop
           appstreamcli validate --no-net out/FoxMes.AppDir/usr/share/metainfo/ru.fxl.foxMes.metainfo.xml
-          artifacts/linux/FoxMes-1.4.2-linux-x86_64.AppImage --appimage-extract >/dev/null
+          artifacts/linux/FoxMes-1.4.3-linux-x86_64.AppImage --appimage-extract >/dev/null
           ldd out/FoxMes.AppDir/usr/bin/FoxMes | tee /tmp/foxmes-ldd.txt
           ! grep -q 'not found' /tmp/foxmes-ldd.txt
       # The Linux app build still runs on a seeding run: compiling is what fills
@@ -477,6 +480,12 @@ jobs:
         with:
           name: foxmes-release
           path: release
+      - name: Build release notes
+        shell: bash
+        run: |
+          python3 Telegram/build/foxmes/make-release-notes.py \
+            --output "$RUNNER_TEMP/release-notes.md"
+          cat "$RUNNER_TEMP/release-notes.md"
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -485,4 +494,4 @@ jobs:
           gh release create "$GITHUB_REF_NAME" release/* \
             --verify-tag \
             --title "FoxMes Desktop $FOXMES_VERSION" \
-            --notes-file Telegram/build/foxmes/release-notes.md
+            --notes-file "$RUNNER_TEMP/release-notes.md"

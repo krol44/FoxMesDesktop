@@ -4,7 +4,7 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 source_root="${FOXMES_SOURCE_ROOT:-$(cd "$script_dir/../../.." && pwd)}"
 artifact_root="${FOXMES_ARTIFACT_ROOT:-$source_root/artifacts/linux}"
-version="1.4.2"
+version="1.4.3"
 image_tag="foxmes:centos_env"
 appdir="$source_root/out/FoxMes.AppDir"
 tools="$source_root/out/foxmes-tools"

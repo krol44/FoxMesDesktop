@@ -444,7 +444,10 @@ MainWidget::MainWidget(
 	}
 	orderWidgets();
 
-	if (!Core::UpdaterDisabled()) {
+	// FoxMes bridge: the GitHub Releases check stays available even when
+	// the built-in auto-installer is compiled out, so start it whenever
+	// any kind of update check is available.
+	if (Core::UpdateCheckAvailable()) {
 		Core::UpdateChecker checker;
 		checker.start();
 	}

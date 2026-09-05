@@ -10,7 +10,7 @@
   <Identity Name="ru.fxl.foxMes"
     ProcessorArchitecture="ARCHITECTURE"
     Publisher="CN=Foxtail"
-    Version="1.4.2.0" />
+    Version="1.4.3.0" />
   <Properties>
     <DisplayName>FoxMes</DisplayName>
     <PublisherDisplayName>Foxtail</PublisherDisplayName>

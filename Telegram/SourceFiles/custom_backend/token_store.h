@@ -23,7 +23,7 @@ inline QString TokenStorePrefix(qint64 userId) {
 // The only place the whole client reads its account storage from, so the dev
 // suffix applied here separates a dev login from the production one.
 inline QSettings Settings() {
-	return QSettings(u"FoxMes"_q, u"FoxMesDesktop"_q + DevProfileSuffix());
+	return QSettings(u"FoxMes"_q, u"FoxMesDesktop"_q + ProfileSuffix());
 }
 
 } // namespace details

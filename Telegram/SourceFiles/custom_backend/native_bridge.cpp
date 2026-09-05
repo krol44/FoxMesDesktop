@@ -295,6 +295,13 @@ bool AttachmentIsPhoto(const QJsonObject &attachment, bool forceFile) {
     return AttachmentMime(attachment).startsWith(u"image/"_q);
 }
 
+// Voice messages and round videos are the two medias upstream marks as
+// unlistened - HistoryItem::isUnreadMedia() ignores the flag on anything else.
+bool AttachmentPlaysOnce(const QJsonObject &attachment) {
+    const auto kind = attachment.value("kind").toString();
+    return (kind == u"voice"_q) || (kind == u"video_note"_q);
+}
+
 // Registers the PhotoData behind an image attachment.
 //
 // Bytes are only at hand for our own optimistic send; everything else is
@@ -2268,6 +2275,21 @@ std::optional<NativeBridge::PreparedMessage> NativeBridge::prepareMessage(
         // the sent attachment vanishes from the bubble and a reloaded message
         // renders as the empty-text placeholder.
         mtpFlags |= Flag::f_media;
+    }
+    // media_unread is what draws the dot next to a voice message that has not
+    // been listened to yet, and what fills its whole waveform instead of the
+    // played part (HistoryItem::isUnreadMedia, HistoryView::Document::draw).
+    // Without it every arriving voice bubble looked like an already played
+    // one. fxl-api has no per-message "content read" state - only the
+    // chat-wide read boundary the unread counter is drawn from - so that
+    // boundary is what the flag follows: anything the recipient has not read
+    // past has not been listened to either. Playing the message clears the
+    // flag locally (ApiWrap::markContentsRead), and opening the chat moves the
+    // boundary, which is what keeps it clear across a history reload.
+    if (!(mtpFlags & Flag::f_out)
+        && AttachmentPlaysOnce(attachment)
+        && (messageId > history->inboxReadTillId().bare)) {
+        mtpFlags |= Flag::f_media_unread;
     }
     // entities is optional too, with the same trap as media: without the flag
     // MTPDmessage reads the field back as absent no matter what was passed in

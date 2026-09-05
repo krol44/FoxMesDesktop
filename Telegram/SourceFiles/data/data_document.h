@@ -206,6 +206,12 @@ public:
 	[[nodiscard]] bool isTheme() const;
 	[[nodiscard]] bool isSharedMediaMusic() const;
 	[[nodiscard]] crl::time duration() const;
+	// Fills in a playback length that never arrived with the message, from
+	// the file after it has been downloaded and decoded. Never overwrites a
+	// length that is already known: the sender's word wins, this is only for
+	// media that came without one - a FoxMes voice message sent from fxl-web,
+	// which the chat stores with no duration attribute at all.
+	void fillDurationFromContent(crl::time duration);
 	[[nodiscard]] bool hasDuration() const;
 	[[nodiscard]] bool isImage() const;
 	void recountIsImage();

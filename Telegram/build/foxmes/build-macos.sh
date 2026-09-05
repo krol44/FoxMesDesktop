@@ -5,7 +5,7 @@ script_dir="$(cd "$(dirname "$0")" && pwd)"
 source_root="${FOXMES_SOURCE_ROOT:-$(cd "$script_dir/../../.." && pwd)}"
 artifact_root="${FOXMES_ARTIFACT_ROOT:-$source_root/artifacts/macos}"
 libraries_root="${FOXMES_LIBRARIES_ROOT:-$(cd "$source_root/.." && pwd)/Libraries}"
-version="1.4.2"
+version="1.4.3"
 
 # Two phases, because CI caches the dependency tree between them and needs a
 # seam to hang the cache save on. No argument runs both, so a local build is
@@ -99,6 +99,40 @@ build_app() {
 	local app="$source_root/out/Release/FoxMes.app"
 	local binary="$app/Contents/MacOS/FoxMes"
 	test -x "$binary"
+
+	# CODE_SIGNING_ALLOWED=NO above skips Xcode's signing phase, and with it
+	# the only step that applies Telegram.entitlements. The linker still ad-hoc
+	# signs the executable, so the app runs on arm64 and looks signed - but it
+	# carries no entitlements and no hardened runtime, and then recording a
+	# voice or video message dies the moment it starts: TCC hands out no
+	# microphone or camera access. Signing here restores exactly what a local
+	# ./dev-client.sh build gets from Xcode.
+	#
+	# --sign - is ad-hoc: no certificate, no key, no Apple developer account.
+	# The cost is that the identity is the code hash, so it changes with every
+	# release and macOS asks for microphone access again after each update. A
+	# Developer ID signature plus notarization is what would make the grant
+	# stick, and that does need a paid account - this does not.
+	codesign --force \
+	  --sign - \
+	  --options runtime \
+	  --entitlements "$source_root/Telegram/Telegram/Telegram.entitlements" \
+	  "$app"
+	codesign --verify --strict "$app"
+	# The signature can succeed and still carry nothing: an entitlements file
+	# that failed to parse, or a signing step quietly skipped by a future
+	# refactor of the flags above, both end here rather than in a release
+	# nobody can record with.
+	for entitlement in \
+	  com.apple.security.device.audio-input \
+	  com.apple.security.device.camera
+	do
+		if ! codesign --display --entitlements - "$app" 2>/dev/null \
+		  | grep -q "$entitlement"; then
+			echo "signed bundle is missing $entitlement" >&2
+			exit 1
+		fi
+	done
 	# lipo takes the input file first: "lipo -verify_arch arm64 <file>" makes it
 	# read the path as another architecture name and fail with a usage error.
 	# -verify_arch is dropped entirely because it passes on a universal binary
