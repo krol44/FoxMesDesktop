@@ -71,6 +71,11 @@ public:
 		send();
 	}
 
+	// Only an explicit "turn updates off" request stops the poll. The
+	// upstream Updater is owned by short-lived Core::UpdateChecker values
+	// (MainWidget, Intro::Widget and the settings section all create one on
+	// the stack), so tying this to its destructor aborted the very request
+	// that had just been started, and nothing ever rescheduled it.
 	void stop() {
 		_timer.cancel();
 		abortRequest();
@@ -186,7 +191,9 @@ private:
 	}
 
 	void fail() {
-		_last.reset();
+		// A failed check says nothing about the release we already saw:
+		// keep the known available update so a network blip does not hide
+		// the update button until the next successful hourly check.
 		_failed.fire({});
 	}
 

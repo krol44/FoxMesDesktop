@@ -31,6 +31,10 @@ struct AvailableUpdate {
 // Entry points used exclusively by thin hooks in Core::Updater /
 // Core::UpdateChecker (see BRIDGE.md for the hook shape rules).
 void StartUpdateCheck();
+
+// Stops the hourly poll for good. Hook it to an explicit user request only,
+// never to a destructor: Core::UpdateChecker values are short-lived stack
+// objects, so the Updater they own dies right after the check is started.
 void StopUpdateCheck();
 [[nodiscard]] bool IsAvailable();
 [[nodiscard]] AvailableUpdate CurrentAvailable();

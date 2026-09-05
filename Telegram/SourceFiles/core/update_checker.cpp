@@ -1947,10 +1947,6 @@ bool Updater::percent() const {
 }
 
 void Updater::stop() {
-	if (CustomBackend::Enabled()) {
-		CustomBackend::Updates::StopUpdateCheck();
-		return;
-	}
 	_httpImplementation = Implementation();
 	_mtpImplementation = Implementation();
 	_flatpakImplementation = Implementation{
@@ -2235,6 +2231,10 @@ void UpdateChecker::setMtproto(base::weak_ptr<Main::Session> session) {
 }
 
 void UpdateChecker::stop() {
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Updates::StopUpdateCheck();
+		return;
+	}
 	_updater->stop();
 }
 

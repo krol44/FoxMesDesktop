@@ -146,9 +146,9 @@ def main() -> int:
     for line in (ROOT / "Telegram/build/version").read_text(encoding="utf-8").splitlines():
         key, value = line.split(maxsplit=1)
         version_values[key] = value
-    if version_values.get("AppVersion") != "1004004":
+    if version_values.get("AppVersion") != "1004005":
         failures.append("Telegram/build/version has an unexpected version code")
-    if version_values.get("AppVersionStr") != "1.4.4":
+    if version_values.get("AppVersionStr") != "1.4.5":
         failures.append("Telegram/build/version has an unexpected version string")
 
     startup_task = (
