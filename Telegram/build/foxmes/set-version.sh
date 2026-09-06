@@ -82,6 +82,19 @@ build_patch_list() {
   add_patch "$ROOT/Telegram/build/foxmes/foxmes.iss" \
     "OutputBaseFilename=FoxMes-$ov-windows-x64-setup" "OutputBaseFilename=FoxMes-$nv-windows-x64-setup"
 
+  # The root README walks users through the unsigned downloads by file name,
+  # so every artifact it names carries the version as well.
+  add_patch "$ROOT/README.md" \
+    "FoxMes Desktop $ov" "FoxMes Desktop $nv"
+  add_patch "$ROOT/README.md" \
+    "FoxMes-$ov-windows-x64-setup.exe" "FoxMes-$nv-windows-x64-setup.exe"
+  add_patch "$ROOT/README.md" \
+    "FoxMes-$ov-windows-x64-portable.zip" "FoxMes-$nv-windows-x64-portable.zip"
+  add_patch "$ROOT/README.md" \
+    "FoxMes-$ov-linux-x86_64.AppImage" "FoxMes-$nv-linux-x86_64.AppImage"
+  add_patch "$ROOT/README.md" \
+    "FoxMes-$ov-linux-x86_64.tar.xz" "FoxMes-$nv-linux-x86_64.tar.xz"
+
   add_patch "$ROOT/Telegram/build/foxmes/README.md" \
     "Version $ov is unsigned." "Version $nv is unsigned."
 

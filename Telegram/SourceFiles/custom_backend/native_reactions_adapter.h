@@ -42,6 +42,12 @@ void SetAvailableCatalog(
 	const QStringList &assetUrls,
 	const QStringList &categories);
 
+// The caller's reaction order as the server keeps it (chat_user_emojis):
+// most used, then most recently used, both as alts. ApplyDefault turns them
+// into the _top/_recent lists the picker is sorted by; upstream fills the
+// same two lists from getTopReactions/getRecentReactions.
+void SetUsageLists(const QStringList &top, const QStringList &recent);
+
 // The catalog as loaded, for surfaces other than the reaction strip.
 [[nodiscard]] std::vector<CatalogItem> Catalog();
 [[nodiscard]] rpl::producer<> CatalogChanged();

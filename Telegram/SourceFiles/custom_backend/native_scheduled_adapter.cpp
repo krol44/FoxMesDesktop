@@ -192,6 +192,13 @@ bool ApplyEvent(
 			peerToMTP(history->peer->id),
 			MTP_vector<MTPint>(ids),
 			MTP_vector<MTPint>(sent));
+		// On a cold start the scheduled list was never loaded, so apply()
+		// returns at its _data lookup and sent_message_ids go nowhere. That is
+		// the right outcome, not a hole: the conversion it performs turns a
+		// scheduled row that is on screen into the real message, and there is
+		// no such row in memory. The delivered message itself arrives as an
+		// ordinary message.created, and the queue is re-read from the server
+		// whenever the section is opened.
 		session->scheduledMessages().apply(
 			update.c_updateDeleteScheduledMessages());
 		return true;

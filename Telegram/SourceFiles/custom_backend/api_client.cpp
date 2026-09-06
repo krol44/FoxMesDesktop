@@ -326,6 +326,10 @@ void ApiClient::reactionsCatalog(Callback done) {
     jsonRequest("GET", "/reactions", {}, std::move(done));
 }
 
+void ApiClient::reactionUsage(Callback done) {
+    jsonRequest("GET", "/reactions/usage", {}, std::move(done));
+}
+
 void ApiClient::chats(Callback done) {
     jsonRequest("GET", "/chats", {}, std::move(done));
 }
@@ -833,6 +837,14 @@ void ApiClient::operationResult(const QString &operationId, Callback done) {
 void ApiClient::markRead(qint64 chatId, qint64 messageId, Callback done) {
     jsonRequest("POST", QString("/chats/%1/read").arg(chatId), QJsonDocument(QJsonObject{
         {"message_id", messageId},
+    }), std::move(done));
+}
+
+void ApiClient::createMeet(qint64 chatId, const QString &operationId, Callback done) {
+    jsonRequest("POST", QString("/chats/%1/meet").arg(chatId), QJsonDocument(QJsonObject{
+        {"operation_id", operationId.isEmpty()
+            ? QUuid::createUuid().toString(QUuid::WithoutBraces)
+            : operationId},
     }), std::move(done));
 }
 

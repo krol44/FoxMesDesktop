@@ -157,10 +157,34 @@ constexpr auto kMaxSendReplays = 3;
 // history page does not produce one request per message.
 constexpr auto kDeliveredBatchDelayMs = 400;
 
+// A reaction the user just sent moves their reaction order, but the counter
+// lives on the server, so the refresh waits out a click storm instead of
+// asking once per toggle. Upstream debounces its getRecentReactions by the
+// same ten seconds (kRecentRequestTimeout in data_message_reactions.cpp).
+constexpr auto kReactionUsageRefreshDelayMs = 10 * 1000;
+
 // How many pinned bodies a pinned-list fetch asks the server to hydrate. The
 // full id set always comes back regardless; this only bounds how much of it
 // arrives ready to render, the rest is fetched per id by the pinned bar.
 constexpr auto kPinnedMessagesLimit = 30;
+
+// How many message events may wait for their chat to be mapped. The queue
+// exists for the few that can outrun the first /chats response; a chat that
+// never appears must not let it grow without a bound.
+constexpr auto kDeferredMessageEventsLimit = 256;
+
+// The alt lists GET /reactions and GET /reactions/usage answer with. Alts
+// only: the client mints its own DocumentId from each one.
+[[nodiscard]] QStringList ReactionAlts(const QJsonValue &value) {
+    auto result = QStringList();
+    for (const auto &entry : value.toArray()) {
+        const auto emoji = entry.toString();
+        if (!emoji.isEmpty() && !result.contains(emoji)) {
+            result.push_back(emoji);
+        }
+    }
+    return result;
+}
 
 QString AttachmentMime(const QJsonObject &attachment) {
     auto result = attachment.value("mime").toString().trimmed();
@@ -1496,6 +1520,11 @@ void NativeBridge::refreshReactionsCatalog() {
         auto assetUrls = QStringList();
         auto categories = QStringList();
         const auto object = doc.object();
+        // Set before the catalog: ApplyDefault, which the refresh below
+        // schedules, reads both in one pass.
+        Reactions::SetUsageLists(
+            ReactionAlts(object.value("top_reactions")),
+            ReactionAlts(object.value("recent_reactions")));
         const auto array = object.value("available_reactions").toArray();
         for (const auto &entry : array) {
             const auto reaction = entry.toObject();
@@ -1530,6 +1559,34 @@ void NativeBridge::scheduleReactionsRefresh() {
         }
         weak->_reactionsRefreshScheduled = false;
         weak->_session->data().reactions().refreshDefault();
+    });
+}
+
+// Re-reads the caller's reaction order after they reacted. Only the order:
+// the catalog is the whole emoji table of the site and does not change
+// because somebody used a reaction.
+void NativeBridge::refreshReactionUsage() {
+    const auto weak = QPointer<NativeBridge>(this);
+    client().reactionUsage([weak](QJsonDocument doc, QString error, int) {
+        if (!weak || !error.isEmpty() || !doc.isObject()) {
+            return;
+        }
+        const auto object = doc.object();
+        Reactions::SetUsageLists(
+            ReactionAlts(object.value("top_reactions")),
+            ReactionAlts(object.value("recent_reactions")));
+        weak->scheduleReactionsRefresh();
+    });
+}
+
+void NativeBridge::scheduleReactionUsageRefresh() {
+    if (_reactionUsageRefreshScheduled) {
+        return;
+    }
+    _reactionUsageRefreshScheduled = true;
+    QTimer::singleShot(kReactionUsageRefreshDelayMs, this, [this] {
+        _reactionUsageRefreshScheduled = false;
+        refreshReactionUsage();
     });
 }
 
@@ -1915,6 +1972,52 @@ void NativeBridge::applyChats(const QJsonDocument &doc) {
     // One batched order restoration after the whole array is parsed.
     rebuildPinnedOrder();
 	updatePresence();
+	// Every chat this response knows about is mapped now, so message events
+	// that arrived before it can finally be applied.
+	drainDeferredMessageEvents();
+}
+
+// Parks a message event whose chat is not mapped yet. Bounded on purpose: this
+// queue exists for the handful of events that can outrun the first /chats
+// response, and an unbounded one would grow silently if the chat never
+// appears - a message in a chat this account is not part of, for instance.
+void NativeBridge::deferMessageEvent(
+        const QString &type,
+        const QJsonObject &data) {
+    if (_deferredMessageEvents.size() >= kDeferredMessageEventsLimit) {
+        _deferredMessageEvents.erase(_deferredMessageEvents.begin());
+    }
+    _deferredMessageEvents.push_back({ type, data });
+}
+
+void NativeBridge::drainDeferredMessageEvents() {
+    if (_deferredMessageEvents.empty()) {
+        return;
+    }
+    // Anything still unmapped after this pass is put back: the chat may be
+    // created by a later event, and re-queueing keeps the arrival order.
+    auto pending = base::take(_deferredMessageEvents);
+    auto applied = false;
+    for (auto &deferred : pending) {
+        const auto chatId = deferred.data
+            .value("chat_id").toVariant().toLongLong();
+        const auto history = historyForChatId(chatId);
+        if (!history) {
+            _deferredMessageEvents.push_back(std::move(deferred));
+            continue;
+        }
+        applyMessage(
+            history,
+            deferred.data,
+            deferred.type == u"message.updated"_q,
+            deferred.type == u"message.created"_q
+                ? NewMessageType::Unread
+                : NewMessageType::Existing);
+        applied = true;
+    }
+    if (applied) {
+        _session->data().sendHistoryChangeNotifications();
+    }
 }
 
 void NativeBridge::trackWindow(Window::SessionController *controller) {
@@ -2503,11 +2606,37 @@ HistoryItem *NativeBridge::applyMessage(
         clearPendingSend(pendingLocalId);
         item = pendingLocal;
     } else {
+        // Upstream raises the unread counter for an own message that carries
+        // f_from_scheduled: a reminder that fired while the user was looking
+        // has to announce itself somehow (History::newItemAdded). Under the
+        // bridge that is only true for a live delivery. On replay the same
+        // event arrives for something that happened while the client was
+        // closed, after /chats has already reported the authoritative
+        // unread_count - and an own outgoing message is never unread for its
+        // author, here or in fxl-web.
+        //
+        // The phantom count was not cosmetic: History::loadAroundId() returns
+        // the inbox read boundary exactly while unreadCount() > 0, the history
+        // loader takes it as the anchor of the first page, and loadHistoryPage
+        // then drops openAtEnd - so opening the chat asked for a page around
+        // an old boundary instead of the fresh tail, and the just delivered
+        // message was not in it. It appeared only after a restart, when no
+        // replay ran. The notification is unaffected: newItemAdded pushes it
+        // before it touches the counter.
+        const auto own = (message.value("sender_id").toVariant().toLongLong()
+            == client().meId());
+        const auto unreadBefore = history->unreadCountKnown()
+            ? std::optional<int>(history->unreadCount())
+            : std::nullopt;
         item = history->addNewMessage(
             id,
             prepared->mtp,
             MessageFlags(),
             type);
+        if (own && unreadBefore && history->unreadCountKnown()
+            && history->unreadCount() != *unreadBefore) {
+            history->setUnreadCount(*unreadBefore);
+        }
     }
     applyMessageReactions(item, message);
     history->setChatListTimeId(unixTime(message.value("created_at").toString()));
@@ -5037,6 +5166,13 @@ void NativeBridge::dispatchReactionReplace(History *history, qint64 messageId) {
                     weak->dispatchReactionReplace(history, messageId);
                 }
             }
+            // An accepted replace may have moved the reaction order. Which
+            // way is the server's answer to give - it counts what the write
+            // actually inserted - so the client only asks, and only after the
+            // click storm settles.
+            if (error.isEmpty() && doc.isObject()) {
+                weak->scheduleReactionUsageRefresh();
+            }
         });
 }
 
@@ -5597,6 +5733,18 @@ void NativeBridge::handleEvent(const QJsonObject &event) {
                     : NewMessageType::Existing);
             _session->data().sendHistoryChangeNotifications();
         } else {
+            // The chat is not mapped yet - on a cold start replay can outrun
+            // the /chats response that fills _peerByChat. Dropping the payload
+            // here and asking for the chat list was a one-way loss: the
+            // watermark below still moved past this event, so the server never
+            // replayed it again. Keep it until the chat exists.
+            //
+            // The watermark is deliberately still advanced. It is also what
+            // the gap check above compares against, so holding it back would
+            // make the very next event look like a gap and trigger a resync
+            // loop. The queue below is the recovery instead, and the history
+            // page remains the backstop if the client dies before it drains.
+            deferMessageEvent(type, data);
             reloadChats();
         }
     } else if (type == u"reaction.updated"_q) {

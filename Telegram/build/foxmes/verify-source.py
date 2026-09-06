@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from pathlib import Path
 import re
+import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -68,6 +69,60 @@ EXPECTED_CONSTANTS = {
         ROOT / "Telegram/SourceFiles/platform/win/windows_autostart_task.cpp"
     ),
 }
+
+
+# Source paths as they appear on their own line in a nice_target_sources list.
+SOURCE_LINE = re.compile(r"^\s*([A-Za-z0-9_][A-Za-z0-9_./-]*\.(?:cpp|cc|c|mm|m|h|hpp))\s*$")
+
+# Roots the Telegram target lists sources against. Only these two are resolved:
+# a path that matches neither belongs to another target root (lib_base, cmake
+# modules) and is left alone rather than guessed at.
+SOURCE_ROOTS = ("Telegram/SourceFiles", "Telegram/Resources")
+
+
+def untracked_build_sources() -> list:
+    """Sources the build lists and this checkout has, but git does not.
+
+    A file that CMake references and git has never heard of builds fine for
+    whoever wrote it and fails for everyone else: the release runners check the
+    repository out, so the file simply is not there and every platform dies in
+    the configure step, minutes apart, after the deps have been restored. That
+    is what happened to native_meet_adapter.cpp in 1.4.6 - three jobs spent
+    their configure time discovering the same forgotten `git add`.
+
+    Only "present here but untracked" is reported. A path that exists nowhere
+    would already have broken the local build, and one that resolves under
+    neither root belongs to another target and is not this check's business.
+    """
+    try:
+        tracked = subprocess.run(
+            ("git", "ls-files", "-z"),
+            cwd=ROOT,
+            capture_output=True,
+            check=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        # Not a git checkout (a source tarball, say). Nothing to compare
+        # against, and failing here would block a legitimate build.
+        return []
+    known = {entry for entry in tracked.decode("utf-8").split("\0") if entry}
+
+    failures = []
+    for lists in (ROOT / "Telegram/CMakeLists.txt",):
+        for line in lists.read_text(encoding="utf-8").splitlines():
+            match = SOURCE_LINE.match(line)
+            if not match:
+                continue
+            for root in SOURCE_ROOTS:
+                relative = f"{root}/{match.group(1)}"
+                if not (ROOT / relative).is_file():
+                    continue
+                if relative not in known:
+                    failures.append(
+                        f"{lists.relative_to(ROOT)} builds {relative}, "
+                        "which is not tracked by git - run git add")
+                break
+    return failures
 
 
 def main() -> int:
@@ -146,9 +201,9 @@ def main() -> int:
     for line in (ROOT / "Telegram/build/version").read_text(encoding="utf-8").splitlines():
         key, value = line.split(maxsplit=1)
         version_values[key] = value
-    if version_values.get("AppVersion") != "1004005":
+    if version_values.get("AppVersion") != "1004006":
         failures.append("Telegram/build/version has an unexpected version code")
-    if version_values.get("AppVersionStr") != "1.4.5":
+    if version_values.get("AppVersionStr") != "1.4.6":
         failures.append("Telegram/build/version has an unexpected version string")
 
     startup_task = (
@@ -403,6 +458,8 @@ def main() -> int:
     )
     if "export DEBUG=" not in linux_script or "export LTO=" not in linux_script:
         failures.append("build-linux.sh no longer clears DEBUG and LTO")
+
+    failures.extend(untracked_build_sources())
 
     if failures:
         print("\n".join(failures), file=sys.stderr)

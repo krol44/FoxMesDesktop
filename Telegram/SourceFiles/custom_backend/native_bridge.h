@@ -527,6 +527,8 @@ private:
 	void resyncAfterGap(qint64 resumeFrom, qint64 observedSeq);
 	void onWebSocketMessage(const QString &message);
 	void refreshReactionsCatalog();
+	void refreshReactionUsage();
+	void scheduleReactionUsageRefresh();
 	void scheduleReactionsRefresh();
 	void updatePresence();
 	void applyPresence(const QJsonObject &data);
@@ -536,6 +538,8 @@ private:
         qint64 aroundId,
         Data::LoadDirection direction,
         HistoryLoaded done = {});
+    void deferMessageEvent(const QString &type, const QJsonObject &data);
+    void drainDeferredMessageEvents();
     [[nodiscard]] qint64 chatIdFor(History *history) const;
     [[nodiscard]] History *historyForChatId(qint64 chatId) const;
     [[nodiscard]] PeerId peerForChatId(qint64 chatId) const;
@@ -656,6 +660,15 @@ private:
 	// Chats whose real tail page was fetched through the bridge, so the
 	// loadedAtBottom flag of their History reflects actual data.
 	std::unordered_set<qint64> _bottomLoadedChats;
+	// Message events whose chat was not mapped when they arrived. On a cold
+	// start replay can outrun the first /chats response; without this the
+	// payload was dropped while the replay watermark moved past it, so the
+	// server never sent it again.
+	struct DeferredMessageEvent {
+		QString type;
+		QJsonObject data;
+	};
+	std::vector<DeferredMessageEvent> _deferredMessageEvents;
 	// In-flight history pages keyed by their request identity; every queued
 	// completion is invoked exactly once when the response arrives.
 	std::unordered_map<HistoryLoadKey, std::vector<std::function<void()>>, HistoryLoadKeyHash>
@@ -745,6 +758,7 @@ private:
 	bool _contactsDone = false;
 	bool _chatsDone = false;
 	bool _reactionsRefreshScheduled = false;
+	bool _reactionUsageRefreshScheduled = false;
 	std::unique_ptr<LiveUpdatesConnection> _liveUpdates;
 
 };

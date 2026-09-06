@@ -75,6 +75,20 @@ int &MaxSelectedStorage() {
     return value;
 }
 
+// The two usage orders the server keeps per user (chat_user_emojis): most
+// used and most recently used, as alts. Upstream fills the same two lists
+// from messages.getTopReactions/getRecentReactions, and the picker reads
+// them as concat(top, recent, full) - see LookupPossibleReactions.
+QStringList &TopUsageStorage() {
+    static auto values = QStringList();
+    return values;
+}
+
+QStringList &RecentUsageStorage() {
+    static auto values = QStringList();
+    return values;
+}
+
 constexpr auto kStaticEmojiSize = 100;
 
 // Bridge reactions are custom-emoji reactions: upstream identifies them by
@@ -610,6 +624,11 @@ void SetAvailableCatalog(
     CatalogChangedStream().fire({});
 }
 
+void SetUsageLists(const QStringList &top, const QStringList &recent) {
+    TopUsageStorage() = top;
+    RecentUsageStorage() = recent;
+}
+
 int MaxSelectedReactions() {
     return MaxSelectedStorage();
 }
@@ -722,11 +741,42 @@ void ApplyDefault(
 			toCache(reaction.appearAnimation);
 			toCache(reaction.selectAnimation);
 		}
+		// The usage orders are resolved against the list just built, not
+		// against the catalog: an alt whose asset never arrived has no
+		// reaction to point at, and a dangling entry here would be a hole at
+		// the front of the picker.
+		const auto resolveUsage = [&](
+				const QStringList &alts,
+				std::vector<Data::ReactionId> &ids,
+				std::vector<Data::Reaction> &into) {
+			ids.clear();
+			into.clear();
+			ids.reserve(alts.size());
+			into.reserve(alts.size());
+			for (const auto &alt : alts) {
+				for (const auto &reaction : list) {
+					if (reaction.title == alt) {
+						ids.push_back(reaction.id);
+						into.push_back(reaction);
+						break;
+					}
+				}
+			}
+		};
+		resolveUsage(TopUsageStorage(), self._topIds, self._top);
+		resolveUsage(RecentUsageStorage(), self._recentIds, self._recent);
 		if (self._waitingForReactions) {
 			self._waitingForReactions = false;
 			self.resolveReactionImages();
 		}
 		self._defaultUpdated.fire({});
+		// Fired directly, not through recentUpdated(): that one arms the
+		// upstream top-refresh timer, whose request has no transport here and
+		// would sit in MTProto forever. The strip merges all three streams
+		// (history_view_reactions_button.cpp), so the order change reaches an
+		// already open chat.
+		self._topUpdated.fire({});
+		self._recentUpdated.fire({});
 	});
 }
 

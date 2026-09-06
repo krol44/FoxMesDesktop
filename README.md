@@ -4,7 +4,7 @@ FoxMes Desktop is built on the Telegram Desktop core.
 
 ## Running an unsigned download
 
-FoxMes Desktop 1.0.0 is distributed without a commercial code-signing certificate. Before bypassing an operating-system warning, verify the downloaded file against `SHA256SUMS` from the same GitHub release.
+FoxMes Desktop 1.4.6 is distributed without a commercial code-signing certificate. Before bypassing an operating-system warning, verify the downloaded file against `SHA256SUMS` from the same GitHub release.
 
 ### macOS
 
@@ -25,14 +25,14 @@ Right-click the downloaded installer, select **Properties**, enable **Unblock** 
 The file can also be unblocked with PowerShell:
 
 ```powershell
-Unblock-File .\FoxMes-1.0.0-windows-x64-setup.exe
+Unblock-File .\FoxMes-1.4.6-windows-x64-setup.exe
 ```
 
 For the portable version, unblock the ZIP before extracting it:
 
 ```powershell
-Unblock-File .\FoxMes-1.0.0-windows-x64-portable.zip
-Expand-Archive .\FoxMes-1.0.0-windows-x64-portable.zip .\FoxMes-portable
+Unblock-File .\FoxMes-1.4.6-windows-x64-portable.zip
+Expand-Archive .\FoxMes-1.4.6-windows-x64-portable.zip .\FoxMes-portable
 .\FoxMes-portable\FoxMes.exe
 ```
 
@@ -41,14 +41,14 @@ Expand-Archive .\FoxMes-1.0.0-windows-x64-portable.zip .\FoxMes-portable
 For the AppImage, grant execute permission and start it:
 
 ```bash
-chmod +x FoxMes-1.0.0-linux-x86_64.AppImage
-./FoxMes-1.0.0-linux-x86_64.AppImage
+chmod +x FoxMes-1.4.6-linux-x86_64.AppImage
+./FoxMes-1.4.6-linux-x86_64.AppImage
 ```
 
 If AppImage mounting is unavailable, extract and run it directly:
 
 ```bash
-./FoxMes-1.0.0-linux-x86_64.AppImage --appimage-extract
+./FoxMes-1.4.6-linux-x86_64.AppImage --appimage-extract
 ./squashfs-root/AppRun
 ```
 
@@ -56,7 +56,7 @@ For the tar archive:
 
 ```bash
 mkdir FoxMes
-tar -xJf FoxMes-1.0.0-linux-x86_64.tar.xz -C FoxMes
+tar -xJf FoxMes-1.4.6-linux-x86_64.tar.xz -C FoxMes
 ./FoxMes/AppRun
 ```
 

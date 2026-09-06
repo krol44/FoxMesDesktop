@@ -103,6 +103,9 @@ public:
     void users(const QString &query, Callback done);
     void user(qint64 userId, Callback done);
     void reactionsCatalog(Callback done);
+    // The caller's reaction order alone, without the catalog behind it: the
+    // emoji table never changes because somebody reacted.
+    void reactionUsage(Callback done);
 
     void chats(Callback done);
     void chatsLight(Callback done);
@@ -285,6 +288,10 @@ public:
     // Ambiguous-timeout recovery: stored result of a journaled mutation.
     void operationResult(const QString &operationId, Callback done);
     void markRead(qint64 chatId, qint64 messageId, Callback done = {});
+    // Books a meet room for a private chat and answers with its link. The
+    // link itself is sent into the chat as an ordinary message afterwards,
+    // exactly like the "create meet" action of fxl-web does.
+    void createMeet(qint64 chatId, const QString &operationId, Callback done);
     // First-touch delivery acknowledgement for messages that actually reached
     // this device, batched by the bridge.
     void markDelivered(
