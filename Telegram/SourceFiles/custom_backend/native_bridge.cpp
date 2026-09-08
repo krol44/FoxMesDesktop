@@ -4167,6 +4167,24 @@ void NativeBridge::editText(
         if (done) done(u"MESSAGE_EDIT_PENDING"_q);
         return;
     }
+    if (item->isScheduled()) {
+        // A scheduled message is a reminder, which lives in its own queue with
+        // its own ids and its own endpoint. Only the guard above is shared:
+        // its key is the local id upstream mints for the item, which is unique
+        // across both spaces and never goes on the wire.
+        const auto weak = QPointer<NativeBridge>(this);
+        Scheduled::Edit(
+            item,
+            edited.text,
+            entitiesToJson(edited.entities, edited.text, webPage),
+            [weak, messageId, done = std::move(done)](QString error) {
+                if (weak) {
+                    weak->_pendingEdits.erase(messageId);
+                }
+                if (done) done(std::move(error));
+            });
+        return;
+    }
     const auto weak = QPointer<NativeBridge>(this);
     const auto chatId = chatIdFor(history);
     const auto revision = [&] {

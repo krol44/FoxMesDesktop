@@ -117,6 +117,51 @@ void Request(not_null<History*> history) {
 	});
 }
 
+void Edit(
+		not_null<HistoryItem*> item,
+		const QString &text,
+		const QJsonArray &entities,
+		std::function<void(QString)> done) {
+	const auto history = item->history();
+	const auto session = &history->session();
+	if (item->isSending() || item->hasFailed()) {
+		// A reminder that never reached the queue has no id there to edit,
+		// and lookupId asserts on exactly this case.
+		if (done) done(u"MESSAGE_ID_INVALID"_q);
+		return;
+	}
+	const auto raw = history.get();
+	ClientFor(session).updateReminder(
+		session->scheduledMessages().lookupId(item).bare,
+		text,
+		entities,
+		// Both schedule fields left empty is what tells the server to keep the
+		// time the reminder already has: an edit of the text is not a
+		// reschedule.
+		SendOptions(),
+		// Nothing here holds a reminder revision - the queue is applied as
+		// messages, and those carry the revisions of chat_messages, which is a
+		// different id space. A reminder is private to its author anyway, so
+		// the guard is turned off rather than fed a number from the wrong
+		// space, which would reject every edit.
+		0,
+		NewOperationId(),
+		[raw, done = std::move(done)](
+				QJsonDocument doc,
+				QString error,
+				int status) mutable {
+			if (error.isEmpty() && doc.isObject()) {
+				// The answer carries the rows the update touched and nothing
+				// about the rest of the queue, so it adds and updates only.
+				ApplyItems(raw, doc.object().value("items").toArray(), false);
+			} else {
+				LOG(("FoxMes: reminder edit failed (%1, %2)"
+					).arg(status).arg(error));
+			}
+			if (done) done(std::move(error));
+		});
+}
+
 void SendNow(not_null<PeerData*> peer, const QVector<MTPint> &ids) {
 	const auto session = &peer->session();
 	for (const auto &id : ids) {

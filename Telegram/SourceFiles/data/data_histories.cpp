@@ -7,7 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_histories.h"
 #include "custom_backend/native_runtime.h"
-#include "custom_backend/native_scheduled_adapter.h"
 #include "custom_backend/native_bridge.h"
 #include "custom_backend/native_delete_adapter.h"
 #include "custom_backend/native_chat_state_adapter.h"
@@ -1034,10 +1033,6 @@ void Histories::deleteMessages(const MessageIdsList &ids, bool revoke) {
 		history->owner().histories().deleteMessages(history, ids, revoke);
 	}
 	for (const auto &[peer, ids] : scheduledIdsByPeer) {
-		if (CustomBackend::Enabled()) {
-			CustomBackend::Scheduled::Delete(peer, ids);
-			continue;
-		}
 		peer->session().api().request(MTPmessages_DeleteScheduledMessages(
 			peer->input(),
 			MTP_vector<MTPint>(ids)

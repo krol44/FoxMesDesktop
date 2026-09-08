@@ -6,10 +6,14 @@ FoxMes bridge: scheduled messages.
 #include "base/basic_types.h"
 #include "data/data_msg_id.h"
 
+#include <QtCore/QJsonArray>
 #include <QtCore/QJsonObject>
 #include <QtCore/QVector>
 
+#include <functional>
+
 class History;
+class HistoryItem;
 class PeerData;
 
 namespace Main {
@@ -34,6 +38,18 @@ namespace CustomBackend::Scheduled {
 // MTProto request would hold its slot forever under the bridge, so this is not
 // an optimisation: the hook is what keeps the request from leaking.
 void Request(not_null<History*> history);
+
+// Replaces the transport of an edit made from the scheduled list. A reminder
+// is not a chat_messages row: it is addressed by its own id, on its own
+// endpoint. The id upstream carries on a scheduled item is the local one it
+// mints for the queue (ServerMaxMsgId plus the reminder id), so the message
+// edit path would both address the wrong table and overflow the column the
+// message ids live in.
+void Edit(
+	not_null<HistoryItem*> item,
+	const QString &text,
+	const QJsonArray &entities,
+	std::function<void(QString)> done);
 
 // Delivers scheduled messages ahead of their time.
 void SendNow(not_null<PeerData*> peer, const QVector<MTPint> &ids);

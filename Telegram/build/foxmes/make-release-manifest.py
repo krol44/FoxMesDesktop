@@ -4,8 +4,8 @@ import json
 from pathlib import Path
 import sys
 
-VERSION = "1.4.6"
-VERSION_CODE = 1004006
+VERSION = "1.4.7"
+VERSION_CODE = 1004007
 EXPECTED = {
     f"FoxMes-{VERSION}-windows-x64-setup.exe",
     f"FoxMes-{VERSION}-windows-x64-portable.zip",

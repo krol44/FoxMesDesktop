@@ -2,7 +2,9 @@
 
 #include "custom_backend/native_bridge.h"
 #include "custom_backend/native_runtime.h"
+#include "custom_backend/native_scheduled_adapter.h"
 #include "base/flat_map.h"
+#include "data/components/scheduled_messages.h"
 #include "data/data_session.h"
 #include "data/data_peer.h"
 #include "history/history.h"
@@ -42,9 +44,23 @@ void DeleteSelectedMessages(
     // together with the server-side ones; skipping them here is what made a
     // stuck message impossible to delete or cancel.
     auto local = std::vector<not_null<HistoryItem*>>();
+    // A scheduled message is not regular - it is a reminder, a row of its own
+    // queue addressed by its own id on its own endpoint. Without this bucket it
+    // fell through to the local one and was only destroyed on the client, so
+    // the cancelled reminder came back with the next load of the list.
+    auto scheduled = base::flat_map<not_null<PeerData*>, QVector<MTPint>>();
     for (const auto &fullId : ids) {
         const auto item = session->data().message(fullId);
         if (!item) {
+            continue;
+        }
+        if (item->isScheduled()) {
+            if (!item->isSending() && !item->hasFailed()) {
+                // The id has to be read before the item is destroyed below.
+                scheduled[item->history()->peer].push_back(MTP_int(
+                    session->scheduledMessages().lookupId(item)));
+            }
+            local.push_back(item);
             continue;
         }
         if (!item->isRegular() || item->id.bare <= 0) {
@@ -55,6 +71,9 @@ void DeleteSelectedMessages(
     }
     for (auto &[history, messageIds] : grouped) {
         bridge->deleteMessages(history, messageIds, revoke);
+    }
+    for (const auto &[peer, reminderIds] : scheduled) {
+        Scheduled::Delete(peer, reminderIds);
     }
     if (!local.empty()) {
         // Destroying a sending item runs upstream's cancelLocalItem, which is
