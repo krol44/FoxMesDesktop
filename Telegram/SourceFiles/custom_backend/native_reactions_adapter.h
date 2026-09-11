@@ -19,7 +19,12 @@ namespace CustomBackend::Reactions {
 // One catalog entry as the server serves it. It is the whole emoji table of
 // the site, which is also what the stickers panel shows - reactions and
 // stickers are one catalog here, not two.
+//
+// id is the identity of the row and the only key this client uses. emoji is
+// its caption: it is unique inside a category and repeats between categories,
+// so two different stickers legitimately carry the same characters.
 struct CatalogItem final {
+	DocumentId id = 0;
 	QString emoji;
 	QString assetUrl;
 	QString category;
@@ -35,37 +40,32 @@ struct Asset final {
     Main::Session *session,
     const QJsonArray &reactions,
     qint64 myUserId);
-// v2 catalog: emoji list with per-entry CDN asset urls. Native Unicode alts
-// are rendered from built-in graphics; unknown alts download their asset.
-void SetAvailableCatalog(
-	const QStringList &emojis,
-	const QStringList &assetUrls,
-	const QStringList &categories);
+// v2 catalog: catalog rows with per-entry CDN asset urls. The asset is the
+// only source of the picture - see the "картинку реакции даёт только CDN"
+// rule in BRIDGE.md.
+void SetAvailableCatalog(const std::vector<CatalogItem> &items);
 
-// The caller's reaction order as the server keeps it (chat_user_emojis):
-// most used, then most recently used, both as alts. ApplyDefault turns them
+// The caller's reaction order as the server keeps it (chat_user_emojis): most
+// used, then most recently used, both as catalog ids. ApplyDefault turns them
 // into the _top/_recent lists the picker is sorted by; upstream fills the
 // same two lists from getTopReactions/getRecentReactions.
-void SetUsageLists(const QStringList &top, const QStringList &recent);
+void SetUsageLists(
+	const std::vector<DocumentId> &top,
+	const std::vector<DocumentId> &recent);
 
 // The catalog as loaded, for surfaces other than the reaction strip.
 [[nodiscard]] std::vector<CatalogItem> Catalog();
 [[nodiscard]] rpl::producer<> CatalogChanged();
 
-// The asset behind one alt, shared with the stickers panel so the same picture
+// The asset behind one row, shared with the stickers panel so the same picture
 // is downloaded once and rendered by whichever surface needs it.
-[[nodiscard]] Asset AssetFor(const QString &emoji);
-[[nodiscard]] rpl::producer<QString> AssetLoaded();
+[[nodiscard]] Asset AssetFor(DocumentId id);
+[[nodiscard]] rpl::producer<DocumentId> AssetLoaded();
 
-// The client-side DocumentId of one alt, minted and registered so the reverse
-// lookup keeps working. It is derived from the alt alone and never leaves this
-// client - see the "DocumentId is computed from the alt" rule in BRIDGE.md.
-// A custom_emoji entity in a message resolves through it, which is what makes
-// a sticker in a bubble the same object as the same sticker in the panel.
-[[nodiscard]] DocumentId RegisterDocumentId(const QString &emoji);
+// The emoji of one row, for the text a send carries under its entity.
 [[nodiscard]] QString EmojiFor(DocumentId id);
-// The CDN address of one alt, as the catalog serves it.
-[[nodiscard]] QString AssetUrlFor(const QString &emoji);
+// The CDN address of one row, as the catalog serves it.
+[[nodiscard]] QString AssetUrlFor(DocumentId id);
 
 // Server-driven per-message limit of distinct chosen reactions
 // (catalog "max_selected"). Defaults to the historical client value.

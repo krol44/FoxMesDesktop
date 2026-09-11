@@ -275,13 +275,13 @@ public:
     void deleteHistory(qint64 chatId, Callback done);
     void deleteMessagesByDate(qint64 chatId, qint64 minDate, qint64 maxDate, Callback done);
     void deleteChat(qint64 chatId, Callback done);
-    void react(qint64 messageId, const QString &emoji, Callback done);
     // Guarded full-set replace (v2): the whole set is sent with the
     // reaction_revision observed by the caller; a mismatch answers 409 with
-    // the authoritative message.
+    // the authoritative message. The set is catalog ids - the emoji itself
+    // repeats between catalog groups and names no row.
     void setReactions(
         qint64 messageId,
-        const QStringList &reactions,
+        const std::vector<DocumentId> &reactions,
         qint64 expectedRevision,
         const QString &operationId,
         Callback done);

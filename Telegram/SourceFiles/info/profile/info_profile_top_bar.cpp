@@ -1336,6 +1336,10 @@ void TopBar::setupUserpicButton(
 	};
 
 	const auto hasMenu = [=] {
+		if (CustomBackend::DisableWhile) {
+			// Userpic context menu actions are not supported yet.
+			return false;
+		}
 		if (canChangePhoto()) {
 			return true;
 		}

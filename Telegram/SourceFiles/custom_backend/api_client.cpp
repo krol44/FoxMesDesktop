@@ -807,22 +807,20 @@ void ApiClient::deleteChat(qint64 chatId, Callback done) {
     jsonRequest("DELETE", QString("/chats/%1").arg(chatId), {}, std::move(done));
 }
 
-void ApiClient::react(qint64 messageId, const QString &emoji, Callback done) {
-    jsonRequest("POST", QString("/messages/%1/reactions").arg(messageId), QJsonDocument(QJsonObject{
-        {"emoji", emoji},
-    }), std::move(done));
-}
-
 void ApiClient::setReactions(
         qint64 messageId,
-        const QStringList &reactions,
+        const std::vector<DocumentId> &reactions,
         qint64 expectedRevision,
         const QString &operationId,
         Callback done) {
-    // Canonical v2 field is "reactions"; the server rejects the legacy
-    // "emojis" alias with 400 (DisallowUnknownFields).
+    auto ids = QJsonArray();
+    for (const auto id : reactions) {
+        ids.append(qint64(id));
+    }
+    // Canonical v2 field is "reactions", carrying catalog ids; the server
+    // rejects the legacy "emojis" alias with 400 (DisallowUnknownFields).
     jsonRequest("PUT", QString("/messages/%1/reactions").arg(messageId), QJsonDocument(QJsonObject{
-        {"reactions", stringsArray(reactions)},
+        {"reactions", ids},
         {"operation_id", operationId.isEmpty()
             ? QUuid::createUuid().toString(QUuid::WithoutBraces)
             : operationId},

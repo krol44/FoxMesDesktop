@@ -34,16 +34,17 @@ constexpr auto kStickerSide = 100;
 constexpr auto kSetIdBase = uint64(0xF0C0000000000000ULL);
 
 struct State {
-	// Documents built for this session, keyed by DocumentId, with the alt they
-	// were built from. The alt is what a send puts on the wire.
-	base::flat_map<DocumentId, QString> stickers;
+	// Documents built for this session, keyed by their panel DocumentId, with
+	// the catalog row they were built from. That row is what a send puts on
+	// the wire.
+	base::flat_map<DocumentId, DocumentId> stickers;
 	// Set ids this adapter installed, so a refresh replaces exactly them and
 	// leaves anything else in Data::Stickers alone.
 	std::vector<uint64> setIds;
-	// Alts already in the panel, with the mime they were built from. The mime
-	// is what a retry changes: an alt whose emoji_webm request failed first
-	// gets the still webp, and the animation only arrives on a later attempt.
-	base::flat_map<QString, QString> alts;
+	// Catalog rows already in the panel, with the mime they were built from.
+	// The mime is what a retry changes: a row whose emoji_webm request failed
+	// first gets the still webp, and the animation only arrives later.
+	base::flat_map<DocumentId, QString> alts;
 	rpl::lifetime lifetime;
 	bool subscribed = false;
 };
@@ -72,11 +73,12 @@ base::flat_map<not_null<Main::Session*>, State> &States() {
 	return kSetIdBase + (qHash(category) & 0xFFFFFFFFULL);
 }
 
-// A separate id space from the reaction document of the same alt: they are two
-// objects in one Data::Session and must not overwrite each other. Stable per
-// (set, alt) so a refresh reuses the object the panel is already painting.
-[[nodiscard]] DocumentId StickerDocumentId(uint64 setId, const QString &alt) {
-	return DocumentId(setId ^ Reactions::RegisterDocumentId(alt));
+// A separate id space from the reaction document of the same catalog row:
+// they are two objects in one Data::Session and must not overwrite each
+// other. Stable per (set, row) so a refresh reuses the object the panel is
+// already painting.
+[[nodiscard]] DocumentId StickerDocumentId(uint64 setId, DocumentId emojiId) {
+	return DocumentId(setId ^ emojiId);
 }
 
 [[nodiscard]] QString SetTitleFor(const QString &category) {
@@ -86,7 +88,7 @@ base::flat_map<not_null<Main::Session*>, State> &States() {
 		: trimmed;
 }
 
-// Builds the panel document for one catalog alt.
+// Builds the panel document for one catalog row.
 //
 // documentAttributeSticker, not documentAttributeCustomEmoji: the sticker
 // attribute is what makes DocumentData::setattributes() write
@@ -96,7 +98,7 @@ base::flat_map<not_null<Main::Session*>, State> &States() {
 // - see native_reactions_adapter.
 [[nodiscard]] DocumentData *BuildDocument(
 		not_null<Main::Session*> session,
-		const QString &alt,
+		const Reactions::CatalogItem &item,
 		uint64 setId,
 		const Reactions::Asset &asset) {
 	if (asset.content.isEmpty()) {
@@ -110,14 +112,13 @@ base::flat_map<not_null<Main::Session*>, State> &States() {
 			MTP_int(kStickerSide)),
 		MTP_documentAttributeSticker(
 			MTP_flags(Flag()),
-			// The alt travels on the document, which is where Send() reads it
-			// back from: the wire protocol of this product speaks alts, not
-			// document ids.
-			MTP_string(alt),
+			// The emoji travels on the document as its caption; the catalog
+			// row a send puts on the wire is kept in State::stickers.
+			MTP_string(item.emoji),
 			MTP_inputStickerSetEmpty(),
 			MTPMaskCoords()),
 	};
-	const auto id = StickerDocumentId(setId, alt);
+	const auto id = StickerDocumentId(setId, item.id);
 	const auto document = session->data().document(
 		id,
 		uint64(0), // access hash
@@ -141,11 +142,11 @@ base::flat_map<not_null<Main::Session*>, State> &States() {
 	auto media = document->createMediaView();
 	media->setBytes(asset.content);
 	MediaCache()[document->id] = std::move(media);
-	StateFor(session).stickers[document->id] = alt;
+	StateFor(session).stickers[document->id] = item.id;
 	return document;
 }
 
-// Adds the sticker for one alt, creating its set if this is the first entry of
+// Adds the sticker for one row, creating its set if this is the first entry of
 // that category. Incremental on purpose: assets land one network reply at a
 // time, and rebuilding the whole panel on each of them would be quadratic in
 // the size of the catalog - and would throw away every document the open panel
@@ -153,20 +154,20 @@ base::flat_map<not_null<Main::Session*>, State> &States() {
 void ApplyOne(
 		not_null<Main::Session*> session,
 		const Reactions::CatalogItem &item) {
-	const auto asset = Reactions::AssetFor(item.emoji);
+	const auto asset = Reactions::AssetFor(item.id);
 	if (asset.content.isEmpty()) {
 		// Still downloading. AssetLoaded() brings us back here.
 		return;
 	}
 	auto &state = StateFor(session);
-	if (const auto i = state.alts.find(item.emoji); i != state.alts.end()) {
+	if (const auto i = state.alts.find(item.id); i != state.alts.end()) {
 		if (i->second == asset.mime) {
 			return;
 		}
 		// The still was replaced by the animation. The document keeps its id -
 		// the panel is painting it right now - so only the bytes behind it are
 		// swapped, and the next frame comes from the new content.
-		const auto id = StickerDocumentId(SetIdFor(item.category), item.emoji);
+		const auto id = StickerDocumentId(SetIdFor(item.category), item.id);
 		if (const auto j = MediaCache().find(id); j != MediaCache().end()) {
 			j->second->setBytes(asset.content);
 			i->second = asset.mime;
@@ -195,11 +196,11 @@ void ApplyOne(
 		state.setIds.push_back(setId);
 		order.push_back(setId);
 	}
-	const auto document = BuildDocument(session, item.emoji, setId, asset);
+	const auto document = BuildDocument(session, item, setId, asset);
 	if (!document) {
 		return;
 	}
-	state.alts[item.emoji] = asset.mime;
+	state.alts[item.id] = asset.mime;
 	i->second->stickers.push_back(document);
 	i->second->count = i->second->stickers.size();
 	stickers.setLastUpdate(crl::now());
@@ -220,7 +221,7 @@ void Clear(not_null<Main::Session*> session) {
 	}
 	state.setIds.clear();
 	state.alts.clear();
-	for (const auto &[id, alt] : state.stickers) {
+	for (const auto &[id, emojiId] : state.stickers) {
 		MediaCache().remove(id);
 	}
 	state.stickers.clear();
@@ -293,8 +294,9 @@ bool Send(
 	if (!bridge) {
 		return false;
 	}
-	const auto alt = i->second;
-	if (alt.isEmpty()) {
+	const auto emojiId = i->second;
+	const auto emoji = Reactions::EmojiFor(emojiId);
+	if (!emojiId || emoji.isEmpty()) {
 		return false;
 	}
 	// A sticker is a message whose whole text is one custom emoji, which is
@@ -305,12 +307,11 @@ bool Send(
 	entities.push_back(EntityInText(
 		EntityType::CustomEmoji,
 		0,
-		int(alt.size()),
-		Data::SerializeCustomEmojiId(
-			Reactions::RegisterDocumentId(alt))));
+		int(emoji.size()),
+		Data::SerializeCustomEmojiId(emojiId)));
 	bridge->sendText(
 		history,
-		alt,
+		emoji,
 		entities,
 		Data::WebPageDraft(),
 		ReplyTargetFrom(history, action.replyTo),

@@ -300,8 +300,9 @@ public:
     // are outside the current product scope and are dropped here rather than
     // in the upstream queue, so the decision stays in one place.
     void saveDefaultNotifySettings(Data::DefaultNotify type);
-    void react(HistoryItem *item, const QString &emoji);
-    void setReactions(HistoryItem *item, const QStringList &emojis);
+    void setReactions(
+        HistoryItem *item,
+        const std::vector<DocumentId> &emojiIds);
     // Dispatches the coalesced desired set for a message (one PUT in flight);
     // called again from the completion when the desired set changed meanwhile.
     void dispatchReactionReplace(History *history, qint64 messageId);
@@ -722,7 +723,7 @@ private:
 	// clicks coalesce into the desired set; the canonical revision observed
 	// from the last response guards the next attempt.
 	struct ReactionReplaceState {
-		QStringList desired;
+		std::vector<DocumentId> desired;
 		bool inFlight = false;
 		// Zero is the canonical revision of a message nobody ever reacted
 		// to, so it is also the right guard for the first replace on one.

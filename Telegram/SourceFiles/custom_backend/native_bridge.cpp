@@ -173,14 +173,15 @@ constexpr auto kPinnedMessagesLimit = 30;
 // never appears must not let it grow without a bound.
 constexpr auto kDeferredMessageEventsLimit = 256;
 
-// The alt lists GET /reactions and GET /reactions/usage answer with. Alts
-// only: the client mints its own DocumentId from each one.
-[[nodiscard]] QStringList ReactionAlts(const QJsonValue &value) {
-    auto result = QStringList();
+// The usage lists GET /reactions and GET /reactions/usage answer with:
+// catalog ids, which are also the DocumentIds this client uses.
+[[nodiscard]] std::vector<DocumentId> ReactionUsageIds(
+        const QJsonValue &value) {
+    auto result = std::vector<DocumentId>();
     for (const auto &entry : value.toArray()) {
-        const auto emoji = entry.toString();
-        if (!emoji.isEmpty() && !result.contains(emoji)) {
-            result.push_back(emoji);
+        const auto id = DocumentId(entry.toVariant().toLongLong());
+        if (id && !ranges::contains(result, id)) {
+            result.push_back(id);
         }
     }
     return result;
@@ -1129,22 +1130,18 @@ MTPVector<MTPMessageEntity> NativeBridge::renderMessageEntities(
         } else if (type == u"email"_q) {
             result.push_back(MTP_messageEntityEmail(from, count));
         } else if (type == u"custom_emoji"_q) {
-            // A sticker of this product: the range is the alt, and the entity
-            // is what turns it from that literal text into the animation. The
-            // id is minted from the alt, never taken from the payload - the
-            // catalog and the history are drawn from the same registry, and a
-            // server-side id would disagree with it whenever the catalog
-            // refresh had not landed yet.
-            const auto alt = ((offset >= 0)
-                && (length > 0)
-                && (offset + length <= text.size()))
-                ? text.mid(offset, length)
-                : QString();
-            if (alt.isEmpty()) continue;
+            // A sticker of this product: the range is the emoji itself, and
+            // the entity is what turns it from that literal text into the
+            // animation. emoji_id names the catalog row and is the DocumentId
+            // here; the characters alone repeat between catalog groups and
+            // would collapse two stickers into one.
+            const auto emojiId = DocumentId(
+                entity.value("emoji_id").toVariant().toLongLong());
+            if (!emojiId) continue;
             result.push_back(MTP_messageEntityCustomEmoji(
                 from,
                 count,
-                MTP_long(Reactions::RegisterDocumentId(alt))));
+                MTP_long(emojiId)));
         }
     }
     return result.isEmpty()
@@ -1177,6 +1174,7 @@ QJsonArray NativeBridge::entitiesToJson(
     for (const auto &entity : entities) {
         auto type = QString();
         auto data = QString();
+        auto emojiId = DocumentId(0);
         switch (entity.type()) {
         case EntityType::Bold: type = u"bold"_q; break;
         case EntityType::Italic: type = u"italic"_q; break;
@@ -1190,14 +1188,13 @@ QJsonArray NativeBridge::entitiesToJson(
             break;
         case EntityType::Blockquote: type = u"blockquote"_q; break;
         case EntityType::CustomEmoji:
-            // The alt is already the text under the entity, and the server
-            // resolves the asset from it against its own catalog. The address
-            // is sent anyway so a client without a catalog has something to
-            // render; the server never trusts it.
+            // The emoji is already the text under the entity, and the server
+            // resolves the row from emoji_id against its own catalog. The
+            // address is sent anyway so a client without a catalog has
+            // something to render; the server never trusts it.
             type = u"custom_emoji"_q;
-            data = Reactions::AssetUrlFor(
-                Reactions::EmojiFor(
-                    Data::ParseCustomEmojiData(entity.data())));
+            emojiId = Data::ParseCustomEmojiData(entity.data());
+            data = Reactions::AssetUrlFor(emojiId);
             break;
         case EntityType::CustomUrl:
             type = u"text_url"_q;
@@ -1229,6 +1226,9 @@ QJsonArray NativeBridge::entitiesToJson(
             {"length", entity.length()},
         };
         if (!data.isEmpty()) object.insert("data", data);
+        // The catalog row is the identity of a sticker; the characters under
+        // the entity are only its caption.
+        if (emojiId) object.insert("emoji_id", qint64(emojiId));
         // At most one link carries the settings: the message holds one media,
         // so it holds one card, and the same url can appear in the text twice.
         if (tuned && !previewAssigned && (type == u"text_url"_q)) {
@@ -1516,28 +1516,34 @@ void NativeBridge::refreshReactionsCatalog() {
         if (!weak || !doc.isObject()) {
             return;
         }
-        auto values = QStringList();
-        auto assetUrls = QStringList();
-        auto categories = QStringList();
+        auto values = std::vector<Reactions::CatalogItem>();
         const auto object = doc.object();
         // Set before the catalog: ApplyDefault, which the refresh below
         // schedules, reads both in one pass.
         Reactions::SetUsageLists(
-            ReactionAlts(object.value("top_reactions")),
-            ReactionAlts(object.value("recent_reactions")));
+            ReactionUsageIds(object.value("top_reactions")),
+            ReactionUsageIds(object.value("recent_reactions")));
         const auto array = object.value("available_reactions").toArray();
         for (const auto &entry : array) {
             const auto reaction = entry.toObject();
+            const auto id = DocumentId(
+                reaction.value("id").toVariant().toLongLong());
             const auto emoji = reaction.value("emoji").toString();
-            if (emoji.isEmpty() || values.contains(emoji)) {
+            // Deduplicated by id, not by the emoji: the same characters
+            // legitimately caption a row in two catalog groups, and dropping
+            // the second one would hide half the picker.
+            if (!id || emoji.isEmpty()) {
                 continue;
             }
-            values.push_back(emoji);
-            assetUrls.push_back(reaction.value("asset_url").toString());
-            categories.push_back(reaction.value("category").toString());
+            values.push_back(Reactions::CatalogItem{
+                .id = id,
+                .emoji = emoji,
+                .assetUrl = reaction.value("asset_url").toString(),
+                .category = reaction.value("category").toString(),
+            });
         }
-        if (!values.isEmpty()) {
-            Reactions::SetAvailableCatalog(values, assetUrls, categories);
+        if (!values.empty()) {
+            Reactions::SetAvailableCatalog(values);
             const auto maxSelected = object.value("max_selected").toInt();
             if (maxSelected > 0) {
                 Reactions::SetMaxSelectedReactions(maxSelected);
@@ -1573,8 +1579,8 @@ void NativeBridge::refreshReactionUsage() {
         }
         const auto object = doc.object();
         Reactions::SetUsageLists(
-            ReactionAlts(object.value("top_reactions")),
-            ReactionAlts(object.value("recent_reactions")));
+            ReactionUsageIds(object.value("top_reactions")),
+            ReactionUsageIds(object.value("recent_reactions")));
         weak->scheduleReactionsRefresh();
     });
 }
@@ -5087,35 +5093,16 @@ void NativeBridge::saveDefaultNotifySettings(Data::DefaultNotify type) {
         });
 }
 
-void NativeBridge::react(HistoryItem *item, const QString &emoji) {
-    if (!item || emoji.isEmpty() || item->id.bare <= 0) return;
-    const auto history = item->history().get();
-    const auto weak = QPointer<NativeBridge>(this);
-    client().react(item->id.bare, emoji, [weak, history](QJsonDocument doc, QString error, int) {
-        if (!weak || !history || !error.isEmpty() || !doc.isObject()) return;
-        const auto data = doc.object();
-        const auto messageId = data.value("id").toVariant().toLongLong();
-        if (messageId > 0 && messageId <= INT32_MAX) {
-            if (const auto existing = weak->_session->data().message(
-                    history->peer,
-                    MsgId(int32(messageId)))) {
-                weak->applyMessageReactions(existing, data);
-            } else {
-                weak->applyMessage(history, data, false);
-            }
-        }
-        weak->_session->data().sendHistoryChangeNotifications();
-    });
-}
-
-void NativeBridge::setReactions(HistoryItem *item, const QStringList &emojis) {
+void NativeBridge::setReactions(
+        HistoryItem *item,
+        const std::vector<DocumentId> &emojiIds) {
     if (!item || item->id.bare <= 0) return;
     const auto history = item->history().get();
     const auto messageId = item->id.bare;
     auto &state = _reactionReplace[messageId];
     // Coalesce: whatever the click storm produces, only the final desired
     // set is sent once the in-flight request completes.
-    state.desired = emojis;
+    state.desired = emojiIds;
     if (state.inFlight) {
         return;
     }
