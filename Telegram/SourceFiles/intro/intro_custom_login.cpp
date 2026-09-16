@@ -31,7 +31,7 @@ CustomLoginWidget::CustomLoginWidget(
     setTitleText(tr::lng_fox_mes_title());
     setErrorCentered(true);
     _code->changes() | rpl::on_next([this] { hideError(); }, _code->lifetime());
-    _getCode->setClickedCallback([this] { openPairingPage(); });
+    _getCode->setClickedCallback([this] { startPairing(); });
 	_getCode->setTextTransform(Ui::RoundButtonTextTransform::ToUpper);
 }
 
@@ -58,39 +58,38 @@ bool CustomLoginWidget::hasBack() const {
 }
 
 void CustomLoginWidget::startPairing() {
+    if (_busy) return;
+
+    hideError();
     _busy = true;
+    _getCode->setDisabled(true);
     const auto weak = QPointer<CustomLoginWidget>(this);
     CustomBackend::Client().startDevice([weak](QJsonDocument doc, QString error, int) {
         if (!weak) return;
         weak->_busy = false;
+        weak->_getCode->setDisabled(false);
         if (!error.isEmpty() || !doc.isObject()) {
-			weak->_openPairingWhenReady = false;
-			weak->showError(tr::lng_fox_mes_link_failed());
+            weak->showError(error.isEmpty()
+                ? tr::lng_fox_mes_link_failed()
+                : rpl::single(error));
             return;
         }
         const auto object = doc.object();
-        weak->_pairingRequest = object.value("request").toString();
-        weak->_pairingURL = object.value("url").toString();
-        if (weak->_pairingRequest.isEmpty() || weak->_pairingURL.isEmpty()) {
-			weak->_openPairingWhenReady = false;
-			weak->showError(tr::lng_fox_mes_invalid_link());
+        const auto request = object.value("request").toString();
+        const auto url = object.value("url").toString();
+        if (request.isEmpty() || url.isEmpty() || !QUrl(url).isValid()) {
+            weak->showError(tr::lng_fox_mes_invalid_link());
             return;
         }
-		if (weak->_openPairingWhenReady) {
-			weak->_openPairingWhenReady = false;
-			weak->openPairingPage();
-		}
+        weak->_pairingRequest = request;
+        weak->_pairingURL = url;
+        weak->_code->setText(QString());
+        weak->openPairingPage();
     });
 }
 
 void CustomLoginWidget::openPairingPage() {
-    if (_pairingURL.isEmpty()) {
-        _openPairingWhenReady = true;
-        if (!_busy) startPairing();
-        return;
-    }
-    const auto url = QUrl(_pairingURL);
-    if (!url.isValid() || !QDesktopServices::openUrl(url)) {
+    if (!QDesktopServices::openUrl(QUrl(_pairingURL))) {
         showError(tr::lng_fox_mes_browser_failed());
     }
 }

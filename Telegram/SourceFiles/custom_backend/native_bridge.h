@@ -488,6 +488,13 @@ private:
     // every chat, so a name or an avatar changed anywhere else (the web
     // profile page, another device) reaches this client through nothing else.
     void refreshSelf();
+    // A session with no event position yet (a fresh login) first reads the
+    // server's current one from GET /me `event_seq`: without `since` the socket
+    // replays the whole event log, history the chats reload already holds.
+    // Every connect reloads the chats after that read, so an event committed in
+    // between still replays or is already in the reload. Without the field the
+    // socket starts from zero, as before.
+    void startLiveUpdates();
     void applyDefaultNotifySettingsPayload(const QJsonObject &settings);
     void applyNotificationSettings(
         PeerData *peer,

@@ -897,7 +897,7 @@ The `Error` template parameter defaults to `rpl::no_error`: `rpl::producer<Type,
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **FoxMesDesktop** (242912 symbols, 470236 relationships, 434 execution flows).
+This project is indexed by GitNexus as **FoxMesDesktop** (242906 symbols, 470213 relationships, 434 execution flows).
 
 > Index stale? Run `node .gitnexus/run.cjs analyze --index-only` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? Bootstrap with `npx`, `bunx`, or `pnpm dlx` — e.g. `bunx gitnexus@latest analyze` (npm 11 npx crash; #1939).
 
@@ -925,6 +925,10 @@ This project is indexed by GitNexus as **FoxMesDesktop** (242912 symbols, 470236
 | `gitnexus://repo/FoxMesDesktop/clusters` | All functional areas |
 | `gitnexus://repo/FoxMesDesktop/processes` | All execution flows |
 | `gitnexus://repo/FoxMesDesktop/process/{name}` | Step-by-step execution trace |
+
+## Cross-Repo Groups
+
+This repository is listed under GitNexus **group(s): fxl** (see `~/.gitnexus/groups/`). For cross-repo analysis, use MCP tools `impact`, `query`, and `context` with `repo` set to `@<groupName>` or `@<groupName>/<memberPath>` (paths match keys in that group’s `group.yaml`). Use `group_list` / `group_sync` for membership and sync. From the project root: `node .gitnexus/run.cjs group list`, `node .gitnexus/run.cjs group sync <name>`, `node .gitnexus/run.cjs group impact <name> --target <symbol> --repo <group-path>` (the `.gitnexus/run.cjs` path is repo-root-relative).
 
 ## CLI
 

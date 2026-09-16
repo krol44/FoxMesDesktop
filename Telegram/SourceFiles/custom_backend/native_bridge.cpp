@@ -68,10 +68,13 @@
 #include <QMap>
 #include <QMimeDatabase>
 #include <QPointer>
+#include <QRegularExpression>
+#include <QUrl>
 #include <QUuid>
 
 #include <algorithm>
 #include <climits>
+#include <cmath>
 #include <map>
 #include <memory>
 #include <utility>
@@ -320,6 +323,133 @@ bool AttachmentIsPhoto(const QJsonObject &attachment, bool forceFile) {
     return AttachmentMime(attachment).startsWith(u"image/"_q);
 }
 
+// Upstream never hands a bubble an original photo: a server photo carries an
+// inline stripped thumbnail plus 's' (100px), 'm' (320px) and 'y' (1280px)
+// sizes, and the bubble draws a blurred small one until 'y' arrives. An fxl-cdn
+// url is the original upload - a camera shot is 4032x3024 and 3 MB - and with
+// it as the only size every visible bubble downloaded and decoded the whole
+// picture, PhotoMedia::set() scaled it to PhotoData::SideLimit() on the main
+// thread, and Photo::prepareImageCacheWithLarge() blurred the full original
+// for the background because there was nothing smaller to blur. Fast
+// scrolling through media pinned every core. fxl-cdn serves resized copies of
+// a stored image (Thumbor behind <sha256>/-/preview/WxH: fit-in, no
+// upscaling), so the sizes upstream works with are requested from it. 1280 is
+// twice the widest media bubble (maxMediaSize) on a high-dpi screen.
+constexpr auto kCdnSmallSide = 100;
+constexpr auto kCdnThumbnailSide = 320;
+constexpr auto kCdnLargeSide = 1280;
+
+// Only a bare fxl-cdn original - <host>/<sha256> - takes a transform. A
+// third-party url (a link preview image) or one already transformed is left
+// as it is.
+bool IsCdnOriginalUrl(const QString &url) {
+    static const auto kShaPath = QRegularExpression(
+        u"^/[0-9a-fA-F]{64}/?$"_q);
+    const auto parsed = QUrl(url);
+    return parsed.isValid()
+        && !parsed.host().isEmpty()
+        && !parsed.hasQuery()
+        && kShaPath.match(parsed.path()).hasMatch();
+}
+
+// Thumbor re-encodes still raster images only: a GIF would lose its animation
+// and an SVG is not rendered, so those keep the original.
+bool MimeHasCdnPreview(const QString &mime) {
+    return (mime == u"image/jpeg"_q)
+        || (mime == u"image/jpg"_q)
+        || (mime == u"image/png"_q)
+        || (mime == u"image/webp"_q);
+}
+
+QString CdnPreviewUrl(const QString &url, int side) {
+    auto base = url;
+    while (base.endsWith('/')) {
+        base.chop(1);
+    }
+    return base
+        + u"/-/preview/%1x%1/quality/smart/format/webp"_q.arg(side);
+}
+
+// The size a fit-in preview comes out with.
+QSize CdnPreviewSize(int width, int height, int side) {
+    if (width <= 0 || height <= 0 || std::max(width, height) <= side) {
+        return QSize(width, height);
+    }
+    const auto scale = float64(side) / std::max(width, height);
+    return QSize(
+        std::max(1, int(std::round(width * scale))),
+        std::max(1, int(std::round(height * scale))));
+}
+
+// A url image location, resized by fxl-cdn to fit `side` when it can be.
+bool FitsSide(int width, int height, int side) {
+    return (width > 0) && (height > 0) && (std::max(width, height) <= side);
+}
+
+ImageWithLocation RemoteImage(
+        const QString &url,
+        int width,
+        int height,
+        int side,
+        bool resizable) {
+    if (url.isEmpty()) {
+        return ImageWithLocation{
+            .location = ImageLocation(DownloadLocation(), width, height),
+        };
+    } else if (!resizable
+        || !IsCdnOriginalUrl(url)
+        || FitsSide(width, height, side)) {
+        // An image that already fits is served as uploaded: re-encoding it
+        // only grows it.
+        return ImageWithLocation{
+            .location = ImageLocation(
+                DownloadLocation{ PlainUrlLocation{ url } },
+                width,
+                height),
+        };
+    }
+    const auto size = CdnPreviewSize(width, height, side);
+    return ImageWithLocation{
+        .location = ImageLocation(
+            DownloadLocation{ PlainUrlLocation{ CdnPreviewUrl(url, side) } },
+            size.width(),
+            size.height()),
+    };
+}
+
+// The images of a photo known only by its url, sized like an MTP photo. What
+// fxl-cdn cannot resize keeps the original as the only (large) size.
+//
+// No bytesCount on purpose. For a url location upstream does the same
+// (image_location_factory.cpp:322) because the declared size need not match
+// what the server actually sends, and webFileLoader learns the real one from
+// the response. Declaring it made LoadCloudFile() ask the loader to grow past
+// its own full size and trip Expects(size <= _fullSize) in
+// FileLoader::increaseLoadSize().
+void UpdateRemotePhotoImages(
+        not_null<PhotoData*> photo,
+        const QString &url,
+        int width,
+        int height,
+        bool resizable) {
+    const auto sized = resizable && !url.isEmpty() && IsCdnOriginalUrl(url);
+    // A smaller size is only worth having when the image is larger than it:
+    // otherwise the large size is that image already.
+    const auto image = [&](int side) {
+        return (sized && !FitsSide(width, height, side))
+            ? RemoteImage(url, width, height, side, true)
+            : ImageWithLocation();
+    };
+    photo->updateImages(
+        QByteArray(),
+        image(kCdnSmallSide),
+        image(kCdnThumbnailSide),
+        RemoteImage(url, width, height, kCdnLargeSide, resizable),
+        ImageWithLocation(),
+        ImageWithLocation(),
+        0);
+}
+
 // Voice messages and round videos are the two medias upstream marks as
 // unlistened - HistoryItem::isUnreadMedia() ignores the flag on anything else.
 bool AttachmentPlaysOnce(const QJsonObject &attachment) {
@@ -400,28 +530,12 @@ MTPPhoto AttachmentPhoto(
     // and an MTProto location needs a dc_id we do not have - so the size and
     // the url are registered straight on the PhotoData.
     const auto url = attachment.value("url").toString().trimmed();
-    const auto data = session->data().photo(mediaId);
-    // No bytesCount on purpose. For a url location upstream does the same
-    // (image_location_factory.cpp:322) because the declared size need not
-    // match what the server actually sends, and webFileLoader learns the real
-    // one from the response. Declaring it made LoadCloudFile() ask the loader
-    // to grow past its own full size and trip
-    // Expects(size <= _fullSize) in FileLoader::increaseLoadSize().
-    data->updateImages(
-        QByteArray(),
-        ImageWithLocation(),
-        ImageWithLocation(),
-        ImageWithLocation{
-            .location = ImageLocation(
-                url.isEmpty()
-                    ? DownloadLocation()
-                    : DownloadLocation{ PlainUrlLocation{ url } },
-                width,
-                height),
-        },
-        ImageWithLocation(),
-        ImageWithLocation(),
-        0);
+    UpdateRemotePhotoImages(
+        session->data().photo(mediaId),
+        url,
+        width,
+        height,
+        MimeHasCdnPreview(AttachmentMime(attachment)));
     return photo;
 }
 
@@ -461,14 +575,11 @@ void ApplyAttachmentSource(
     if (width <= 0 || height <= 0) {
         width = height = kUnknownPhotoSide;
     }
+    // A poster is a still frame the server rendered, so fxl-cdn can always
+    // resize it - the full-size frame was blurred and scaled per bubble too.
     document->updateThumbnails(
         InlineImageLocation(),
-        ImageWithLocation{
-            .location = ImageLocation(
-                DownloadLocation{ PlainUrlLocation{ poster } },
-                width,
-                height),
-        },
+        RemoteImage(poster, width, height, kCdnLargeSide, true),
         ImageWithLocation(),
         false);
 }
@@ -709,20 +820,14 @@ MTPPhoto WebPagePhoto(
     // Same reason as AttachmentPhoto(): photoApplyFields() only applies a
     // location it considers valid, and an MTProto one needs a dc_id we do not
     // have, so the url is registered straight on the PhotoData.
-    const auto data = session->data().photo(mediaId);
-    data->updateImages(
-        QByteArray(),
-        ImageWithLocation(),
-        ImageWithLocation(),
-        ImageWithLocation{
-            .location = ImageLocation(
-                DownloadLocation{ PlainUrlLocation{ url } },
-                width,
-                height),
-        },
-        ImageWithLocation(),
-        ImageWithLocation(),
-        0);
+    // A preview image hosted on fxl-cdn gets the same sizes as an attachment;
+    // one from a third-party site keeps its url.
+    UpdateRemotePhotoImages(
+        session->data().photo(mediaId),
+        url,
+        width,
+        height,
+        true);
     return photo;
 }
 
@@ -1033,7 +1138,7 @@ NativeBridge::NativeBridge(Main::Session *session)
 		trackWindow(controller);
 	}
 	if (!client().accessToken().isEmpty()) {
-		_liveUpdates->start();
+		startLiveUpdates();
 		QTimer::singleShot(0, this, [this] { flushReadJournal(); });
 	}
 }
@@ -1502,6 +1607,27 @@ void NativeBridge::refreshSelf() {
 		// just brought in until the answer arrives again.
 		RememberUser(weak->_session, user);
 		weak->ensureUser(user, false);
+	});
+}
+
+void NativeBridge::startLiveUpdates() {
+	if (_eventSeq > 0) {
+		_liveUpdates->start();
+		return;
+	}
+	const auto weak = QPointer<NativeBridge>(this);
+	client().me([weak](QJsonDocument doc, QString error, int) {
+		if (!weak) {
+			return;
+		}
+		const auto seq = doc.object().value(
+			"event_seq").toVariant().toLongLong();
+		if (error.isEmpty() && seq > 0 && weak->_eventSeq == 0) {
+			weak->_eventSeq = seq;
+			weak->client().setEventSequence(seq);
+			RememberEventSequence(weak->_session, seq);
+		}
+		weak->_liveUpdates->start();
 	});
 }
 

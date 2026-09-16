@@ -32,7 +32,6 @@ private:
 	object_ptr<Ui::RoundButton> _getCode;
 	QString _pairingRequest;
 	QString _pairingURL;
-	bool _openPairingWhenReady = false;
 	bool _busy = false;
 };
 
