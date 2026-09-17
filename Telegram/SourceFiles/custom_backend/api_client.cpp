@@ -357,13 +357,20 @@ void ApiClient::forwardMessages(
         qint64 chatId,
         qint64 sourceChatId,
         const QList<qint64> &messageIds,
+        bool dropAuthor,
+        std::optional<int> videoTimestamp,
         const QString &operationId,
         Callback done) {
-    jsonRequest("POST", QString("/chats/%1/messages/forward").arg(chatId), QJsonDocument(QJsonObject{
+    auto body = QJsonObject{
         {"source_chat_id", sourceChatId},
         {"message_ids", idArray(messageIds)},
         {"operation_id", operationId},
-    }), std::move(done));
+        {"drop_author", dropAuthor},
+    };
+    if (videoTimestamp.has_value()) {
+        body.insert("video_timestamp", *videoTimestamp);
+    }
+    jsonRequest("POST", QString("/chats/%1/messages/forward").arg(chatId), QJsonDocument(body), std::move(done));
 }
 
 void ApiClient::pinMessage(

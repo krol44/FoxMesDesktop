@@ -3965,6 +3965,15 @@ void ApiWrap::forwardMessages(
 		return;
 	}
 
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Actions::ForwardDraft(
+			_session,
+			std::move(draft),
+			action.history,
+			std::move(successCallback));
+		return;
+	}
+
 	struct SharedCallback {
 		int requestsLeft = 0;
 		FnMut<void()> callback;
@@ -3974,25 +3983,6 @@ void ApiWrap::forwardMessages(
 		: std::shared_ptr<SharedCallback>();
 	if (successCallback) {
 		shared->callback = std::move(successCallback);
-	}
-
-	if (CustomBackend::Enabled()) {
-		std::vector<not_null<History*>> targets{ action.history };
-		// Forward() reports its own failure and has no MTP fallback, so its
-		// contract is to call and return unconditionally; the result is
-		// deliberately discarded rather than branched on.
-		(void)CustomBackend::Actions::Forward(
-			_session,
-			draft.items,
-			targets,
-			[shared] {
-				// finishForwarding() forwards without a success callback,
-				// so shared is null on that path.
-				if (shared && shared->callback) {
-					shared->callback();
-				}
-			});
-		return;
 	}
 
 	const auto count = int(draft.items.size());

@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/file_download_web.h"
 
 #include "custom_backend/native_runtime.h"
+#include "custom_backend/native_streaming_loader.h"
 #include "storage/cache/storage_cache_types.h"
 #include "base/timer.h"
 #include "base/weak_ptr.h"
@@ -735,6 +736,9 @@ Storage::Cache::Key webFileLoader::cacheKey() const {
 }
 
 std::optional<MediaKey> webFileLoader::fileLocationKey() const {
+	if (CustomBackend::Enabled()) {
+		return CustomBackend::Streaming::FileLocationKey(_url);
+	}
 	return std::nullopt;
 }
 

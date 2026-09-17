@@ -41,7 +41,9 @@ bool Forward(
 		not_null<Main::Session*> session,
 		std::vector<not_null<HistoryItem*>> items,
 		const std::vector<not_null<History*>> &to,
-		std::function<void()> done) {
+		std::function<void()> done,
+		bool dropAuthor,
+		std::optional<int> videoTimestamp) {
 	const auto bridge = BridgeFor(session);
 	if (!bridge || items.empty() || to.empty()) {
 		// There is no MTP fallback under the bridge, so a caller that
@@ -69,7 +71,7 @@ bool Forward(
 	auto left = std::make_shared<int>(int(to.size()));
 	auto failed = std::make_shared<bool>(false);
 	for (const auto &target : to) {
-		bridge->forwardMessages(source, target, ids, [session, peer = target->peer, left, failed, done](
+		bridge->forwardMessages(source, target, ids, dropAuthor, videoTimestamp, [session, peer = target->peer, left, failed, done](
 				QString error) {
 			if (!error.isEmpty()) {
 				*failed = true;
@@ -87,6 +89,39 @@ bool Forward(
 		});
 	}
 	return true;
+}
+
+void ForwardDraft(
+		not_null<Main::Session*> session,
+		Data::ResolvedForwardDraft &&draft,
+		not_null<History*> target,
+		FnMut<void()> &&done) {
+	const auto completion = std::make_shared<FnMut<void()>>(std::move(done));
+	if (!Forward(session, std::move(draft.items), { target }, [completion] {
+		if (*completion) {
+			(*completion)();
+		}
+	}, draft.options != Data::ForwardOptions::PreserveInfo)) {
+		return;
+	}
+}
+
+void ForwardToThreads(
+		not_null<Main::Session*> session,
+		std::vector<not_null<HistoryItem*>> items,
+		const std::vector<not_null<Data::Thread*>> &to,
+		Data::ForwardOptions options,
+		std::optional<int> videoTimestamp,
+		std::function<void()> done) {
+	auto targets = std::vector<not_null<History*>>();
+	targets.reserve(to.size());
+	for (const auto thread : to) {
+		targets.push_back(thread->owningHistory());
+	}
+	if (!Forward(session, std::move(items), targets, std::move(done),
+		options != Data::ForwardOptions::PreserveInfo, videoTimestamp)) {
+		return;
+	}
 }
 
 bool TogglePin(

@@ -4,8 +4,10 @@ This file is part of FoxMes Desktop.
 #pragma once
 
 #include "storage/cache/storage_cache_types.h"
+#include "data/data_types.h"
 
 #include <memory>
+#include <optional>
 
 class DocumentData;
 
@@ -37,6 +39,20 @@ namespace CustomBackend::Streaming {
 // document later on.
 void RememberSource(not_null<DocumentData*> document, const QString &url);
 void ClearSession(not_null<Main::Session*> session);
+
+void RememberFileCacheKey(
+	not_null<Main::Session*> session,
+	const QString &url,
+	const QString &fileUniqueId,
+	const QString &representation);
+[[nodiscard]] std::optional<Storage::Cache::Key> FileCacheKey(const QString &url);
+[[nodiscard]] Storage::Cache::Key UrlCacheKey(const QString &url);
+[[nodiscard]] std::optional<MediaKey> FileLocationKey(const QString &url);
+[[nodiscard]] MediaKey DocumentMediaKey(
+	const QString &url,
+	LocationType type,
+	int32 dc,
+	uint64 id);
 
 // Answers DocumentData::canBeStreamed() for a document with no remote location.
 [[nodiscard]] bool CanBeStreamed(not_null<const DocumentData*> document);

@@ -76,3 +76,4 @@ settings.local.json
 /docs/changelog/
 /.mcp.json
 /Telegram/CMakeLists.txt.bak
+/RELEASE.md

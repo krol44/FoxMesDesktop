@@ -234,10 +234,23 @@ bool PhotoMedia::setToClipboard() {
 	}
 	auto mime = std::make_unique<QMimeData>();
 	mime->setImageData(std::move(fallback));
-	if (auto bytes = imageBytes(large); !bytes.isEmpty()) {
+	// The marker below tells ReadMimeImage() (core/mime_type.cpp) to read the
+	// bytes back verbatim as a jpeg instead of the re-encoded QImage above,
+	// and it trusts the marker unconditionally - it never falls back to the
+	// image set above when the marker is present but the read fails. Upstream
+	// can assume the large size is always a jpeg because MTProto photos are;
+	// ours are not - a large size served from fxl-cdn is routinely webp - so
+	// the same bytes tagged "image/jpeg" here decode fine but under the wrong
+	// format, ReadMimeImage's read.format == "jpeg" check rejects them, and
+	// the paste came back empty instead of falling back to the image. Only
+	// bytes that actually start with the jpeg marker (FF D8) may carry the tag.
+	if (auto bytes = imageBytes(large)
+		; bytes.size() >= 2
+		&& uchar(bytes[0]) == 0xFF
+		&& uchar(bytes[1]) == 0xD8) {
 		mime->setData(u"image/jpeg"_q, std::move(bytes));
+		mime->setData(u"application/x-td-use-jpeg"_q, "1");
 	}
-	mime->setData(u"application/x-td-use-jpeg"_q, "1");
 	QGuiApplication::clipboard()->setMimeData(mime.release());
 	return true;
 }

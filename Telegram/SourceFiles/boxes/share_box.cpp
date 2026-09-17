@@ -1833,33 +1833,24 @@ ShareBox::SubmitCallback ShareBox::DefaultForwardCallback(
 			return;
 		}
 		if (CustomBackend::Enabled()) {
-			auto targets = std::vector<not_null<History*>>();
-			targets.reserve(result.size());
-			for (const auto &thread : result) {
-				targets.push_back(thread->owningHistory());
-			}
-			const auto phraseArgs = CreateForwardedMessagePhraseArgs(
-				result,
-				msgIds);
-			// The bridge ignores the comment field: the FoxMes forward API
-			// copies source messages as-is. Forward() resolves the request
-			// itself (success or an error toast); there is no MTP path to
-			// fall back to under the bridge, so this must always return.
-			(void)CustomBackend::Actions::Forward(
+			CustomBackend::Actions::ForwardToThreads(
 				&history->session(),
 				items,
-				targets,
+				result,
+				forwardOptions,
+				videoTimestamp,
 				[=] {
 					if (show->valid()) {
 						show->hideLayer();
 						ShowForwardedMessageToast(
 							show,
 							&history->session(),
-							phraseArgs);
+							CreateForwardedMessagePhraseArgs(result, msgIds));
 					}
 				});
 			return;
 		}
+
 		if (HistoryView::Controls::HasRichPage(items)) {
 			forwardOptions = HistoryView::Controls::NormalizeForwardOptions(
 				&history->session(),

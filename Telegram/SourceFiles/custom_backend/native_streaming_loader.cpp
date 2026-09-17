@@ -4,8 +4,14 @@ This file is part of FoxMes Desktop.
 #include "custom_backend/native_streaming_loader.h"
 
 #include "base/weak_ptr.h"
+#include "base/openssl_help.h"
 #include "custom_backend/native_runtime.h"
 #include "data/data_document.h"
+#include "data/data_session.h"
+#include "data/data_types.h"
+#include "core/file_location.h"
+#include "storage/storage_account.h"
+#include "storage/cache/storage_cache_database.h"
 #include "main/main_session.h"
 #include "media/streaming/media_streaming_loader.h"
 #include "storage/streamed_file_downloader.h"
@@ -14,6 +20,10 @@ This file is part of FoxMes Desktop.
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkRequest>
+#include <QUuid>
+#include <map>
+#include <mutex>
+#include <set>
 
 namespace CustomBackend::Streaming {
 namespace {
@@ -22,6 +32,36 @@ using Media::Streaming::LoadedPart;
 using Media::Streaming::SpeedEstimate;
 
 constexpr auto kPartSize = Media::Streaming::Loader::kPartSize;
+
+// Keep the legacy URL layout compatible with Data::UrlCacheKey for resources without a UUID.
+Storage::Cache::Key LegacyUrlCacheKey(const QString &location) {
+	const auto url = location.toUtf8();
+	const auto hash = openssl::Sha256(bytes::make_span(url));
+	const auto bytes = bytes::make_span(hash);
+	const auto part1 = *reinterpret_cast<const uint32*>(bytes.data());
+	const auto part2 = *reinterpret_cast<const uint64*>(bytes.data() + sizeof(uint32));
+	const auto part3 = *reinterpret_cast<const uint16*>(bytes.data() + sizeof(uint32) + sizeof(uint64));
+	return Storage::Cache::Key{
+		0x0000030000000000ULL | (uint64(part3) << 32) | part1,
+		part2,
+	};
+}
+
+struct FileCacheEntry {
+	Storage::Cache::Key key;
+	std::set<Main::Session*> sessions;
+};
+
+// URL cache keys are also read by download workers; session state below is main-thread only.
+struct FileCacheRegistry {
+	std::mutex mutex;
+	std::map<QString, FileCacheEntry> entries;
+};
+
+FileCacheRegistry &FileCacheKeys() {
+	static auto value = FileCacheRegistry();
+	return value;
+}
 
 // How many part requests are in flight at once. Upstream lets the MTProto
 // download manager decide; over HTTP the number is ours, and four is what fills
@@ -363,10 +403,86 @@ void RememberSource(not_null<DocumentData*> document, const QString &url) {
 		return;
 	}
 	States()[&document->session()].urls[document->id] = url;
+	if (const auto key = FileLocationKey(url)) {
+		// HTTP documents keep dc/access at zero, so setRemoteLocation() never restores their path.
+		if (!document->location().check()) {
+			document->setLocation(document->session().local().readFileLocation(*key));
+		}
+	}
+}
+
+void RememberFileCacheKey(
+		not_null<Main::Session*> session,
+		const QString &url,
+		const QString &fileUniqueId,
+		const QString &representation) {
+	const auto uuid = QUuid(fileUniqueId);
+	if (url.isEmpty() || uuid.isNull()) {
+		return;
+	}
+	const auto identity = u"foxmes-file-v1:"_q
+		+ uuid.toString(QUuid::WithoutBraces) + ':' + representation;
+	const auto key = LegacyUrlCacheKey(identity);
+	const auto previous = UrlCacheKey(url);
+	auto &registry = FileCacheKeys();
+	{
+		const auto lock = std::lock_guard(registry.mutex);
+		auto &entry = registry.entries[url];
+		entry.key = key;
+		if (!entry.sessions.insert(session.get()).second) {
+			return;
+		}
+	}
+	if (previous != key) {
+		session->data().cache().copyIfEmpty(previous, key);
+	}
+}
+
+std::optional<Storage::Cache::Key> FileCacheKey(const QString &url) {
+	auto &registry = FileCacheKeys();
+	const auto lock = std::lock_guard(registry.mutex);
+	const auto i = registry.entries.find(url);
+	return (i == registry.entries.end())
+		? std::nullopt : std::make_optional(i->second.key);
+}
+
+Storage::Cache::Key UrlCacheKey(const QString &url) {
+	if (const auto key = FileCacheKey(url)) {
+		return *key;
+	}
+	return LegacyUrlCacheKey(url);
+}
+
+std::optional<MediaKey> FileLocationKey(const QString &url) {
+	if (const auto key = FileCacheKey(url)) {
+		return MediaKey{ key->high, key->low };
+	}
+	return std::nullopt;
+}
+
+MediaKey DocumentMediaKey(
+		const QString &url,
+		LocationType type,
+		int32 dc,
+		uint64 id) {
+	if (const auto key = FileCacheKey(url)) {
+		return { key->high, key->low };
+	}
+	return ::mediaKey(type, dc, id);
 }
 
 void ClearSession(not_null<Main::Session*> session) {
 	States().remove(session);
+	auto &registry = FileCacheKeys();
+	const auto lock = std::lock_guard(registry.mutex);
+	for (auto i = registry.entries.begin(); i != registry.entries.end();) {
+		i->second.sessions.erase(session.get());
+		if (i->second.sessions.empty()) {
+			i = registry.entries.erase(i);
+		} else {
+			++i;
+		}
+	}
 }
 
 bool CanBeStreamed(not_null<const DocumentData*> document) {
@@ -380,6 +496,13 @@ bool CanBeStreamed(not_null<const DocumentData*> document) {
 Storage::Cache::Key BigFileCacheKey(not_null<const DocumentData*> document) {
 	if (SourceUrl(document).isEmpty()) {
 		return Storage::Cache::Key();
+	}
+	if (const auto key = FileCacheKey(SourceUrl(document))) {
+		// A separate namespace for ranges, with low bits reserved for Reader's slice number.
+		return Storage::Cache::Key{
+			0x0000050000000000ULL | (key->high & 0x000000FFFFFFFFFFULL),
+			key->low & ~0xFFFFULL,
+		};
 	}
 	// The layout upstream computes for a document, with the dc id left at
 	// zero: our attachments have none, and upstream never issues dc 0, so a

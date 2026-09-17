@@ -7,6 +7,11 @@ BUILD_DIR="${BUILD_DIR:-${ROOT_DIR}/out}"
 BUILD_CONFIG="${BUILD_CONFIG:-Release}"
 # Profile: "dev" (default) runs against the local fxl-api,
 # "prod" uses the production URL baked into the binary.
+BUILD_ONLY=0
+if [[ "${1:-}" == "--build-only" ]]; then
+  BUILD_ONLY=1
+  shift
+fi
 PROFILE="${1:-dev}"
 
 if [[ ! -d "${PROJECT_DIR}" ]]; then
@@ -53,6 +58,11 @@ APP_BIN="${APP_BUNDLE}/Contents/MacOS/FoxMes-local"
 if [[ ! -x "${APP_BIN}" ]]; then
   echo "Application binary not found inside ${APP_BUNDLE}" >&2
   exit 1
+fi
+
+if [[ "${BUILD_ONLY}" == "1" ]]; then
+  echo "Build complete: ${APP_BUNDLE}"
+  exit 0
 fi
 
 cd "${ROOT_DIR}"

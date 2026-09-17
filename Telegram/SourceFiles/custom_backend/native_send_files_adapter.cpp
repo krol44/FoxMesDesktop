@@ -162,6 +162,22 @@ constexpr auto kPhotoJpegQuality = 87;
 		: (base + suffix);
 }
 
+// A path- or content-based file always carries its own name; only a bare
+// clipboard image does not (attach_prepare.cpp: PreparedFile(QString())
+// leaves displayName empty for that constructor). MaterializeImage below
+// names that case, but a paste that already arrives as encoded bytes - e.g.
+// Telegram's own internal "application/x-td-use-jpeg" copy flavor
+// (core/mime_type.cpp ReadMimeImage) - skips MaterializeImage (it only
+// synthesizes bytes when there are none yet), and PrepareDetails
+// (storage_media_prepare.cpp) never assigns a name either. Left empty, it
+// reached the upload as the bridge's generic "upload.bin" fallback
+// (native_bridge.cpp), and the sanitizer - which infers the format from the
+// extension, not the bytes - refused it outright.
+[[nodiscard]] QString NamedUploadOf(const QString &mime) {
+	const auto suffix = QMimeDatabase().mimeTypeForName(mime).preferredSuffix();
+	return suffix.isEmpty() ? u"clipboard"_q : (u"clipboard."_q + suffix);
+}
+
 // Bytes for a prepared file that has neither a path nor content on disk.
 // Two composer paths produce one: a clipboard picture arrives as a bare QImage
 // (Storage::PrepareMediaFromImage keeps the pixels in `information` and leaves
@@ -423,6 +439,9 @@ void SendFiles(
 				spec.forceFile = true;
 				spec.kind = u"document"_q;
 			}
+		}
+		if (spec.displayName.isEmpty() && !spec.content.isEmpty()) {
+			spec.displayName = NamedUploadOf(spec.mime);
 		}
 		files.push_back(std::move(spec));
 	}

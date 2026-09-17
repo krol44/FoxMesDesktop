@@ -48,6 +48,7 @@
 #include "main/main_account.h"
 #include "main/main_session.h"
 #include "storage/storage_facade.h"
+#include "storage/storage_account.h"
 #include "storage/storage_shared_media.h"
 #include "ui/effects/thanos_effect.h"
 #include "ui/item_text_options.h"
@@ -391,7 +392,9 @@ ImageWithLocation RemoteImage(
         int width,
         int height,
         int side,
-        bool resizable) {
+        bool resizable,
+        Main::Session *session = nullptr,
+        const QString &fileUniqueId = QString()) {
     if (url.isEmpty()) {
         return ImageWithLocation{
             .location = ImageLocation(DownloadLocation(), width, height),
@@ -399,6 +402,9 @@ ImageWithLocation RemoteImage(
     } else if (!resizable
         || !IsCdnOriginalUrl(url)
         || FitsSide(width, height, side)) {
+        if (session) {
+            Streaming::RememberFileCacheKey(session, url, fileUniqueId, u"original"_q);
+        }
         // An image that already fits is served as uploaded: re-encoding it
         // only grows it.
         return ImageWithLocation{
@@ -409,9 +415,14 @@ ImageWithLocation RemoteImage(
         };
     }
     const auto size = CdnPreviewSize(width, height, side);
+    const auto previewUrl = CdnPreviewUrl(url, side);
+    if (session) {
+        Streaming::RememberFileCacheKey(session, previewUrl, fileUniqueId,
+            u"preview-webp-smart-v1-%1"_q.arg(side));
+    }
     return ImageWithLocation{
         .location = ImageLocation(
-            DownloadLocation{ PlainUrlLocation{ CdnPreviewUrl(url, side) } },
+            DownloadLocation{ PlainUrlLocation{ previewUrl } },
             size.width(),
             size.height()),
     };
@@ -431,20 +442,21 @@ void UpdateRemotePhotoImages(
         const QString &url,
         int width,
         int height,
-        bool resizable) {
+        bool resizable,
+        const QString &fileUniqueId = QString()) {
     const auto sized = resizable && !url.isEmpty() && IsCdnOriginalUrl(url);
     // A smaller size is only worth having when the image is larger than it:
     // otherwise the large size is that image already.
     const auto image = [&](int side) {
         return (sized && !FitsSide(width, height, side))
-            ? RemoteImage(url, width, height, side, true)
+            ? RemoteImage(url, width, height, side, true, &photo->session(), fileUniqueId)
             : ImageWithLocation();
     };
     photo->updateImages(
         QByteArray(),
         image(kCdnSmallSide),
         image(kCdnThumbnailSide),
-        RemoteImage(url, width, height, kCdnLargeSide, resizable),
+        RemoteImage(url, width, height, kCdnLargeSide, resizable, &photo->session(), fileUniqueId),
         ImageWithLocation(),
         ImageWithLocation(),
         0);
@@ -455,6 +467,38 @@ void UpdateRemotePhotoImages(
 bool AttachmentPlaysOnce(const QJsonObject &attachment) {
     const auto kind = attachment.value("kind").toString();
     return (kind == u"voice"_q) || (kind == u"video_note"_q);
+}
+
+void CacheLocalAttachmentPhoto(
+        not_null<Main::Session*> session,
+        const QJsonObject &attachment,
+        const QImage &image,
+        const QByteArray &bytes) {
+    const auto fileUniqueId = attachment.value("file_unique_id").toString();
+    const auto url = attachment.value("url").toString().trimmed();
+    if (QUuid(fileUniqueId).isNull() || url.isEmpty()) {
+        return;
+    }
+    const auto resizable = MimeHasCdnPreview(AttachmentMime(attachment))
+        && IsCdnOriginalUrl(url);
+    for (const auto side : { kCdnSmallSide, kCdnThumbnailSide, kCdnLargeSide }) {
+        const auto remote = RemoteImage(url, image.width(), image.height(),
+            side, resizable, session, fileUniqueId);
+        auto cached = bytes;
+        if (resizable && !FitsSide(image.width(), image.height(), side)) {
+            // Cache local renderings only as previews; the original retains its uploaded bytes.
+            cached.clear();
+            QBuffer buffer(&cached);
+            buffer.open(QIODevice::WriteOnly);
+            image.scaled(CdnPreviewSize(image.width(), image.height(), side),
+                Qt::KeepAspectRatio, Qt::SmoothTransformation).save(&buffer, "PNG");
+        }
+        session->data().cache().putIfEmpty(remote.location.file().cacheKey(),
+            Storage::Cache::Database::TaggedValue(std::move(cached), Data::kImageCacheTag));
+        if (!resizable || FitsSide(image.width(), image.height(), side)) {
+            break;
+        }
+    }
 }
 
 // Registers the PhotoData behind an image attachment.
@@ -521,6 +565,7 @@ MTPPhoto AttachmentPhoto(
         MTPVector<MTPVideoSize>(),
         MTP_int(0));
     if (!thumbs.empty()) {
+        CacheLocalAttachmentPhoto(session, attachment, image, bytes);
         session->data().processPhoto(photo, thumbs);
         return photo;
     }
@@ -535,7 +580,8 @@ MTPPhoto AttachmentPhoto(
         url,
         width,
         height,
-        MimeHasCdnPreview(AttachmentMime(attachment)));
+        MimeHasCdnPreview(AttachmentMime(attachment)),
+        attachment.value("file_unique_id").toString());
     return photo;
 }
 
@@ -561,10 +607,16 @@ void ApplyAttachmentSource(
         const QJsonObject &attachment) {
     const auto url = attachment.value("url").toString().trimmed();
     if (!url.isEmpty()) {
+        const auto previousLocation = document->location(true);
+        Streaming::RememberFileCacheKey(&document->session(), url,
+            attachment.value("file_unique_id").toString(), u"original"_q);
         document->setContentUrl(url);
         // The streaming loader needs the same url, and DocumentData hands out
         // no getter for it.
         Streaming::RememberSource(document, url);
+        if (Streaming::FileCacheKey(url) && previousLocation.check()) {
+            document->session().local().writeFileLocation(document->mediaKey(), previousLocation);
+        }
     }
     const auto poster = attachment.value("poster_url").toString().trimmed();
     if (poster.isEmpty()) {
@@ -579,7 +631,8 @@ void ApplyAttachmentSource(
     // resize it - the full-size frame was blurred and scaled per bubble too.
     document->updateThumbnails(
         InlineImageLocation(),
-        RemoteImage(poster, width, height, kCdnLargeSide, true),
+        RemoteImage(poster, width, height, kCdnLargeSide, true,
+            &document->session(), attachment.value("poster_file_unique_id").toString()),
         ImageWithLocation(),
         false);
 }
@@ -587,7 +640,8 @@ void ApplyAttachmentSource(
 MTPMessageMedia MediaFromAttachment(
         not_null<Main::Session*> session,
         const QJsonObject &attachment,
-        const LocalAttachment &local) {
+        const LocalAttachment &local,
+        std::optional<int> videoTimestamp = std::nullopt) {
     const auto &bytes = local.bytes;
     const auto attachmentId = attachment.value("id").toVariant().toLongLong();
     const auto mediaId = kAttachmentMediaIdOffset + attachmentId;
@@ -760,12 +814,15 @@ MTPMessageMedia MediaFromAttachment(
     } else if (kind == u"video"_q || kind == u"animation"_q) {
         mediaFlags |= Flag::f_video;
     }
+    if (videoTimestamp.has_value()) {
+        mediaFlags |= Flag::f_video_timestamp;
+    }
     return MTP_messageMediaDocument(
         MTP_flags(mediaFlags),
         document,
         MTPVector<MTPDocument>(),
         MTPPhoto(),
-        MTPint(),
+        MTP_int(videoTimestamp.value_or(0)),
         MTPint());
 }
 
@@ -2527,7 +2584,13 @@ std::optional<NativeBridge::PreparedMessage> NativeBridge::prepareMessage(
     auto media = attachment.isEmpty()
         ? MediaFromWebPage(_session, webPage)
         : std::optional<MTPMessageMedia>(
-            MediaFromAttachment(_session, attachment, local));
+            MediaFromAttachment(
+                _session,
+                attachment,
+                local,
+                message.value("video_timestamp").isDouble()
+                    ? std::make_optional(message.value("video_timestamp").toInt())
+                    : std::nullopt));
     if (media && webPage.value("above").toBool()) {
         // "Move up" in the preview settings. Upstream calls it invert_media
         // and keeps it on the message, not on the media.
@@ -5535,6 +5598,8 @@ void NativeBridge::forwardMessages(
         History *source,
         History *target,
         const std::vector<int32_t> &ids,
+        bool dropAuthor,
+        std::optional<int> videoTimestamp,
         std::function<void(QString error)> done) {
     if (!source || !target || ids.empty()) {
         if (done) done(u"nothing to forward"_q);
@@ -5542,7 +5607,7 @@ void NativeBridge::forwardMessages(
     }
     const auto weak = QPointer<NativeBridge>(this);
     const auto completion = std::make_shared<std::function<void(QString)>>(std::move(done));
-    ensureChat(source, [weak, source, target, ids, completion](qint64 sourceChatId) mutable {
+    ensureChat(source, [weak, source, target, ids, dropAuthor, videoTimestamp, completion](qint64 sourceChatId) mutable {
         if (!weak || !source || !target) {
             if (*completion) (*completion)(u"forward cancelled"_q);
             return;
@@ -5551,7 +5616,7 @@ void NativeBridge::forwardMessages(
             if (*completion) (*completion)(u"source chat unavailable"_q);
             return;
         }
-        weak->ensureChat(target, [weak, target, ids, sourceChatId, completion](qint64 targetChatId) mutable {
+        weak->ensureChat(target, [weak, target, ids, sourceChatId, dropAuthor, videoTimestamp, completion](qint64 targetChatId) mutable {
             if (!weak || !target) {
                 if (*completion) (*completion)(u"forward cancelled"_q);
                 return;
@@ -5566,7 +5631,7 @@ void NativeBridge::forwardMessages(
             const auto operationId = QUuid::createUuid().toString(QUuid::WithoutBraces);
             const auto attempt = std::make_shared<int>(0);
             const auto request = std::make_shared<std::function<void()>>();
-            *request = [weak, target, targetChatId, sourceChatId, messageIds, operationId, completion, attempt, request] {
+            *request = [weak, target, targetChatId, sourceChatId, messageIds, dropAuthor, videoTimestamp, operationId, completion, attempt, request] {
                 if (!weak || !target) {
                     *request = {};
                     if (*completion) (*completion)(u"forward cancelled"_q);
@@ -5577,6 +5642,8 @@ void NativeBridge::forwardMessages(
                     targetChatId,
                     sourceChatId,
                     messageIds,
+                    dropAuthor,
+                    videoTimestamp,
                     operationId,
                     [weak, target, completion, attempt, request](
                             QJsonDocument doc,

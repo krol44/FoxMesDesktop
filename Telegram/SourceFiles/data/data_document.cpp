@@ -1796,6 +1796,9 @@ void DocumentData::setMimeString(const QString &mime) {
 }
 
 MediaKey DocumentData::mediaKey() const {
+	if (CustomBackend::Enabled()) {
+		return CustomBackend::Streaming::DocumentMediaKey(_url, locationType(), _dc, id);
+	}
 	return ::mediaKey(locationType(), _dc, id);
 }
 

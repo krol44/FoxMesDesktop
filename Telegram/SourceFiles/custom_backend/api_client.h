@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <optional>
 #include <memory>
 
 #include <QByteArray>
@@ -112,7 +113,7 @@ public:
     void chat(qint64 chatId, Callback done);
     void savedChat(Callback done);
     void createDirect(qint64 userId, Callback done);
-    void forwardMessages(qint64 chatId, qint64 sourceChatId, const QList<qint64> &messageIds, const QString &operationId, Callback done);
+    void forwardMessages(qint64 chatId, qint64 sourceChatId, const QList<qint64> &messageIds, bool dropAuthor, std::optional<int> videoTimestamp, const QString &operationId, Callback done);
     // Pinned messages are a shared property of the chat. Every response and
     // every chat.pinned event carries the whole authoritative id set plus a
     // monotonic pin_revision, so the client replaces its list instead of

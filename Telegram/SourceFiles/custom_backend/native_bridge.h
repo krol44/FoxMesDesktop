@@ -367,6 +367,8 @@ public:
         History *source,
         History *target,
         const std::vector<int32_t> &ids,
+        bool dropAuthor,
+        std::optional<int> videoTimestamp,
         std::function<void(QString error)> done = {});
     void pinMessage(History *history, MsgId messageId, bool forEveryone, std::function<void(QString error)> done = {});
     void unpinMessage(History *history, MsgId messageId, std::function<void(QString error)> done = {});

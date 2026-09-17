@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <optional>
 #include <vector>
 
 class History;
@@ -16,6 +17,8 @@ class SessionNavigation;
 
 namespace Data {
 class Thread;
+enum class ForwardOptions;
+struct ResolvedForwardDraft;
 } // namespace Data
 
 namespace Ui {
@@ -33,7 +36,23 @@ namespace CustomBackend::Actions {
 	not_null<Main::Session*> session,
 	std::vector<not_null<HistoryItem*>> items,
 	const std::vector<not_null<History*>> &to,
-	std::function<void()> done = nullptr);
+	std::function<void()> done = nullptr,
+	bool dropAuthor = false,
+	std::optional<int> videoTimestamp = std::nullopt);
+
+void ForwardDraft(
+	not_null<Main::Session*> session,
+	Data::ResolvedForwardDraft &&draft,
+	not_null<History*> target,
+	FnMut<void()> &&done);
+
+void ForwardToThreads(
+	not_null<Main::Session*> session,
+	std::vector<not_null<HistoryItem*>> items,
+	const std::vector<not_null<Data::Thread*>> &to,
+	Data::ForwardOptions options,
+	std::optional<int> videoTimestamp,
+	std::function<void()> done);
 
 // Pins/unpins a message through the FoxMes REST bridge. Returns false when
 // the bridge is unavailable; the caller must then run its upstream path.

@@ -7,6 +7,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_types.h"
 
+#include "custom_backend/native_streaming_loader.h"
+#include "custom_backend/native_runtime.h"
+
 #include "media/media_common.h"
 #include "ui/widgets/fields/input_field.h"
 #include "storage/cache/storage_cache_types.h"
@@ -58,6 +61,9 @@ Storage::Cache::Key WebDocumentCacheKey(const WebFileLocation &location) {
 }
 
 Storage::Cache::Key UrlCacheKey(const QString &location) {
+	if (CustomBackend::Enabled()) {
+		return CustomBackend::Streaming::UrlCacheKey(location);
+	}
 	const auto url = location.toUtf8();
 	const auto hash = openssl::Sha256(bytes::make_span(url));
 	const auto bytes = bytes::make_span(hash);
