@@ -303,6 +303,10 @@ void ApiClient::me(Callback done) {
     });
 }
 
+void ApiClient::desktopVersion(Callback done) {
+    jsonRequest("GET", "/desktop/version", {}, std::move(done), false);
+}
+
 void ApiClient::updateMe(const QString &displayName, Callback done) {
     // PATCH /me was replaced by PUT /me: only display_name is updated.
     jsonRequest("PUT", "/me", QJsonDocument(QJsonObject{

@@ -2204,6 +2204,9 @@ rpl::producer<> UpdateChecker::isLatest() const {
 
 auto UpdateChecker::progress() const
 -> rpl::producer<Progress> {
+	if (CustomBackend::Enabled()) {
+		return CustomBackend::Updates::ProgressEvents();
+	}
 	return _updater->progress();
 }
 
@@ -2240,18 +2243,30 @@ void UpdateChecker::stop() {
 
 auto UpdateChecker::state() const
 -> State {
+	if (CustomBackend::Enabled()) {
+		return CustomBackend::Updates::CurrentState();
+	}
 	return _updater->state();
 }
 
 int UpdateChecker::already() const {
+	if (CustomBackend::Enabled()) {
+		return CustomBackend::Updates::AlreadyDownloaded();
+	}
 	return _updater->already();
 }
 
 int UpdateChecker::size() const {
+	if (CustomBackend::Enabled()) {
+		return CustomBackend::Updates::TotalSize();
+	}
 	return _updater->size();
 }
 
 bool UpdateChecker::percent() const {
+	if (CustomBackend::Enabled()) {
+		return CustomBackend::Updates::PreferPercent();
+	}
 	return _updater->percent();
 }
 

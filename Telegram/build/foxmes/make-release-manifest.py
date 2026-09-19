@@ -4,14 +4,25 @@ import json
 from pathlib import Path
 import sys
 
-VERSION = "1.4.9"
-VERSION_CODE = 1004009
+VERSION = "1.5.0"
+VERSION_CODE = 1005000
+RELEASE_URL = (
+    "https://github.com/krol44/FoxMesDesktop/releases/download/v" + VERSION
+)
 EXPECTED = {
     f"FoxMes-{VERSION}-windows-x64-setup.exe",
     f"FoxMes-{VERSION}-windows-x64-portable.zip",
     f"FoxMes-{VERSION}-macos-arm64.dmg",
     f"FoxMes-{VERSION}-linux-x86_64.AppImage",
     f"FoxMes-{VERSION}-linux-x86_64.tar.xz",
+}
+# The package each platform installs from, and the digest the client checks it
+# against before running it. The admin only ever types a version number in the
+# dashboard - the hashes are computed here, so they cannot be copied wrong.
+PLATFORM_ASSETS = {
+    "windows": f"FoxMes-{VERSION}-windows-x64-setup.exe",
+    "macos": f"FoxMes-{VERSION}-macos-arm64.dmg",
+    "linux_appimage": f"FoxMes-{VERSION}-linux-x86_64.AppImage",
 }
 
 
@@ -30,12 +41,16 @@ def main() -> int:
     if missing:
         raise SystemExit(f"Missing release artifacts: {sorted(missing)}")
 
+    manifest = {"version_code": VERSION_CODE, "version": VERSION}
+    for platform, name in PLATFORM_ASSETS.items():
+        manifest[platform] = {
+            "url": f"{RELEASE_URL}/{name}",
+            "sha256": sha256(release_dir / name),
+        }
+
     version_path = release_dir / "version.json"
     version_path.write_text(
-        json.dumps(
-            {"version_code": VERSION_CODE, "version": VERSION},
-            separators=(",", ":"),
-        ),
+        json.dumps(manifest, separators=(",", ":")),
         encoding="utf-8",
     )
     checksums = []

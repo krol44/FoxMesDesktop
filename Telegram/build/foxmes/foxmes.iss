@@ -2,7 +2,7 @@
 #define MyAppShortName "FoxMes"
 #define MyAppPublisher "Foxtail"
 #define MyAppURL "https://fxl.ru"
-#define MyAppVersion "1.4.9"
+#define MyAppVersion "1.5.0"
 #define MyAppExeName "FoxMes.exe"
 #define MyAppId "F65B4EBE-8E1B-58C8-AED1-B3E8E207EA5C"
 
@@ -26,7 +26,7 @@ DefaultDirName={localappdata}\FoxMes
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir={#OutputPath}
-OutputBaseFilename=FoxMes-1.4.9-windows-x64-setup
+OutputBaseFilename=FoxMes-1.5.0-windows-x64-setup
 SetupIconFile={#SourcePath}\..\..\Resources\art\icon256.ico
 UninstallDisplayName={#MyAppName}
 UninstallDisplayIcon={app}\{#MyAppExeName}
@@ -41,6 +41,9 @@ VersionInfoProductName={#MyAppName}
 VersionInfoProductVersion={#MyAppVersion}
 VersionInfoVersion={#MyAppVersion}.0
 WizardStyle=modern
+; Self-update runs this installer with /VERYSILENT while FoxMes is open, so the
+; Restart Manager has to close it before the files are replaced.
+CloseApplications=yes
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -65,6 +68,11 @@ Root: HKCU; Subkey: "Software\Classes\foxmes\shell\open\command"; ValueType: str
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppShortName}}"; Flags: nowait postinstall skipifsilent
+; The line above is skipped in silent mode, which is exactly the mode
+; self-update uses - without this one the app would be updated and left closed.
+; RestartApplications is not enough: it only brings back what the Restart
+; Manager itself closed, and the updating client quits on its own.
+Filename: "{app}\{#MyAppExeName}"; Flags: nowait; Check: WizardSilent
 
 [Code]
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

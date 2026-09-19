@@ -8,7 +8,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$version = "1.4.9"
+$version = "1.5.0"
 $telegramRoot = Join-Path $SourceRoot "Telegram"
 $buildRoot = Join-Path $SourceRoot "out"
 # prepare.py puts x64 dependencies in Libraries\win64, a sibling of the
@@ -270,7 +270,7 @@ if (-not (Test-Path $executable)) { throw "FoxMes.exe was not produced." }
 # 2026-09-04, after a two-hour build.
 $versionInfo = (Get-Item $executable).VersionInfo
 if ("$($versionInfo.CompanyName)".Trim() -ne "Foxtail") { throw "Unexpected executable publisher." }
-if ($versionInfo.ProductVersion -notlike "1.4.9*") { throw "Unexpected executable version." }
+if ($versionInfo.ProductVersion -notlike "1.5.0*") { throw "Unexpected executable version." }
 
 # Emptied for the same reason the Linux and macOS scripts empty theirs: a
 # package left by an earlier version would otherwise be uploaded as part of
@@ -320,18 +320,54 @@ if ($observedVersion -ne $version) {
     throw "Unexpected installer version: '$($observedVersion)'."
 }
 if ((Get-AuthenticodeSignature $setup).Status -ne "NotSigned") {
-    throw "The version 1.4.9 installer must be unsigned."
+    throw "The version 1.5.0 installer must be unsigned."
 }
 
 $temporaryRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { $env:TEMP }
 $testInstall = Join-Path $temporaryRoot "FoxMesInstallTest"
+$installedExecutable = Join-Path $testInstall "FoxMes.exe"
 $telegramProtocolBefore = Test-Path "HKCU:\Software\Classes\tg"
-$installer = Start-Process -FilePath $setup -Wait -PassThru -ArgumentList `
+# Deliberately not -Wait, and the bounded wait is not decoration either. Since
+# 1.5.0 foxmes.iss has a silent-mode [Run] entry that starts FoxMes.exe - the
+# self-update path needs it, or an updated client is left closed - while
+# Start-Process -Wait waits for the process *and its descendants*. The app
+# never exits on its own, so this line hung the 1.5.0 release run: the
+# installer was finished and verified, and the job then sat here until GitHub
+# cancelled it at the six-hour limit, which also skipped the dependency cache
+# saves. WaitForExit() waits for setup.exe alone, and the timeout turns a
+# future hang into a ten-minute failure with the caches intact.
+$installer = Start-Process -FilePath $setup -PassThru -ArgumentList `
     "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$testInstall"
+if (-not $installer.WaitForExit(600000)) {
+    Stop-Process -InputObject $installer -Force -ErrorAction SilentlyContinue
+    throw "The silent installation did not finish within ten minutes."
+}
 if ($installer.ExitCode -ne 0) { throw "Silent installation failed." }
-if (-not (Test-Path (Join-Path $testInstall "FoxMes.exe"))) {
+if (-not (Test-Path $installedExecutable)) {
     throw "Installed FoxMes.exe was not found."
 }
+
+# Asserted rather than merely tolerated: this relaunch is the whole of what
+# self-update relies on after the files are replaced, and an installer that
+# quietly stopped doing it would leave every updating client closed with
+# nothing here to notice. The app is then stopped, because a running
+# FoxMes.exe holds {app} open and the uninstall below would trip over files
+# still in use.
+$launched = $null
+foreach ($attempt in 1..60) {
+    $launched = Get-Process -Name "FoxMes" -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -eq $installedExecutable }
+    if ($launched) { break }
+    Start-Sleep -Seconds 1
+}
+if (-not $launched) {
+    throw ("The silent installation did not start $installedExecutable. " +
+        "Self-update replaces the files and relies on this [Run] entry to " +
+        "bring the client back, so it would update and stay closed.")
+}
+Stop-Process -InputObject $launched -Force -ErrorAction SilentlyContinue
+Wait-Process -InputObject $launched -Timeout 60 -ErrorAction SilentlyContinue
+
 $foxmesCommand = (Get-Item `
     "HKCU:\Software\Classes\foxmes\shell\open\command").GetValue("")
 if ($foxmesCommand -notlike "*FoxMes.exe*--*%1*") {
@@ -341,6 +377,10 @@ if ((Test-Path "HKCU:\Software\Classes\tg") -ne $telegramProtocolBefore) {
     throw "The installer changed the Telegram URL registration."
 }
 
+# -Wait stays here, and for the same reason it had to go above: it waits for
+# descendants. unins000.exe copies itself into %TEMP% and hands the actual
+# uninstall to that copy, then exits immediately, so waiting on the process
+# alone would race the checks below against an uninstall still in progress.
 $uninstaller = Start-Process `
     -FilePath (Join-Path $testInstall "unins000.exe") `
     -Wait `

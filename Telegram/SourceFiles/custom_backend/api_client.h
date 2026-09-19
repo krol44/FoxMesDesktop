@@ -101,6 +101,12 @@ public:
     void me(Callback done);
     void updateMe(const QString &displayName, Callback done);
 
+    // The desktop version an administrator allowed to roll out. Sent without a
+    // bearer on purpose: the update button exists on the login screen too, and
+    // a client that is not paired yet is exactly the one running an old build.
+    // Nothing is fetched from GitHub until this says a newer build exists.
+    void desktopVersion(Callback done);
+
     void users(const QString &query, Callback done);
     void user(qint64 userId, Callback done);
     void reactionsCatalog(Callback done);

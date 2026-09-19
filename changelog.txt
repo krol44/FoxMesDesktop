@@ -1,3 +1,8 @@
+1.5.0 (19.09.26)
+
+- Fix bugs
+- New auto updater
+
 1.4.9 (16.09.26)
 
 - Fix bugs

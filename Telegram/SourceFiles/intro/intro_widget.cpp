@@ -334,6 +334,8 @@ void Widget::checkUpdateStatus() {
 			if (checker.state() == State::Ready) {
 				Core::checkReadyUpdate();
 				Core::Restart();
+			} else if (CustomBackend::Updates::IsReadyToInstall()) {
+				CustomBackend::Updates::InstallAndRestart();
 			} else {
 				CustomBackend::Updates::OpenReleasePage();
 			}
