@@ -357,7 +357,6 @@ struct MaterializedImage {
 	}
 }
 
-// A rasterized .gif, as opposed to an mp4 the sender means as an animation.
 [[nodiscard]] bool RasterizedGif(const UploadSpec &spec) {
 	if (spec.mime == u"image/gif"_q) {
 		return true;
@@ -366,7 +365,6 @@ struct MaterializedImage {
 	return name.endsWith(u".gif"_q, Qt::CaseInsensitive);
 }
 
-// Demotes a send the chat cannot keep as a video to a plain document.
 void DemoteUnsupportedVideo(UploadSpec &spec) {
 	if (spec.kind != u"video"_q && spec.kind != u"animation"_q) {
 		return;
@@ -403,10 +401,6 @@ void SendFiles(
 	auto caption = TextWithEntities();
 	for (const auto &file : list.files) {
 		if (caption.text.isEmpty() && !file.caption.text.isEmpty()) {
-			// The composer keeps formatting as tags; PrepareForSending then
-			// adds what nobody typed - bare urls, mentions, hashtags - exactly
-			// as it does for a text send, because nothing downstream looks for
-			// a link inside plain text.
 			caption = TextWithEntities{
 				file.caption.text,
 				TextUtilities::ConvertTextTagsToEntities(file.caption.tags),
@@ -514,9 +508,6 @@ void SendVoiceMessage(
 	if (!bridge) {
 		return;
 	}
-	// The names and types upstream gives the same two recordings
-	// (localimageloader.cpp): nothing is read off the bytes, because for a
-	// recording the type is known before the first sample.
 	const auto round = video;
 	auto files = std::vector<UploadSpec>();
 	files.push_back(UploadSpec{

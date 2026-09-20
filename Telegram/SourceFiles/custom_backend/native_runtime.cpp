@@ -66,8 +66,6 @@ void ReleaseClientsOnQuit() {
     }();
 }
 
-// Single source of truth for the FOXMES_URL override: it both selects the
-// endpoint and marks the build as running against a dev environment.
 QString EnvBaseUrl() {
 #if FOXMES_ALLOW_ENDPOINT_OVERRIDE
     if (const auto env = std::getenv("FOXMES_URL")) {
@@ -360,8 +358,6 @@ void SaveDefaultNotifyCache(
 
 bool AppearanceDefaultApplied(Main::Session *session) {
 	const auto id = SessionUserId(session);
-	// No account to remember it against, so nothing may be applied: a look
-	// forced now would be forced again on every start.
 	return (id <= 0)
 		|| Settings().value(Prefix(id) + u"/appearance_default"_q).toBool();
 }

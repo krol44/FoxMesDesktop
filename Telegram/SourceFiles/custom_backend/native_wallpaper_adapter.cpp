@@ -31,12 +31,8 @@ namespace {
 // same Data::Session maps.
 constexpr auto kWallPaperIdOffset = quint64(4000000000000000ULL);
 
-// What a picture is uploaded as. The gallery is small and the file is shown
-// full-screen behind a chat, so quality matters more than bytes here.
 constexpr auto kUploadJpegQuality = 87;
 
-// The id of the "no background" paper. Its own, so the gallery can tell it from
-// every other cell and mark it as the current one.
 constexpr auto kNoBackgroundId = quint64(4000000000000001ULL);
 
 struct State {
@@ -157,7 +153,6 @@ base::flat_map<not_null<Main::Session*>, State> &States() {
 	return std::clamp(paper.patternIntensity(), 0, 100);
 }
 
-// Restores the two per-choice settings the server stores next to the sha256.
 [[nodiscard]] Data::WallPaper WithChoice(
 		const Data::WallPaper &paper,
 		const QJsonObject &state) {
@@ -166,18 +161,11 @@ base::flat_map<not_null<Main::Session*>, State> &States() {
 		.withPatternIntensity(state.value("intensity").toInt());
 }
 
-// One of the colour schemes compiled into the desktop, named the way the
-// server names it in the first-run look.
 struct AppearanceTheme {
 	QString path;
-	// Night in the sense the theme picker uses: the two light schemes are the
-	// day ones, everything else flips the app into night mode.
 	bool night = false;
 };
 
-// Resolved through the upstream catalog rather than by spelling the resource
-// paths out here: those paths are already written down once, and a second copy
-// would drift from the first.
 [[nodiscard]] std::optional<AppearanceTheme> ThemeNamed(const QString &name) {
 	using Type = Window::Theme::EmbeddedType;
 	const auto type = [&]() -> std::optional<Type> {
@@ -219,8 +207,6 @@ void ApplyAppearanceDefault(
 	}
 	const auto theme = ThemeNamed(appearance.value("theme").toString());
 	if (!theme) {
-		// A name this build has no scheme for. Leaving the install alone beats
-		// guessing, and no mark is written: a later build will know the name.
 		return;
 	}
 	const auto background = Window::Theme::Background();
@@ -262,9 +248,6 @@ void ApplyAppearanceDefault(
 	Window::Theme::KeepApplied();
 	if (appearance.value("wallpaper_none").toBool()
 		&& !Data::IsThemeWallPaper(background->paper())) {
-		// No picture at all, which for a chat means the background the theme
-		// carries. A scheme that ships one has already landed there, so this
-		// only covers the schemes that do not.
 		background->set(Data::ThemeWallPaper());
 	}
 	RememberAppearanceDefaultApplied(session);
@@ -473,8 +456,6 @@ void ResetForPeer(not_null<PeerData*> peer) {
 		if (!strong || chatId <= 0 || !BridgeFor(strong)) {
 			return;
 		}
-		// An empty sha256 is the documented reset: the chat follows the
-		// per-user default again.
 		ClientFor(strong).setChatWallpaper(
 			chatId,
 			QString(),
@@ -545,8 +526,6 @@ bool ChooseNoBackground(
 		// can prepare an image for it.
 		Window::Theme::Background()->set(Data::ThemeWallPaper());
 		if (BridgeFor(session)) {
-			// The empty sha256 is the documented reset of the per-user
-			// default.
 			ClientFor(session).setDefaultWallpaper(
 				QString(),
 				false,
@@ -575,9 +554,6 @@ void RequestDefault(not_null<Main::Session*> session) {
 			return;
 		}
 		const auto state = doc.object();
-		// Before the wallpaper below and independent of it: the server answers
-		// a look only while the account has no wallpaper of its own, so the
-		// two are never both present.
 		ApplyAppearanceDefault(strong, state.value("appearance").toObject());
 		if (!state.value("wallpaper").isObject()) {
 			// An explicit null means "no default"; the local background is
@@ -594,16 +570,11 @@ void RequestDefault(not_null<Main::Session*> session) {
 			return;
 		}
 		const auto ready = WithChoice(*paper, state);
-		// Set before the pixels arrive, exactly as upstream does when it reads
-		// a stored background at startup: the document download fills them in
-		// and the background repaints itself.
 		Window::Theme::Background()->set(ready);
 		ready.loadDocument();
 	});
 }
 
-// wallpaper is the same state object GET /wallpaper answers: the picture plus
-// the two settings that belong to the choice rather than to the file.
 void ApplyForPeer(not_null<PeerData*> peer, const QJsonObject &wallpaper) {
 	const auto session = &peer->session();
 	if (wallpaper.value("none").toBool()) {

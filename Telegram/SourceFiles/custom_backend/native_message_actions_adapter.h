@@ -70,15 +70,11 @@ void PinFromBox(
 	not_null<HistoryItem*> item,
 	bool forEveryone);
 
-// Unpins an explicit selection of messages ("unpin selected"). Confirms once
-// for the whole batch, like upstream, and only then sends the unpins.
 void UnpinMessages(
 	not_null<Window::SessionNavigation*> navigation,
 	std::vector<struct FullMsgId> items,
 	std::function<void()> onConfirmed);
 
-// Unpins everything in a thread ("unpin all messages"). One request, because
-// the FoxMes contract clears the whole list server-side.
 void UnpinAll(
 	not_null<Window::SessionNavigation*> navigation,
 	not_null<Data::Thread*> thread);

@@ -18,25 +18,10 @@ class Session;
 
 namespace CustomBackend::Calls {
 
-// FoxMes has no MTProto, but it has the same call: the upstream state machine
-// (calls/calls_call.cpp) drives seven requests and reacts to two updates, and
-// everything above that - the panel, the camera, screen sharing, muting, the
-// emoji fingerprint - lives inside tgcalls and never touches a server.
-//
-// So this adapter substitutes the transport and nothing else. Every function
-// below answers in the shape of the TL constructor upstream expects, so the
-// completion lambdas in calls_call.cpp keep working unchanged; the key of the
-// conversation is derived on the two clients and never reaches us.
-
-// Answers carry the phone call exactly as upstream would receive it inside
-// phone.phoneCall, and a failure carries the error string upstream already
-// knows how to show (Call::handleRequestError).
 using Done = std::function<void(const MTPPhoneCall &)>;
 using Fail = std::function<void(const QString &)>;
 using Plain = std::function<void()>;
 
-// phone.requestCall. The chat is resolved from the user before the request,
-// so completion still happens exactly once, after the server answered.
 void RequestCall(
 	not_null<UserData*> user,
 	bytes::const_span gaHash,
@@ -45,14 +30,12 @@ void RequestCall(
 	Done done,
 	Fail fail);
 
-// phone.receivedCall - this device is showing the call.
 void ReceivedCall(
 	not_null<Main::Session*> session,
 	uint64 callId,
 	Plain done,
 	Fail fail);
 
-// phone.acceptCall / phone.confirmCall - the two halves of the key exchange.
 void AcceptCall(
 	not_null<Main::Session*> session,
 	uint64 callId,
@@ -91,7 +74,6 @@ void SendSignalingData(
 	std::function<void(bool)> done,
 	Fail fail);
 
-// messages.getDhConfig and phone.getCallConfig.
 void RequestDhConfig(
 	not_null<Main::Session*> session,
 	std::function<void(const MTPmessages_DhConfig &)> done,
@@ -101,10 +83,6 @@ void RequestCallConfig(
 	std::function<void(const QByteArray &)> done,
 	Fail fail);
 
-// One finished call as the service message upstream draws it
-// (history_item.cpp, MTPDmessageActionPhoneCall -> Data::MediaCall). Shared by
-// the chat history and the recent calls list so both describe a call the same
-// way.
 [[nodiscard]] MTPMessage BuildCallMessage(
 	PeerId peerId,
 	bool out,
@@ -116,9 +94,6 @@ void RequestCallConfig(
 	bool video,
 	TimeId date);
 
-// The recent calls list. Upstream asks for it with messages.search and the
-// phone-call filter, which the bridge has nothing to answer with, so the rows
-// come from the call history instead and are handed back in the same shape.
 void LoadHistory(
 	not_null<Main::Session*> session,
 	MsgId offsetId,

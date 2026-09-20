@@ -21,8 +21,6 @@ class Session;
 
 namespace CustomBackend::Search {
 
-// REST peer search: parses JSON and builds Api::PeerSearchResult here,
-// so no JSON handling or DTO conversion lives inside Api::PeerSearch.
 void SearchPeers(
 	not_null<Main::Session*> session,
 	const QString &query,

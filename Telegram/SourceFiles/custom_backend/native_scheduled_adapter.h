@@ -51,10 +51,8 @@ void Edit(
 	const QJsonArray &entities,
 	std::function<void(QString)> done);
 
-// Delivers scheduled messages ahead of their time.
 void SendNow(not_null<PeerData*> peer, const QVector<MTPint> &ids);
 
-// Cancels scheduled messages.
 void Delete(not_null<PeerData*> peer, const QVector<MTPint> &ids);
 
 // Applies a live reminder event from the WebSocket. Returns false when the

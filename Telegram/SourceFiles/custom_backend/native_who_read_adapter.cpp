@@ -13,8 +13,6 @@ namespace CustomBackend::WhoRead {
 
 std::vector<Api::WhoReadPeer> Readers(not_null<HistoryItem*> item) {
 	auto result = std::vector<Api::WhoReadPeer>();
-	// Only an outgoing message has readers to show; an incoming one was read
-	// by me and upstream never asks about it.
 	if (!item->out() || !item->isRegular()) {
 		return result;
 	}

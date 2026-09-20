@@ -32,9 +32,6 @@
 namespace CustomBackend::Reactions {
 namespace {
 
-// The catalog starts empty and is filled by GET /reactions. There is no seed
-// list any more: a row is named by its id, and a hardcoded emoji has none -
-// reacting with it would send an id the server cannot resolve.
 std::vector<CatalogItem> &CatalogStorage() {
     static auto values = std::vector<CatalogItem>();
     return values;
@@ -163,8 +160,6 @@ base::flat_map<DocumentId, std::shared_ptr<Data::DocumentMedia>> &MediaCache() {
     return value;
 }
 
-// Documents already built for this session, keyed by catalog id. The cache is
-// what makes repeated selector builds cheap.
 base::flat_map<DocumentId, DocumentData*> &DocumentCache() {
     static auto value = base::flat_map<DocumentId, DocumentData*>();
     return value;
@@ -187,7 +182,6 @@ rpl::event_stream<DocumentId> &AssetLoadedStream() {
     return value;
 }
 
-// Fires when the catalog itself is replaced.
 rpl::event_stream<> &CatalogChangedStream() {
     static auto value = rpl::event_stream<>();
     return value;
@@ -381,7 +375,6 @@ void DownloadAsset(
         DocumentId id,
         const QString &emoji,
         const QString &url) {
-    // Insert-if-absent: a request already in flight keeps its own record.
     if (!PendingAssets().contains(id)) {
         PendingAssets().emplace(id, PendingAsset());
     }
@@ -427,10 +420,6 @@ void DownloadAsset(
                         emoji,
                         webm,
                         u"video/webm"_q)) {
-                    // Same bookkeeping as the first-time build: the stickers
-                    // panel is holding the still that was put in place while
-                    // this request kept failing, and only this tells it there
-                    // is an animation now.
                     AssetCache()[id] = Asset{
                         .content = webm,
                         .mime = u"video/webm"_q,
@@ -626,9 +615,6 @@ std::vector<Data::Reaction> BuildAvailableReactions(Main::Session *session) {
 					entry.emoji,
 					entry.assetUrl);
 			} else if (Ui::Emoji::Find(entry.emoji)) {
-				// No asset at all: the built-in graphics are the only thing
-				// left to draw, and better than an entry missing from the
-				// picker.
 				if (auto webp = RasterizeNativeEmoji(entry.emoji)
 					; !webp.isEmpty()) {
 					icon = CustomEmojiDocument(
@@ -648,11 +634,6 @@ std::vector<Data::Reaction> BuildAvailableReactions(Main::Session *session) {
 			continue;
 		}
 		result.push_back(Data::Reaction{
-			// Custom-emoji reaction: the id is the document, which is what
-			// makes InlineList::prepareButtonWithId() build a
-			// Ui::Text::CustomEmoji for the inline badge instead of the one
-			// static frame Reactions::resolveImageFor() bakes for plain
-			// emoji reactions.
 			.id = Data::ReactionId{ entry.id },
 			.title = entry.emoji,
 			.appearAnimation = icon,

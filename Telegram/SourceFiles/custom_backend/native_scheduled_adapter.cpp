@@ -27,10 +27,6 @@ namespace {
 	return QUuid::createUuid().toString(QUuid::WithoutBraces);
 }
 
-// Turns a reminder page into the native messages the scheduled list is built
-// from. A reminder that cannot be rendered is dropped rather than shown half
-// built: the list is what the user will send, and a wrong preview of it is
-// worse than a missing row.
 [[nodiscard]] QVector<MTPMessage> BuildMessages(
 		not_null<NativeBridge*> bridge,
 		not_null<History*> history,
@@ -251,10 +247,6 @@ bool ApplyEvent(
 	return false;
 }
 
-// Fills the scheduled list from a reminder page. Mirrors what the upstream
-// MTProto parse does, minus the users and chats a REST payload does not carry:
-// the entry is created even for an empty page, so an empty queue reads as
-// loaded instead of leaving the section on a spinner forever.
 void Apply(
 		not_null<Data::ScheduledMessages*> messages,
 		not_null<History*> history,

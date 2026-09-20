@@ -101,8 +101,6 @@ namespace {
 	}, [](const MTPDphoneCallDiscardReasonDisconnect &) {
 		return u"disconnect"_q;
 	}, [](const auto &) {
-		// Hangup covers the remaining reasons, including the conference
-		// migration upstream never reaches under the bridge.
 		return u"hangup"_q;
 	});
 }
@@ -239,8 +237,6 @@ namespace {
 	return (session && Enabled()) ? &ClientFor(session) : nullptr;
 }
 
-// A call answer always carries the call under "call". Anything else is a
-// failure, including a success with a body we cannot read.
 void AnswerCall(
 		const QJsonDocument &doc,
 		const QString &error,
@@ -530,8 +526,6 @@ bool AcceptCallsCurrent(not_null<Main::Session*> session) {
 
 void SetAcceptCalls(not_null<Main::Session*> session, bool accept) {
 	auto &state = AcceptCallsFor(session);
-	// The switch answers immediately and the server confirms: a toggle that
-	// waited for the round trip would look stuck on a slow link.
 	state.value = accept;
 	if (const auto client = ClientOrNull(session)) {
 		client->callSettingsUpdate(accept, [](QJsonDocument, QString, int) {});
@@ -600,9 +594,6 @@ void LoadHistory(
 			return;
 		}
 		const auto data = doc.object();
-		// The peers come along because a row is drawn from the user, not from
-		// the call; asking for each of them separately would be one request
-		// per row.
 		for (const auto &user : data.value("users").toArray()) {
 			target->ensureUser(user.toObject(), true);
 		}
@@ -614,8 +605,6 @@ void LoadHistory(
 			const auto history = target->historyForChat(chatId);
 			const auto messageId = call.value("message_id").toVariant().toLongLong();
 			if (!history || messageId <= 0 || messageId > INT32_MAX) {
-				// A call whose service message is not in this chat has no row
-				// to draw: the list is a view over those messages.
 				continue;
 			}
 			const auto outgoing = call.value("outgoing").toBool();
@@ -632,9 +621,6 @@ void LoadHistory(
 		}
 		const auto complete = (messages.size() < limit);
 		const auto count = int(messages.size());
-		// Users are applied above through the bridge, which owns how a FoxMes
-		// user becomes a peer; handing them here as MTPUser would be a second
-		// way to do the same thing.
 		auto result = complete
 			? MTP_messages_messages(
 				MTP_vector<MTPMessage>(std::move(messages)),
@@ -693,10 +679,6 @@ bool HandleEvent(
 	if (!call) {
 		return true;
 	}
-	// Feeding Calls::Instance the update it would have received over MTProto
-	// is what keeps the whole incoming half free of upstream hooks: the
-	// instance creates the incoming call, matches an existing one by id and
-	// runs its state machine exactly as before.
 	Core::App().calls().handleUpdate(session, MTP_updatePhoneCall(*call));
 	return true;
 }

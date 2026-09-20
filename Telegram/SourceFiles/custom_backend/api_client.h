@@ -24,10 +24,6 @@ class QNetworkReply;
 
 namespace CustomBackend {
 
-// Per-attachment media metadata that the bytes cannot carry: the kind that
-// separates a voice message from music or a round video note from a video,
-// plus playback length, the voice waveform, the track performer and the
-// tap-to-reveal spoiler flag.
 struct AttachmentMeta {
     QString kind;
     qint64 durationMs = 0;
@@ -39,14 +35,7 @@ struct AttachmentMeta {
     bool spoiler = false;
 };
 
-// SendOptions carries the per-send choices the composer offers alongside the
-// message itself. It is a struct and not more positional parameters because
-// every send overload would otherwise have to grow again for the next one, and
-// it lives at namespace scope so it can be a default argument of those
-// overloads.
 struct SendOptions {
-    // silent is "send without sound": stored on the message, so the recipient
-    // still knows about it after a reconnect.
     bool silent = false;
     // deliverAt is a unix second; non-zero turns the send into a reminder that
     // fires then. deliverWhenOnline waits for the recipient instead. Exactly
@@ -110,8 +99,6 @@ public:
     void users(const QString &query, Callback done);
     void user(qint64 userId, Callback done);
     void reactionsCatalog(Callback done);
-    // The caller's reaction order alone, without the catalog behind it: the
-    // emoji table never changes because somebody reacted.
     void reactionUsage(Callback done);
 
     void chats(Callback done);
@@ -213,9 +200,6 @@ public:
         const QJsonArray &entities = {},
         const SendOptions &options = {});
 
-    // Reminders are scheduled messages: they live in their own queue until
-    // they fire, and are then delivered by the server through the same send
-    // path a live message takes.
     void reminders(qint64 chatId, Callback done);
     void createReminder(
         qint64 chatId,
@@ -241,8 +225,6 @@ public:
         const SendOptions &options,
         const QString &operationId,
         Callback done);
-    // Rescheduling and editing the text are the same mutation: both leave the
-    // reminder in the queue, and both bump its revision.
     void updateReminder(
         qint64 reminderId,
         const QString &text,
@@ -295,13 +277,8 @@ public:
     // Ambiguous-timeout recovery: stored result of a journaled mutation.
     void operationResult(const QString &operationId, Callback done);
     void markRead(qint64 chatId, qint64 messageId, Callback done = {});
-    // Books a meet room for a private chat and answers with its link. The
-    // link itself is sent into the chat as an ordinary message afterwards,
-    // exactly like the "create meet" action of fxl-web does.
     void createMeet(qint64 chatId, const QString &operationId, Callback done);
 
-    // Calls. The shapes on the wire mirror the MTProto constructors the
-    // upstream call state machine expects; see native_calls_adapter.
     void callConfig(Callback done);
     void callDhConfig(Callback done);
     void requestCall(
@@ -328,8 +305,6 @@ public:
     void callSettingsUpdate(bool acceptCalls, Callback done);
     void callHistory(qint64 offsetId, int limit, Callback done);
     void callHistoryClear(Callback done);
-    // First-touch delivery acknowledgement for messages that actually reached
-    // this device, batched by the bridge.
     void markDelivered(
         qint64 chatId,
         const QList<qint64> &messageIds,
@@ -383,9 +358,6 @@ public:
         bool showPreviews,
         bool soundNone,
         Callback done);
-    // Per-user notification defaults: what upstream saves through
-    // account.updateNotifySettings with inputNotifyUsers. Only the private
-    // chats scope is served, so no scope argument is exposed here.
     void defaultNotificationSettings(Callback done);
     void setDefaultNotificationSettings(
         qint64 muteUntil,
@@ -397,17 +369,9 @@ public:
     void setChatArchived(qint64 chatId, bool archived, Callback done);
     void savePinnedOrder(const QList<qint64> &orderedIds, Callback done);
 
-    // Wallpapers. Upstream reads these from account.getWallPapers and writes
-    // the per-chat choice with messages.setChatWallPaper; neither exists under
-    // the bridge, so the gallery is the caller's own uploads and the choice
-    // rides with the rest of the per-chat settings.
     void wallpapers(Callback done);
     void deleteWallpaper(const QString &sha256, Callback done);
     void defaultWallpaper(Callback done);
-    // blurred and intensity belong to the choice, not to the file: the same
-    // picture is blurred in one chat and sharp in another, and the dimming
-    // slider is per chat too. Upstream keeps both on the WallPaper for the
-    // same reason.
     void setDefaultWallpaper(
         const QString &sha256,
         bool blurred,
@@ -502,17 +466,13 @@ private:
     // is only finished once this poll reports done, and the server abandons a
     // job that is not polled, so the wait is an active one.
     void pollChunkedProcessing(std::shared_ptr<ChunkedUpload> state);
-    // Opens a chunk session (action=init) and starts sending parts.
     void startChunkSession(std::shared_ptr<ChunkedUpload> state);
-    // Starts the whole upload over when the server lost the session.
     bool restartChunkedUpload(
         std::shared_ptr<ChunkedUpload> state,
         int status);
-    // Reads back which parts the server holds (action=status) and continues.
     void syncChunkedUpload(
         std::shared_ptr<ChunkedUpload> state,
         Fn<void()> then);
-    // Re-sends the failed part, then falls back to a full re-sync.
     void retryChunk(
         std::shared_ptr<ChunkedUpload> state,
         QString error,

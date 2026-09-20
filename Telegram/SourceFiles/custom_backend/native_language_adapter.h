@@ -23,7 +23,6 @@ namespace CustomBackend::Language {
 // The backend already serves GET /langs for the day there is a second one, so
 // adding a translation later is a row there and nothing here.
 
-// The languages this client can switch to.
 [[nodiscard]] std::vector<Lang::Language> List();
 
 // Applies a language and restarts, without any MTProto round trip. Returns

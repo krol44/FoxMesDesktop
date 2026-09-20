@@ -63,9 +63,6 @@ FileCacheRegistry &FileCacheKeys() {
 	return value;
 }
 
-// How many part requests are in flight at once. Upstream lets the MTProto
-// download manager decide; over HTTP the number is ours, and four is what fills
-// the pipe without turning one playback into a burst the CDN has to fan out.
 constexpr auto kMaxParallelRequests = 4;
 
 // A part is retried this many times before the stream is failed. Only transport
@@ -305,8 +302,6 @@ void Loader::send(int64 offset, int retries) {
 	const auto auth = AuthorizeDownload(_session, request.url());
 	ApplyDownloadAuth(request, auth);
 	const auto reply = _manager->get(request);
-	// Arms the reply before the handshake, exactly as the web file loader
-	// does; false and a no-op outside a dev build.
 	AllowDownloadTls(reply, auth);
 
 	_sent[offset] = Request{ .reply = reply, .retries = retries };
@@ -321,7 +316,6 @@ void Loader::send(int64 offset, int retries) {
 void Loader::finished(int64 offset, not_null<QNetworkReply*> reply) {
 	const auto i = _sent.find(offset);
 	if (i == end(_sent) || i->second.reply.data() != reply.get()) {
-		// Cancelled or replaced while the answer was on its way.
 		return;
 	}
 	const auto retries = i->second.retries;
@@ -486,8 +480,6 @@ void ClearSession(not_null<Main::Session*> session) {
 }
 
 bool CanBeStreamed(not_null<const DocumentData*> document) {
-	// supportsStreaming() is the documentAttributeVideo flag, the same gate
-	// upstream applies on top of its own location check.
 	return document->supportsStreaming()
 		&& (document->size > 0)
 		&& !SourceUrl(document).isEmpty();

@@ -54,7 +54,6 @@ void RememberFileCacheKey(
 	int32 dc,
 	uint64 id);
 
-// Answers DocumentData::canBeStreamed() for a document with no remote location.
 [[nodiscard]] bool CanBeStreamed(not_null<const DocumentData*> document);
 
 // Answers DocumentData::bigFileBaseCacheKey() for the same. Reader addresses a

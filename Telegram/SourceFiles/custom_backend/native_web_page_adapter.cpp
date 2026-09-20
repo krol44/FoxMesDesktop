@@ -46,8 +46,6 @@ void RequestWebPagePreview(
 		auto &pending = PendingPreviewLinks();
 		const auto i = pending.find(session);
 		if (i == pending.end() || i->second != link) {
-			// The field moved on to another link, or cleared. Upstream would
-			// have cancelled the request; here the answer is dropped instead.
 			return;
 		}
 		pending.erase(i);

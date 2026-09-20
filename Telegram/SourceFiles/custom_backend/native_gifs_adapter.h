@@ -32,8 +32,6 @@ namespace CustomBackend::Gifs {
 // the document carries the animated marker and upstream loops it exactly as it
 // loops a Telegram GIF.
 
-// Fills Data::Stickers::savedGifs() from the server. Answers the hook in
-// ApiWrap::requestSavedGifs.
 void Request(not_null<Main::Session*> session);
 
 // Records where the bytes of a document live, so a "save GIF" on a message can
@@ -53,14 +51,10 @@ void Toggle(
 	Data::FileOrigin origin,
 	bool saved);
 
-// Sends a saved GIF into a chat. Answers the hook in
-// HistoryWidget::sendExistingDocument for a document of ours.
 [[nodiscard]] bool Send(
 	not_null<DocumentData*> document,
 	const Api::SendAction &action);
 
-// True when the document was built by this adapter, i.e. it is a saved GIF and
-// not an arbitrary animation from the history.
 [[nodiscard]] bool IsSavedGif(
 	not_null<Main::Session*> session,
 	not_null<DocumentData*> document);

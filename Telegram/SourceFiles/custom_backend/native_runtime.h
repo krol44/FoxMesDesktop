@@ -99,7 +99,6 @@ void ReleaseOnQuit(std::function<void()> release);
 
 // Client() is the unaffiliated login/register client used by Intro.
 [[nodiscard]] ApiClient &Client();
-// Every authenticated Main::Session has its own REST token context.
 [[nodiscard]] ApiClient &ClientFor(Main::Session *session);
 [[nodiscard]] QJsonObject CurrentUser();
 [[nodiscard]] QJsonObject CurrentUser(Main::Session *session);
@@ -108,8 +107,6 @@ void ReleaseOnQuit(std::function<void()> release);
 void RememberLogin(const QJsonDocument &document);
 void RememberUser(Main::Session *session, const QJsonObject &user);
 void RememberEventSequence(Main::Session *session, qint64 seq);
-// Light chat list snapshot ("GET /chats?light=1" JSON) for instant render
-// before the network answers on cold start.
 [[nodiscard]] QByteArray LoadChatsCache(Main::Session *session);
 void SaveChatsCache(Main::Session *session, const QByteArray &json);
 
@@ -154,9 +151,6 @@ void TrackWindow(
 [[nodiscard]] rpl::producer<LiveUpdatesStatus> LiveUpdatesStatusValue(
 	Main::Account *account);
 void RestartLiveUpdates(Main::Account *account);
-// Projects the live updates WebSocket state onto upstream MTP dcstate
-// semantics (mtproto/facade.h), so thin upstream hooks like
-// TopBarWidget::updateConnectingState() can reuse their original logic.
 [[nodiscard]] int MtpDcStateFor(Main::Account *account);
 
 } // namespace CustomBackend

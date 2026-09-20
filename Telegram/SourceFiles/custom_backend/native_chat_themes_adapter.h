@@ -22,11 +22,8 @@ namespace CustomBackend::ChatThemes {
 // colours - no documents, no patterns, nothing to download. Only the choice
 // is stored server-side, as one string per (chat, user).
 
-// Fills Data::CloudThemes. Answers the hook in CloudThemes::refreshChatThemes.
 void Request(not_null<Main::Session*> session);
 
-// Stores the choice. Answers the hook in SendPeerThemeChangeRequest, which
-// otherwise sends messages.setChatTheme into a transport that never replies.
 void Save(not_null<PeerData*> peer, const QString &emoticon);
 
 // Applies the choice from a chat payload. An empty emoticon is "no theme",

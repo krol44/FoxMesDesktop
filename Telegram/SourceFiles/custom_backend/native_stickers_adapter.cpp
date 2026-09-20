@@ -34,12 +34,7 @@ constexpr auto kStickerSide = 100;
 constexpr auto kSetIdBase = uint64(0xF0C0000000000000ULL);
 
 struct State {
-	// Documents built for this session, keyed by their panel DocumentId, with
-	// the catalog row they were built from. That row is what a send puts on
-	// the wire.
 	base::flat_map<DocumentId, DocumentId> stickers;
-	// Set ids this adapter installed, so a refresh replaces exactly them and
-	// leaves anything else in Data::Stickers alone.
 	std::vector<uint64> setIds;
 	// Catalog rows already in the panel, with the mime they were built from.
 	// The mime is what a retry changes: a row whose emoji_webm request failed
@@ -112,8 +107,6 @@ base::flat_map<not_null<Main::Session*>, State> &States() {
 			MTP_int(kStickerSide)),
 		MTP_documentAttributeSticker(
 			MTP_flags(Flag()),
-			// The emoji travels on the document as its caption; the catalog
-			// row a send puts on the wire is kept in State::stickers.
 			MTP_string(item.emoji),
 			MTP_inputStickerSetEmpty(),
 			MTPMaskCoords()),
@@ -156,7 +149,6 @@ void ApplyOne(
 		const Reactions::CatalogItem &item) {
 	const auto asset = Reactions::AssetFor(item.id);
 	if (asset.content.isEmpty()) {
-		// Still downloading. AssetLoaded() brings us back here.
 		return;
 	}
 	auto &state = StateFor(session);
@@ -240,9 +232,6 @@ void Subscribe(not_null<Main::Session*> session) {
 	}
 	state.subscribed = true;
 	const auto weak = base::make_weak(session);
-	// The catalog and its assets arrive over many requests, so the panel is
-	// rebuilt as they land instead of once at an arbitrary moment. Upstream
-	// does the same for a set whose thumbnail is still loading.
 	rpl::merge(
 		Reactions::CatalogChanged(),
 		Reactions::AssetLoaded() | rpl::to_empty

@@ -35,10 +35,6 @@ void ShowError(const QString &reason) {
 	if (!reason.isEmpty()) {
 		LOG(("FoxMes: meet booking failed: %1").arg(reason));
 	}
-	// A plain string rather than a lang key: this build compiles exactly one
-	// language pack (see native_language_adapter), and a new key would
-	// regenerate lang_auto.h - a header most of the project includes - for one
-	// toast. Same trade as the update toast in github_update.cpp.
 	Ui::Toast::Show(u"Could not create a meet."_q);
 }
 
@@ -79,7 +75,6 @@ void Start(not_null<History*> history) {
 	bridge->resolveChatId(history, [=](qint64 chatId) {
 		const auto strong = weak.get();
 		if (!strong) {
-			// The session is gone; there is nobody left to tell.
 			return;
 		}
 		if (chatId <= 0) {
@@ -87,8 +82,6 @@ void Start(not_null<History*> history) {
 			return;
 		}
 		if (!gPending.emplace(chatId).second) {
-			// Already booking this chat: the second click must not produce a
-			// second room and a second link in the chat.
 			return;
 		}
 		ClientFor(strong).createMeet(

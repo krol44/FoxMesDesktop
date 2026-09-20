@@ -89,8 +89,6 @@ void SearchPeers(
 						QString(),
 						QString(),
 						object.value("username").toString());
-					// Upstream drops updates for a peer it does not consider
-					// loaded.
 					if (!user->isLoaded()) {
 						user->setLoadedStatus(PeerData::LoadedStatus::Normal);
 					}
@@ -200,8 +198,6 @@ void RequestMessages(
 		return;
 	}
 	auto &state = MessagesSearchStates()[owner];
-	// A new (or changed) query restarts pagination; the same query continues
-	// from the stored server cursor.
 	if (state.query != query) {
 		state.query = query;
 		state.nextBefore = 0;
@@ -243,7 +239,6 @@ void RequestMessages(
 		}
 		auto &state = i->second;
 		if (generation != state.generation) {
-			// Stale response: a newer request superseded this one.
 			return;
 		}
 		state.pending = false;
@@ -251,7 +246,6 @@ void RequestMessages(
 			state.exhausted = true;
 		}
 		if (!ids.empty()) {
-			// Continue from the oldest id of this page.
 			state.nextBefore = ids.back();
 		}
 		auto found = MessageIdsList();

@@ -20,7 +20,6 @@ void ReadHistory(
 	MsgId tillId,
 	std::function<void()> done);
 
-// Per-user "marked as unread" dialog flag.
 void SetChatUnreadMark(not_null<History*> history, bool unread);
 
 } // namespace CustomBackend

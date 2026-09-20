@@ -33,15 +33,10 @@ namespace CustomBackend::Wallpapers {
 //   account.installWallPaper   -> SaveDefault      (PUT /wallpaper)
 //   messages.setChatWallPaper  -> SaveForPeer      (PUT /chats/{id}/wallpaper)
 
-// Fills Data::Session::wallpapers() from the server and calls done() once it
-// has. Answers the hook in BackgroundBox::Inner::requestPapers.
 void RequestGallery(not_null<Main::Session*> session, Fn<void()> done);
 
-// Drops one picture from the gallery.
 void Remove(not_null<Main::Session*> session, const Data::WallPaper &paper);
 
-// Uploads a picture chosen from a file and hands back the paper it became, so
-// the caller can apply it exactly as it applies one picked from the gallery.
 void Upload(
 	not_null<Main::Session*> session,
 	const QImage &image,
@@ -80,15 +75,12 @@ void SetNoneForPeer(not_null<PeerData*> peer);
 	PeerData *forPeer,
 	const Data::WallPaper &paper);
 
-// Applies the stored default once the session is up, so a fresh install picks
-// up the picture chosen on another device.
 void RequestDefault(not_null<Main::Session*> session);
 
 // Applies the "wallpaper" object of a chat payload, and clears the chat's own
 // picture when it is absent - which is how a chat says it follows the default.
 void ApplyForPeer(not_null<PeerData*> peer, const QJsonObject &wallpaper);
 
-// Drops what this adapter remembers about a session.
 void ClearSession(not_null<Main::Session*> session);
 
 } // namespace CustomBackend::Wallpapers

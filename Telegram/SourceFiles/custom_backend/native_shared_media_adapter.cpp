@@ -23,8 +23,6 @@ namespace {
 
 using Type = Storage::SharedMediaType;
 
-// One page of a media list. The server splits it in half around an anchor,
-// the same way a history page around a position is split.
 constexpr auto kMediaLimit = 40;
 
 // Info::GlobalMedia::Provider stores the request id, compares a completion
@@ -254,7 +252,6 @@ void Search(
 			auto &states = SearchStates();
 			const auto i = states.find(owner.get());
 			if ((i == end(states)) || !i->second.live.remove(requestId)) {
-				// The list was cancelled while this page was in flight.
 				return;
 			}
 			const auto strong = weak.get();
@@ -284,8 +281,6 @@ mtpRequestId RequestGlobal(
 		crl::on_main([done] { done({}); });
 		return kBridgeGlobalMarker;
 	}
-	// The provider pages by the position it last saw, and a global list is
-	// ordered by message id, which is global here as well.
 	const auto before = offsetPosition
 		? qint64(offsetPosition.fullId.msg.bare)
 		: qint64(0);

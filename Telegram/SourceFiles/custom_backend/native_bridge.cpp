@@ -178,8 +178,6 @@ constexpr auto kPinnedMessagesLimit = 30;
 // never appears must not let it grow without a bound.
 constexpr auto kDeferredMessageEventsLimit = 256;
 
-// The usage lists GET /reactions and GET /reactions/usage answer with:
-// catalog ids, which are also the DocumentIds this client uses.
 [[nodiscard]] std::vector<DocumentId> ReactionUsageIds(
         const QJsonValue &value) {
     auto result = std::vector<DocumentId>();
@@ -316,8 +314,6 @@ FullReplyTo ReplyToFromServerId(History *history, ReplyTarget replyTo) {
 // height. The bubble still needs some geometry to lay out.
 constexpr auto kUnknownPhotoSide = 320;
 
-// An attachment is rendered inline when its MIME says image and the sender did
-// not pick "send as file".
 bool AttachmentIsPhoto(const QJsonObject &attachment, bool forceFile) {
     if (forceFile || attachment.value("as_file").toBool()) {
         return false;
@@ -372,7 +368,6 @@ QString CdnPreviewUrl(const QString &url, int side) {
         + u"/-/preview/%1x%1/quality/smart/format/webp"_q.arg(side);
 }
 
-// The size a fit-in preview comes out with.
 QSize CdnPreviewSize(int width, int height, int side) {
     if (width <= 0 || height <= 0 || std::max(width, height) <= side) {
         return QSize(width, height);
@@ -383,7 +378,6 @@ QSize CdnPreviewSize(int width, int height, int side) {
         std::max(1, int(std::round(height * scale))));
 }
 
-// A url image location, resized by fxl-cdn to fit `side` when it can be.
 bool FitsSide(int width, int height, int side) {
     return (width > 0) && (height > 0) && (std::max(width, height) <= side);
 }
@@ -406,8 +400,6 @@ ImageWithLocation RemoteImage(
         if (session) {
             Streaming::RememberFileCacheKey(session, url, fileUniqueId, u"original"_q);
         }
-        // An image that already fits is served as uploaded: re-encoding it
-        // only grows it.
         return ImageWithLocation{
             .location = ImageLocation(
                 DownloadLocation{ PlainUrlLocation{ url } },
@@ -446,8 +438,6 @@ void UpdateRemotePhotoImages(
         bool resizable,
         const QString &fileUniqueId = QString()) {
     const auto sized = resizable && !url.isEmpty() && IsCdnOriginalUrl(url);
-    // A smaller size is only worth having when the image is larger than it:
-    // otherwise the large size is that image already.
     const auto image = [&](int side) {
         return (sized && !FitsSide(width, height, side))
             ? RemoteImage(url, width, height, side, true, &photo->session(), fileUniqueId)
@@ -668,8 +658,6 @@ MTPMessageMedia MediaFromAttachment(
             MTPDocument());
     }
 
-    // files_real keeps real dimensions for videos and images, and the DTO
-    // carries them: a document laid out without them used to claim 1x1.
     auto width = attachment.value("width").toInt();
     auto height = attachment.value("height").toInt();
     if (width <= 0 || height <= 0) {
@@ -696,8 +684,6 @@ MTPMessageMedia MediaFromAttachment(
                 flags |= Flag::f_waveform;
             }
         }
-        // The track title, falling back to the file name for a node that has
-        // none - which is every node written before the contract split them.
         auto title = attachment.value("title").toString().trimmed();
         if (title.isEmpty()) {
             title = attachment.value("name").toString();
@@ -738,8 +724,6 @@ MTPMessageMedia MediaFromAttachment(
             MTPdouble(),
             MTPstring()));
         if (kind == u"animation"_q) {
-            // Upstream renders a document as a looping GIF only when it
-            // carries the animated attribute.
             attributes.push_back(MTP_documentAttributeAnimated());
         }
     } else if (mime.startsWith(u"image/"_q)) {
@@ -806,8 +790,6 @@ MTPMessageMedia MediaFromAttachment(
     if (attachment.value("spoiler").toBool()) {
         mediaFlags |= Flag::f_spoiler;
     }
-    // The media-level markers upstream reads directly when deciding how to
-    // lay a bubble out, in addition to the document attributes above.
     if (kind == u"video_note"_q) {
         mediaFlags |= Flag::f_round;
     } else if (kind == u"voice"_q) {
@@ -848,9 +830,6 @@ qint64 WebPageStableId(const QString &url) {
     return kWebPageMediaIdOffset + qint64(value % quint64(kWebPageMediaIdRange));
 }
 
-// Registers the PhotoData behind a preview image. Same shape as
-// AttachmentPhoto(): no bytes at hand, so the image is a plain url location
-// and upstream downloads it itself.
 MTPPhoto WebPagePhoto(
         not_null<Main::Session*> session,
         const QString &url,
@@ -889,11 +868,6 @@ MTPPhoto WebPagePhoto(
     return photo;
 }
 
-// Builds the media of a link preview card - the messageMediaWebPage of
-// MTProto. A card whose page is still being read comes through as
-// webPagePending, exactly like the pending state the Telegram server sends
-// before it has finished fetching; the full card then arrives as an ordinary
-// message update.
 std::optional<MTPMessageMedia> MediaFromWebPage(
         not_null<Main::Session*> session,
         const QJsonObject &webPage) {
@@ -921,8 +895,6 @@ std::optional<MTPMessageMedia> MediaFromWebPage(
         && title.isEmpty()
         && description.isEmpty()
         && imageUrl.isEmpty()) {
-        // Nothing to draw. An empty card is worse than none: upstream would
-        // still lay out the frame around it.
         return std::nullopt;
     }
     // Shrunk picture by default: the page type is passed through as the server
@@ -953,8 +925,6 @@ std::optional<MTPMessageMedia> MediaFromWebPage(
     auto mediaFlags = MTPDmessageMediaWebPage::Flags();
     const auto large = webPage.value("large").toBool();
     const auto small = webPage.value("small").toBool();
-    // The sender touched the preview settings, so the layout is their choice
-    // and not a default upstream may recompute.
     if (large || small || webPage.value("above").toBool()) {
         mediaFlags |= MediaFlag::f_manual;
     }
@@ -1141,9 +1111,6 @@ NativeBridge::NativeBridge(Main::Session *session)
     _session->user()->addFlags(UserDataFlag::Premium);
     const auto me = CurrentUser(_session);
     if (!me.isEmpty()) {
-        // Same DTO shape and same code path as any other peer, so self
-        // picks up name, loaded status and avatar consistently instead of
-        // duplicating the field parsing (and missing the avatar) here.
         ensureUser(me, false);
     }
     // The cached DTO above is only as fresh as the last login: nothing else
@@ -1507,8 +1474,6 @@ void NativeBridge::rememberPendingSend(
     request.draftSaving = clearDraft;
     request.files = std::move(files);
     request.localAttachment = std::move(local);
-    // The request goes out immediately after this, so the send counts as in
-    // flight from here until it fails or lands.
     request.inFlight = true;
     _pendingSendNonceToLocalId[request.clientNonce] = item->id.bare;
     _pendingSends[item->id.bare] = std::move(request);
@@ -1554,9 +1519,6 @@ void NativeBridge::failPendingSend(qint64 localId, int status) {
         _session->data().sendHistoryChangeNotifications();
         return;
     }
-    // The request is over and nothing is in flight any more: cancelling is
-    // free again, and resendPendingSends() may replay this send once the
-    // connection is back.
     i->second.inFlight = false;
     i->second.committing = false;
     i->second.cancelUpload = nullptr;
@@ -1590,8 +1552,6 @@ void NativeBridge::clearPendingSend(qint64 localId) {
     if (i == _pendingSends.end()) {
         return;
     }
-    // A replay puts the count back right after it re-sends: here the send is
-    // simply over, one way or another.
     _sendReplays.erase(i->second.clientNonce);
     _pendingSendNonceToLocalId.erase(i->second.clientNonce);
     _pendingSends.erase(i);
@@ -1752,9 +1712,6 @@ void NativeBridge::scheduleReactionsRefresh() {
     });
 }
 
-// Re-reads the caller's reaction order after they reacted. Only the order:
-// the catalog is the whole emoji table of the site and does not change
-// because somebody used a reaction.
 void NativeBridge::refreshReactionUsage() {
     const auto weak = QPointer<NativeBridge>(this);
     client().reactionUsage([weak](QJsonDocument doc, QString error, int) {
@@ -1936,10 +1893,6 @@ void NativeBridge::applyPeerNotifySettings(
         MTPNotificationSound()));
 }
 
-// Canonical parse of a server notification_settings object: clamp, record the
-// snapshot the next local save reuses, then push it into the native model.
-// Both the chat-list snapshot and the chat.updated patch go through here so
-// the clamp and the show_previews baseline cannot drift apart.
 void NativeBridge::applyNotificationSettings(
         PeerData *peer,
         qint64 chatId,
@@ -2046,7 +1999,6 @@ void NativeBridge::loadDefaultNotifySettings() {
     const auto weak = QPointer<NativeBridge>(this);
     client().defaultNotificationSettings([weak](QJsonDocument doc, QString error, int) {
         if (!weak || !error.isEmpty() || !doc.isObject()) {
-            // Keep the cached seed: it is a better guess than "unmuted".
             return;
         }
         weak->applyDefaultNotifySettingsPayload(doc.object());
@@ -2078,8 +2030,6 @@ void NativeBridge::reloadChats() {
 
 void NativeBridge::applyChats(const QJsonDocument &doc) {
     if (!doc.isArray()) return;
-    // The response is the canonical snapshot of per-user chat settings:
-    // the pinned-order map is rebuilt from scratch on every application.
     _pinnedRanks.clear();
     for (const auto &entry : doc.array()) {
         if (!entry.isObject()) continue;
@@ -2113,7 +2063,6 @@ void NativeBridge::applyChats(const QJsonDocument &doc) {
                 chat.value("pinned_rank").toVariant().toLongLong(), 1);
         }
 
-        // Draft snapshot: seed the revision the next save/delete guards with.
         if (const auto draft = chat.value("draft").toObject(); !draft.isEmpty()) {
             _draftRevisionByChat[chatId] = draft.value("revision").toVariant().toLongLong();
         } else {
@@ -2159,11 +2108,8 @@ void NativeBridge::applyChats(const QJsonDocument &doc) {
         }
         history->updateChatListExistence();
     }
-    // One batched order restoration after the whole array is parsed.
     rebuildPinnedOrder();
 	updatePresence();
-	// Every chat this response knows about is mapped now, so message events
-	// that arrived before it can finally be applied.
 	drainDeferredMessageEvents();
 }
 
@@ -2302,8 +2248,6 @@ void NativeBridge::applyPresence(const QJsonObject &data) {
 }
 
 void NativeBridge::loadCachedChats() {
-    // Instant cold-start render from the light snapshot saved by the last
-    // successful reloadChats(); the network refresh replaces it right after.
     const auto json = LoadChatsCache(_session);
     if (json.isEmpty()) return;
     const auto doc = QJsonDocument::fromJson(json);
@@ -2476,8 +2420,6 @@ std::optional<NativeBridge::PreparedMessage> NativeBridge::prepareMessage(
         mtpFlags |= Flag::f_reactions;
     }
     const auto replyId = message.value("reply_to_id").toVariant().toLongLong();
-    // A cross-chat reply names the chat its parent lives in; an ordinary one
-    // does not, and then the parent is here.
     const auto replyPeerId = peerForChatId(message.value("reply_to")
         .toObject()
         .value("chat_id")
@@ -2503,10 +2445,6 @@ std::optional<NativeBridge::PreparedMessage> NativeBridge::prepareMessage(
     if (!editedAt.isEmpty()) {
         mtpFlags |= Flag::f_edit_date;
     }
-    // silent is "sent without sound". It is a flag-only field, so the flag is
-    // the whole value: FlagsFromMTP turns it into MessageFlag::Silent, which
-    // is what mutes the notification and draws the crossed-out bell on a
-    // scheduled item.
     if (message.value("silent").toBool()) {
         mtpFlags |= Flag::f_silent;
     }
@@ -2568,9 +2506,6 @@ std::optional<NativeBridge::PreparedMessage> NativeBridge::prepareMessage(
         mtpFlags |= Flag::f_fwd_from;
     }
 
-    // An album is several messages sharing a grouped_id: upstream builds the
-    // grid from it, so without the flag every item would render as its own
-    // separate bubble.
     const auto groupedId = message
         .value("grouped_id").toVariant().toLongLong();
     if (groupedId != 0) {
@@ -2605,8 +2540,6 @@ std::optional<NativeBridge::PreparedMessage> NativeBridge::prepareMessage(
                     ? std::make_optional(message.value("video_timestamp").toInt())
                     : std::nullopt));
     if (media && webPage.value("above").toBool()) {
-        // "Move up" in the preview settings. Upstream calls it invert_media
-        // and keeps it on the message, not on the media.
         mtpFlags |= Flag::f_invert_media;
     }
     if (media) {
@@ -2699,10 +2632,6 @@ std::optional<NativeBridge::PreparedMessage> NativeBridge::prepareMessage(
     };
 }
 
-// prepareCallMessage turns the "foxCall" node the server left in the chat into
-// the service message upstream already knows how to draw
-// (history_item.cpp, MTPDmessageActionPhoneCall -> Data::MediaCall). Nothing
-// about the rendering is ours: we only restate the outcome.
 std::optional<NativeBridge::PreparedMessage> NativeBridge::prepareCallMessage(
         History *history,
         const QJsonObject &message,
@@ -2881,8 +2810,6 @@ HistoryItem *NativeBridge::applyMessage(
     history->setChatListTimeId(unixTime(message.value("created_at").toString()));
     history->updateChatListExistence();
     _seenMessages.emplace(SeenKey(chatId, messageId));
-    // The message is attached and visible now, which is exactly what delivery
-    // means. Own messages are delivered by definition and are never reported.
     if (item
         && message.value("sender_id").toVariant().toLongLong()
             != client().meId()) {
@@ -2901,8 +2828,6 @@ void NativeBridge::queueDelivered(qint64 chatId, qint64 messageId) {
     }
     ids.push_back(messageId);
     if (!_deliveredTimer.isActive()) {
-        // Coalesce a burst - a history page or a replay flood - into one
-        // request per chat instead of one per message.
         _deliveredTimer.start(kDeliveredBatchDelayMs);
     }
 }
@@ -3024,8 +2949,6 @@ void NativeBridge::applyMessageReactions(
             }
             known->second.revision = revision;
         } else if (revision > 0) {
-            // A message that was never reacted to needs no entry: the
-            // default state already carries revision 0.
             _reactionReplace[item->id.bare].revision = revision;
         }
     }
@@ -3090,7 +3013,6 @@ void NativeBridge::loadHistory(
 				ensureChat(history, [weak, history, aroundId, direction, done = std::move(done)](qint64 chatId) {
 					if (!weak || !history) return;
 					if (chatId <= 0) {
-						// Chat resolution failed - finish instead of retry-looping.
 						if (done) done();
 						return;
 					}
@@ -3309,8 +3231,6 @@ void NativeBridge::loadHistoryPage(
 					range.from = qMin(range.from, MsgId(requestAroundId));
 				}
 				if (!hasMoreAfter) {
-					// The newest page arrived with nothing after it:
-					// the history bottom is reached.
 					range.till = ServerMaxMsgId;
 				}
 				break;
@@ -3320,8 +3240,6 @@ void NativeBridge::loadHistoryPage(
 					range.till = qMax(range.till, MsgId(requestAroundId));
 				}
 				if (!hasMoreAfter) {
-					// The around page proved nothing newer exists: the bottom
-					// edge is reached.
 					range.till = ServerMaxMsgId;
 				}
 				break;
@@ -3336,8 +3254,6 @@ void NativeBridge::loadHistoryPage(
 		} else if (openAtEnd
 			&& requestDirection == Data::LoadDirection::Before
 			&& requestAroundId <= 0) {
-			// An empty chat or an empty final page: mark both edges as
-			// loaded so the view does not keep requesting the same page.
 			history->messages().addSlice({}, MsgRange{ 0, ServerMaxMsgId }, {});
 		}
 		if (requestDirection == Data::LoadDirection::Before && hasMoreBefore && nextBefore > 0) {
@@ -3603,8 +3519,6 @@ void NativeBridge::sendText(
                 weak->failPendingSend(localId, kSendServerAccepted);
             }
             if (clearDraft) {
-                // The server removed exactly this draft version inside its
-               // own transaction; no extra clearing mutation is sent.
                 weak->_draftRevisionByChat[chatId] = 0;
             }
             if (!history->folderKnown()) history->clearFolder();
@@ -3745,10 +3659,6 @@ void NativeBridge::clearCloudDraftFor(qint64 chatId) {
         });
 }
 
-// Removes the optimistic bubbles of a send that is not going into the chat
-// after all. Their pending records are already settled by the caller; what is
-// left is the local items, and leaving them behind would show a message in the
-// conversation that nobody sent there yet.
 void NativeBridge::dropOptimisticItems(
         History *history,
         const std::vector<qint64> &localIds) {
@@ -3808,7 +3718,6 @@ void NativeBridge::sendFiles(
             .path = file.path,
             .forceFile = file.forceFile,
         };
-        // The caption of an album rides on its first message, as in upstream.
         auto keepMedia = std::shared_ptr<Data::DocumentMedia>();
         const auto item = createPendingFileMessage(
             history,
@@ -3838,8 +3747,6 @@ void NativeBridge::sendFiles(
             index ? TextWithEntities() : trimmedCaption,
             std::vector<UploadSpec>{ file },
             std::move(local));
-        // Kept so a replay after reconnect can put the album back together
-        // instead of sending each attachment as an album of its own.
         _pendingSends[item->id.bare].groupedId = groupedId;
         // Nothing else holds the view that carries those bytes, and letting it
         // die would put the document back where it started.
@@ -3877,8 +3784,6 @@ void NativeBridge::sendFiles(
         // A video upload answers with the poster fxl-api generated for it. The
         // link exists nowhere else, so it has to travel with the send.
         auto posters = std::make_shared<QMap<qint64, QString>>();
-        // Media metadata is known before the upload and keyed by the id the
-        // upload hands back, so it is collected as each file completes.
         auto meta = std::make_shared<QMap<qint64, AttachmentMeta>>();
         auto next = std::make_shared<std::function<void()>>();
         *next = [weak, history, chatId, files = std::move(files), trimmedCaption, replyTo, localIds, nonces, forceFile, options, failAll, index, ids, posters, meta, next]() mutable {
@@ -3895,10 +3800,6 @@ void NativeBridge::sendFiles(
                         i->second.cancelUpload = nullptr;
                     }
                 }
-                // One attachment is one message: a native message holds
-                // exactly one media, so several files become an album - a
-                // group of messages sharing a grouped_id - instead of one
-                // message whose extra attachments nobody could render.
                 auto items = QList<ApiClient::AlbumItem>();
                 items.reserve(ids->size());
                 for (auto i = 0; i != ids->size(); ++i) {
@@ -4006,7 +3907,6 @@ void NativeBridge::sendFiles(
             }
             const auto fileIndex = (*index)++;
             const auto file = files[fileIndex];
-            // Progress belongs to the bubble of this very attachment.
             const auto localId = localIds[fileIndex];
             const auto isPhoto = UploadIsPhoto(file);
             const auto uploaded = [weak, next, ids, posters, meta, file, chatId, failAll](QJsonDocument doc, QString error, int status) {
@@ -4017,7 +3917,6 @@ void NativeBridge::sendFiles(
                     failAll(status, error);
                     return;
                 }
-                // Canonical fxl-api response: {ok, data:{id,url,sha256,...}}.
                 const auto data = doc.object().value("data").toObject();
                 const auto id = data.value("id").toVariant().toLongLong();
                 if (id <= 0) {
@@ -4193,8 +4092,6 @@ bool NativeBridge::finishCancelledCommit(
     if (!history || messageId <= 0 || messageId > INT32_MAX) {
         return true;
     }
-    // Cancel means the message must not exist anywhere, so undo the commit the
-    // user could no longer stop.
     deleteMessages(history, { int32_t(messageId) }, true);
     return true;
 }
@@ -4249,8 +4146,6 @@ void NativeBridge::resendPendingSends() {
             continue;
         }
         const auto &first = found->second;
-        // One album is one send. Anything else - a text, a single file - is a
-        // group of one.
         auto group = std::vector<qint64>{ *i };
         auto next = i + 1;
         if (const auto groupedId = first.groupedId) {
@@ -4295,8 +4190,6 @@ void NativeBridge::resendPendingGroup(const std::vector<qint64> &localIds) {
         const auto item = _session->data().message(
             history->peer,
             MsgId(localId));
-        // Still on the clock or already marked failed - anything else is a
-        // bubble the user is no longer waiting for.
         if (!item || (!item->isSending() && !item->hasFailed())) {
             return;
         }
@@ -4509,8 +4402,6 @@ void NativeBridge::deleteMessages(
                 }
                 return out;
             };
-            // The items are already gone locally; the response only decides
-            // what has to come back.
             for (const auto messageId : readIds("deleted_ids")) {
                 weak->_pendingDeletes.erase(messageId);
                 acknowledged = true;
@@ -5021,9 +4912,6 @@ void NativeBridge::setChatArchived(History *history, bool archived, std::functio
     });
 }
 
-// Toggle chat-list pin through fxl-api. The optimistic local mutation was
-// already made by the upstream caller before this hook; on failure it is
-// reverted and canonical state is reloaded.
 void NativeBridge::setChatPinned(
         History *history,
         bool pinned,
@@ -5050,8 +4938,6 @@ void NativeBridge::setChatPinned(
                 return;
             }
             if (!error.isEmpty()) {
-                // Revert the optimistic mutation and reconcile with the
-                // canonical server order (ranks included).
                 weak->_session->data().setChatPinned(history, FilterId(), !pinned);
                 weak->reloadChats();
                 ShowSettingsToast(
@@ -5069,8 +4955,6 @@ void NativeBridge::setChatPinned(
     });
 }
 
-// Persists the full ordered pinned list after a drag-reorder. The submitted
-// list is authoritative on the server: missing chats get unpinned there.
 void NativeBridge::savePinnedOrder(Data::Folder *folder) {
     const auto &order = _session->data().pinnedChatsOrder(folder);
     auto ids = QList<qint64>();
@@ -5092,8 +4976,6 @@ void NativeBridge::savePinnedOrder(Data::Folder *folder) {
     });
 }
 
-// Per-user "marked as unread" dialog flag. Also fires automatically when a
-// chat is opened (mark=false), so errors are reconciled quietly.
 void NativeBridge::setChatUnreadMark(History *history, bool marked) {
     if (!history) return;
     const auto weak = QPointer<NativeBridge>(this);
@@ -5145,8 +5027,6 @@ void NativeBridge::rebuildPinnedOrder() {
     }
 }
 
-// Applies a per-user settings patch carried by chat.updated. Unknown chats
-// and payloads without applicable fields fall back to a full reload.
 void NativeBridge::applyChatSettingsPatch(const QJsonObject &data) {
     const auto chatId = data.value("id").toVariant().toLongLong();
     if (chatId <= 0) return;
@@ -5192,7 +5072,6 @@ void NativeBridge::applyChatSettingsPatch(const QJsonObject &data) {
                 changed = true;
             }
         } else {
-            // Pinned without a rank: cannot place it reliably.
             needsReload = true;
         }
     }
@@ -5258,8 +5137,6 @@ void NativeBridge::saveNotificationSettings(PeerData *peer) {
 				return;
 			}
 			if (!error.isEmpty() || !doc.isObject()) {
-				// The server rejected the change: roll the UI back to the
-				// last server-accepted snapshot.
 				const auto snap = weak->_notificationByChat.find(chatId);
 				const auto known = (snap != weak->_notificationByChat.end());
 				const auto revertMute = known ? snap->second.muteUntil : 0;
@@ -5316,9 +5193,6 @@ void NativeBridge::saveDefaultNotifySettings(Data::DefaultNotify type) {
                 return;
             }
             if (!error.isEmpty() || !doc.isObject()) {
-                // The server rejected the change: roll the UI back to the
-                // last server-accepted snapshot instead of leaving a value
-                // that silently disappears on the next restart.
                 weak->applyDefaultNotifySettings(revertMute, revertSound);
                 return;
             }
@@ -5363,8 +5237,6 @@ void NativeBridge::dispatchReactionReplace(History *history, qint64 messageId) {
             auto &state = reactionIt->second;
             state.inFlight = false;
             const auto applyCanonical = [&](const QJsonObject &data) {
-                // Revisions only grow: an older payload never lowers the
-                // guard for the next replace.
                 if (const auto revision = data.value("reaction_revision").toVariant().toLongLong(); revision > state.revision) {
                     state.revision = revision;
                 }
@@ -5842,9 +5714,6 @@ void NativeBridge::applyPinnedState(
     }
     std::sort(ids.begin(), ids.end());
 
-    // Bodies that travelled with the list are applied first so the bar can
-    // render from a native item instead of re-fetching every pinned message
-    // one by one through requestMessageData().
     for (const auto &value : state.value("messages").toArray()) {
         const auto object = value.toObject();
         if (!object.isEmpty()) {
@@ -5963,8 +5832,6 @@ void NativeBridge::handleEvent(const QJsonObject &event) {
 		return;
 	}
 
-    // A call event is not chat state: it drives the upstream call machine
-    // through Calls::Instance and has nothing to say to the chat list.
     if (Calls::HandleEvent(_session, type, data)) {
         return;
     }
@@ -6103,8 +5970,6 @@ void NativeBridge::handleEvent(const QJsonObject &event) {
 			applyPinnedState(history, chatId, data);
 		}
 	} else if (type == u"draft.updated"_q || type == u"draft.deleted"_q) {
-		// Replayable per-chat draft events keep the local revision in sync so
-		// the next save/send guards against the actual server state.
 		const auto chatId = data.value("chat_id").toVariant().toLongLong();
 		if (const auto revision = data.value("draft").toObject().value("revision").toVariant().toLongLong(); revision > 0) {
 			_draftRevisionByChat[chatId] = revision;
@@ -6112,8 +5977,6 @@ void NativeBridge::handleEvent(const QJsonObject &event) {
 			_draftRevisionByChat[chatId] = 0;
 		}
 	} else if (Scheduled::ApplyEvent(_session, type, data)) {
-		// The scheduled queue is private to its author, so a reminder event
-		// only ever reaches the client that created it.
 	} else if (type == u"gap.detected"_q) {
 		// next_seq is the authoritative recovery point: everything below it is
 		// gone from the replay window, so the snapshot has to stand in for it.
@@ -6127,9 +5990,6 @@ void NativeBridge::handleEvent(const QJsonObject &event) {
 		applyDefaultNotifySettingsPayload(
 			data.value("notification_defaults").toObject());
 	} else if (type == u"chat.updated"_q) {
-		// Per-user settings patches (pin / unread mark / archive) are applied
-		// directly; unknown chats and non-settings payloads fall back to a
-		// full canonical reload inside applyChatSettingsPatch.
 		applyChatSettingsPatch(data);
     } else if (type.startsWith(u"chat."_q)) {
         reloadChats();
@@ -6183,7 +6043,6 @@ void NativeBridge::resyncAfterGap(qint64 resumeFrom, qint64 observedSeq) {
 	_pinnedIds.clear();
 	_pinRevisions.clear();
 
-	// Replay must continue from just before the first event we can still see.
 	_eventSeq = resumeFrom - 1;
 	client().setEventSequence(_eventSeq);
 	RememberEventSequence(_session, _eventSeq);

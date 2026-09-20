@@ -127,14 +127,7 @@ struct UploadSpec {
     QString displayName;
     QString mime;
     QByteArray content;
-    // The user picked "send as file" for this group, so an image must be
-    // rendered as a document instead of a photo.
     bool forceFile = false;
-    // Media metadata the receiving client cannot derive from the bytes: the
-    // same MIME is a voice message or a music file depending on intent, and a
-    // video may be an animation or a round video note. Nothing on the server
-    // stores it either, so it travels with the send and lands on the document
-    // node.
     QString kind;
     qint64 durationMs = 0;
     QString waveform;
@@ -156,8 +149,6 @@ struct UploadSpec {
 // send - otherwise a just-sent photo loses its preview.
 struct LocalAttachment {
     QByteArray bytes;
-    // Where the file being uploaded already lies on disk, so the optimistic
-    // item can be pointed at real content instead of waiting for the upload.
     QString path;
     bool forceFile = false;
 };
@@ -168,7 +159,6 @@ struct LocalAttachment {
 [[nodiscard]] SendOptions SendOptionsFrom(
     const Api::SendOptions &options);
 
-// The composer's reply, reduced to what the bridge sends and echoes locally.
 [[nodiscard]] ReplyTarget ReplyTargetFrom(
     History *history,
     const FullReplyTo &replyTo);
@@ -229,9 +219,6 @@ public:
         // the album twice.
         const std::vector<QString> &reuseClientNonces = {},
         const SendOptions &options = {});
-    // The link preview card as native media. Public so the composer's preview
-    // adapter builds it exactly like an incoming message does - one converter
-    // for one payload shape.
     [[nodiscard]] static std::optional<MTPMessageMedia> WebPageMedia(
         Main::Session *session,
         const QJsonObject &webPage);
@@ -244,21 +231,14 @@ public:
     // keeping a second copy of that lookup. An id of 0 means the chat could
     // not be resolved, and the caller has to fail visibly rather than wait.
     void resolveChatId(History *history, std::function<void(qint64)> done);
-    // Builds the native message a queued reminder will become. Public because
-    // the scheduled adapter renders the scheduled list from it, and there is
-    // exactly one converter for one payload shape.
     [[nodiscard]] std::optional<MTPMessage> prepareReminder(
         History *history,
         const QJsonObject &reminder);
     bool retryFailedMessage(HistoryItem *item);
-    // Re-issues sends that never reached the server, called when the live
-    // connection is restored.
     void resendPendingSends();
     // Replays one send - a text, a single file, or a whole album - keeping the
     // nonces of the first attempt.
     void resendPendingGroup(const std::vector<qint64> &localIds);
-    // Aborts the transfer behind a still-sending item, so cancelling actually
-    // stops the upload instead of only removing the bubble.
     void cancelSend(HistoryItem *item);
     // Handles the response of a send the user cancelled after the commit
     // started: removes the pending entry and deletes the created message.
@@ -291,9 +271,7 @@ public:
         History *history,
         bool pinned,
         std::function<void(bool success)> done = {});
-    // Persists the full ordered list of pinned chats (drag-reorder).
     void savePinnedOrder(Data::Folder *folder);
-    // Per-user "marked as unread" dialog flag; quiet reconcile on error.
     void setChatUnreadMark(History *history, bool marked);
     void saveNotificationSettings(PeerData *peer);
     // Per-user notification default for one peer type. Groups and channels
@@ -373,8 +351,6 @@ public:
     void pinMessage(History *history, MsgId messageId, bool forEveryone, std::function<void(QString error)> done = {});
     void unpinMessage(History *history, MsgId messageId, std::function<void(QString error)> done = {});
     void unpinAllMessages(History *history, std::function<void(QString error)> done = {});
-    // Serves ApiWrap::requestSharedMedia for SharedMediaType::Pinned: upstream
-    // has no transport under the bridge, so the pinned slice comes from here.
     void requestPinnedMessages(History *history);
     void updateProfile(
         const QString &displayName,
@@ -389,8 +365,6 @@ public:
 		MsgId messageId,
 		std::function<void()> done);
 
-	// One participant of a chat whose server read watermark already covers a
-	// message, with the moment fxl-api recorded that read.
 	struct ChatReader {
 		qint64 userId = 0;
 		TimeId date = 0;
@@ -410,8 +384,6 @@ public:
 
 private:
     [[nodiscard]] ApiClient &client() const;
-    // Formatting of an incoming message: entities with UTF-16 offsets map
-    // onto the native MTP entity types one to one.
     [[nodiscard]] static MTPVector<MTPMessageEntity> renderMessageEntities(
         const QJsonObject &message);
     // The outgoing direction of the same mapping. The text is needed because
@@ -607,10 +579,7 @@ private:
         History *history = nullptr;
         QString clientNonce;
         QString text;
-        // Kept so retrying a failed send does not silently drop formatting.
         EntitiesInText entities;
-        // The link preview choice of the first attempt, kept for the same
-        // reason: a retry must not quietly turn the card back on.
         Data::WebPageDraft webPage;
         TextWithEntities caption;
         ReplyTarget replyTo;
@@ -647,7 +616,6 @@ private:
         // back has to be deleted on the server instead of being displayed.
         bool cancelledAfterCommit = false;
     };
-    // Whether this send may be replayed on reconnect at all.
     [[nodiscard]] bool pendingSendReplayable(
         const PendingSendRequest &request) const;
 
@@ -664,7 +632,6 @@ private:
 	std::unordered_map<qint64, std::vector<std::function<void()>>>
 		_messageDataCallbacks;
 	std::unordered_set<qint64> _loadedChats;
-	// Chats whose pinned list was fetched through the bridge.
 	std::unordered_set<qint64> _pinnedSyncedChats;
 	// Last applied pinned list per chat, ascending. Kept so a new state can
 	// clear the shared media entries of messages that are no longer pinned:
@@ -707,8 +674,6 @@ private:
 	qint64 _presenceChatId = 0;
 	std::unordered_set<qint64> _pendingEdits;
 	std::unordered_set<qint64> _pendingDeletes;
-	// Incoming messages attached to a history but not yet acknowledged as
-	// delivered, grouped by chat and flushed by _deliveredTimer.
 	std::unordered_map<qint64, QList<qint64>> _pendingDelivered;
 	QTimer _deliveredTimer;
 	std::unordered_map<MessageKey, qint64, MessageKeyHash> _messageRevisions;

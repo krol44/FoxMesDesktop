@@ -32,11 +32,8 @@ namespace CustomBackend::Stickers {
 // customEmoji node in the message document, exactly as fxl-web writes it, so
 // the send is a text send carrying one custom_emoji entity.
 
-// Fills Data::Stickers sets from the catalog. Answers the hook in
-// ApiWrap::requestStickers.
 void Request(not_null<Main::Session*> session);
 
-// True when this adapter built the document.
 [[nodiscard]] bool IsSticker(
 	not_null<Main::Session*> session,
 	not_null<DocumentData*> document);
@@ -47,7 +44,6 @@ void Request(not_null<Main::Session*> session);
 	not_null<DocumentData*> document,
 	const Api::SendAction &action);
 
-// Drops the documents built for a session that is going away.
 void ClearSession(not_null<Main::Session*> session);
 
 } // namespace CustomBackend::Stickers

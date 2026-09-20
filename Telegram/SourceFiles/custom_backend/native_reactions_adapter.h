@@ -53,7 +53,6 @@ void SetUsageLists(
 	const std::vector<DocumentId> &top,
 	const std::vector<DocumentId> &recent);
 
-// The catalog as loaded, for surfaces other than the reaction strip.
 [[nodiscard]] std::vector<CatalogItem> Catalog();
 [[nodiscard]] rpl::producer<> CatalogChanged();
 
@@ -62,9 +61,7 @@ void SetUsageLists(
 [[nodiscard]] Asset AssetFor(DocumentId id);
 [[nodiscard]] rpl::producer<DocumentId> AssetLoaded();
 
-// The emoji of one row, for the text a send carries under its entity.
 [[nodiscard]] QString EmojiFor(DocumentId id);
-// The CDN address of one row, as the catalog serves it.
 [[nodiscard]] QString AssetUrlFor(DocumentId id);
 
 // Server-driven per-message limit of distinct chosen reactions

@@ -6,27 +6,16 @@
 
 namespace CustomBackend {
 
-// Transport replacement for ApiWrap::sendFiles. Everything the send needs -
-// reading the media kind out of the prepared files, building the upload specs,
-// picking the caption - happens here, so the upstream hook stays a plain
-// "if enabled, call this and return".
 void SendFiles(
 	Ui::PreparedList &&list,
 	SendMediaType type,
 	Api::SendAction action);
 
-// Transport replacement for ApiWrap::sendFile - the clipboard path, which
-// hands over raw bytes with no name. The real MIME is sniffed here so the
-// attachment does not land as an unreadable application/octet-stream blob.
 void SendFileContent(
 	const QByteArray &content,
 	SendMediaType type,
 	const Api::SendAction &action);
 
-// Transport replacement for ApiWrap::sendVoiceMessage - a recorded voice
-// message, or a round video note when `video` is set. Neither goes through
-// PreparedList at all: the recorder hands over finished bytes plus the
-// metadata only it knows, so the upload specs are built here.
 void SendVoiceMessage(
 	const QByteArray &content,
 	const VoiceWaveform &waveform,

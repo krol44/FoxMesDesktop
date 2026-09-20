@@ -42,8 +42,6 @@ constexpr auto kPatternDocumentId = uint64(0xF0DD000000000001ULL);
 // checkWallPaperProperties() accepts.
 constexpr auto kPatternSide = 1440;
 
-// How strongly the doodles show through. Telegram's own chat themes sit around
-// here; lower washes the pattern out, higher makes it fight the text.
 constexpr auto kPatternIntensity = 50;
 
 // The colour encoding MTPWallPaperSettings uses. data_wall_paper.cpp has the
@@ -67,11 +65,7 @@ base::flat_map<
 }
 
 struct Palette {
-	// The background gradient. Two to four colours, blended by the same code
-	// that draws a Telegram gradient wallpaper.
 	std::vector<QColor> background;
-	// The outgoing bubble. Two colours make it a gradient, which is what the
-	// picker previews and what the bubble is painted with.
 	std::vector<QColor> outgoing;
 	QColor accent;
 };
@@ -240,9 +234,6 @@ struct ThemeSpec {
 				DownloadLocation{ InMemoryLocation{ bytes } },
 				kPatternSide,
 				kPatternSide),
-			// Declaration order: ImageWithLocation lists bytes before
-			// bytesCount, and C++20 requires designators to follow it. Clang
-			// only warns, GCC rejects it outright.
 			.bytes = bytes,
 			.bytesCount = int(bytes.size()),
 		},
@@ -262,8 +253,6 @@ struct ThemeSpec {
 		quint64 paperId) {
 	const auto document = PatternDocument(session);
 	if (!document) {
-		// No pattern available: a plain gradient is still a usable theme, and
-		// it is what the colours alone describe.
 		return Data::CloudTheme::Settings{
 			.paper = Data::WallPaper(paperId).withBackgroundColors(
 				palette.background),

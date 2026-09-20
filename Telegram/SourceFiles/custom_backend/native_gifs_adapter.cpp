@@ -34,18 +34,12 @@ constexpr auto kSavedGifMediaIdOffset = qint64(3000000000000000LL);
 // converter uses, so a bubble and a panel cell lay out the same way.
 constexpr auto kUnknownSide = 100;
 
-// One saved GIF as the server names it: the users_gifs row, and the content
-// address the file is stored under.
 struct Entry {
 	qint64 gifId = 0;
 	QString sha256;
 };
 
-// Per-session state. A map and not a member because this adapter is a free
-// namespace, like the other bridge adapters, and the state is torn down with
-// the session in ClearSession().
 struct State {
-	// The saved-GIF list as the server last answered it, keyed by DocumentId.
 	base::flat_map<DocumentId, Entry> saved;
 	// Where the bytes of a document live, for every document the bridge built
 	// - attachments included. "Save GIF" runs on a message's document, and the

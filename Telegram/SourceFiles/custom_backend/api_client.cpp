@@ -42,9 +42,6 @@ QString errorFrom(const QByteArray &body, QNetworkReply *reply) {
     return reply->errorString();
 }
 
-// The name Envoy is configured with, in both the api and the FoxMes route
-// tables. Lower case on purpose: it is compared case-insensitively by Qt, and
-// this is how the config and fxl-web spell it.
 constexpr auto kRequestTimeoutMs = 60'000;
 
 constexpr auto kLaneHeader = "x-fxl-lane";
@@ -308,7 +305,6 @@ void ApiClient::desktopVersion(Callback done) {
 }
 
 void ApiClient::updateMe(const QString &displayName, Callback done) {
-    // PATCH /me was replaced by PUT /me: only display_name is updated.
     jsonRequest("PUT", "/me", QJsonDocument(QJsonObject{
         {"display_name", displayName},
     }), std::move(done));
@@ -339,7 +335,6 @@ void ApiClient::chats(Callback done) {
 }
 
 void ApiClient::chatsLight(Callback done) {
-    // Startup chat list: no members fan-out, no settings/created_at queries.
     jsonRequest("GET", "/chats?light=1", {}, std::move(done));
 }
 
@@ -566,8 +561,6 @@ void ApiClient::sendMessageWithDraftRevision(
         {"attachment_meta", MetaObject(meta)},
     };
     if (!entities.isEmpty()) {
-        // Formatting is stored as marks of the document, so it only travels
-        // when there is any: a plain message keeps the exact shape it had.
         body.insert("entities", entities);
     }
     if (clearDraft && clearDraftRevision > 0) {
@@ -828,8 +821,6 @@ void ApiClient::setReactions(
     for (const auto id : reactions) {
         ids.append(qint64(id));
     }
-    // Canonical v2 field is "reactions", carrying catalog ids; the server
-    // rejects the legacy "emojis" alias with 400 (DisallowUnknownFields).
     jsonRequest("PUT", QString("/messages/%1/reactions").arg(messageId), QJsonDocument(QJsonObject{
         {"reactions", ids},
         {"operation_id", operationId.isEmpty()
@@ -1102,8 +1093,6 @@ void ApiClient::savePinnedOrder(const QList<qint64> &orderedIds, Callback done) 
     }), std::move(done));
 }
 
-// Wallpapers. The gallery is the caller's own uploads; the choice lives in the
-// per-chat and per-user settings and is answered back authoritatively.
 void ApiClient::wallpapers(Callback done) {
     jsonRequest("GET", QStringLiteral("/wallpapers"), {}, std::move(done));
 }
@@ -1182,7 +1171,6 @@ void ApiClient::setChatTheme(
     }), std::move(done));
 }
 
-// Saved GIFs, the bridge counterpart of messages.getSavedGifs/saveGif.
 void ApiClient::savedGifs(int limit, qint64 beforeId, Callback done) {
     auto path = QString("/gifs?limit=%1").arg(limit > 0 ? limit : 60);
     if (beforeId > 0) {
@@ -1276,9 +1264,6 @@ constexpr auto kChunkPreferred = qint64(4 * 1024 * 1024);
 // The server abandons a processing job that has not been polled for 10s
 // (api/files_hls.go hlsAbandonTimeout), so stay well inside that.
 constexpr auto kProcessingPollMs = 2000;
-// A part that failed is retried in place, the same way fxl-web does it
-// (upload-handler.js). Without this a single blip on part 500 of 640 threw
-// away the whole gigabyte behind it.
 constexpr auto kChunkRetries = 3;
 constexpr auto kChunkRetryBackoffMs = 600;
 // When the retries of one part are spent, the session is re-synced against
@@ -1298,8 +1283,6 @@ constexpr auto kUploadRestarts = 1;
 constexpr auto kCommitTimeoutMs = 5 * 60'000;
 
 [[nodiscard]] qint64 ChunkSizeFor(qint64 size) {
-    // Big files raise the part size rather than the part count, because the
-    // count is what the server caps.
     auto result = std::max(kChunkPreferred, (size + kChunkCountMax - 1) / kChunkCountMax);
     return std::clamp(result, kChunkMin, kChunkMax);
 }
@@ -1315,7 +1298,6 @@ struct ApiClient::ChunkedUpload {
     QString mime;
     QString type;
     QString uploadId;
-    // Set only when the server moved the upload to background processing.
     QString processId;
     qint64 size = 0;
     qint64 chunkSize = 0;
@@ -1343,8 +1325,6 @@ struct ApiClient::ChunkedUpload {
         return std::min(chunkSize, size - offset);
     }
 
-    // Progress has to count what the server already had, or a resumed upload
-    // would start its bar from zero.
     void recountSent() {
         sent = 0;
         for (auto i = 0; i != int(received.size()); ++i) {
@@ -1611,8 +1591,6 @@ void ApiClient::sendNextChunk(std::shared_ptr<ChunkedUpload> state) {
         }
         if (weak) weak->sendNextChunk(state);
     });
-    // Report the bytes of the chunk in flight on top of the finished ones, so
-    // the bar moves inside a part and not only between parts.
     QObject::connect(reply, &QNetworkReply::uploadProgress, this, [state](qint64 sent, qint64) {
         if (state->progress && !state->cancelled) {
             state->progress(std::min(state->sent + sent, state->size), state->size);
@@ -1762,8 +1740,6 @@ void ApiClient::pollChunkedProcessing(std::shared_ptr<ChunkedUpload> state) {
             state->progress(state->size * percent / 100, state->size);
         }
         if (object.value("done").toBool()) {
-            // The status answer carries the finished file in the same "data"
-            // shape the direct upload uses, so it is handed over unchanged.
             state->complete(std::move(doc), QString(), status);
             return;
         }
@@ -1771,8 +1747,6 @@ void ApiClient::pollChunkedProcessing(std::shared_ptr<ChunkedUpload> state) {
             state->complete({}, u"upload cancelled"_q, 0);
             return;
         }
-        // The server drops a job nobody asks about, so the next poll has to
-        // come well inside that window.
         QTimer::singleShot(
             kProcessingPollMs,
             weak.data(),

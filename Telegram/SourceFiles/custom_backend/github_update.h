@@ -33,8 +33,6 @@ struct AvailableUpdate {
 	QString version;
 };
 
-// Entry points used exclusively by thin hooks in Core::Updater /
-// Core::UpdateChecker (see BRIDGE.md for the hook shape rules).
 void StartUpdateCheck();
 
 // Stops the periodic poll for good. Hook it to an explicit user request only,
@@ -45,7 +43,6 @@ void StopUpdateCheck();
 [[nodiscard]] AvailableUpdate CurrentAvailable();
 void OpenReleasePage();
 
-// A verified package is on disk and can be installed right now.
 [[nodiscard]] bool IsReadyToInstall();
 
 // Hands the package to the platform installer and quits. No-op unless
@@ -57,7 +54,6 @@ void InstallAndRestart();
 [[nodiscard]] rpl::producer<> FailedEvents();
 [[nodiscard]] rpl::producer<AvailableUpdate> AvailableEvents();
 
-// Download progress for the upstream settings UI, which already renders it.
 [[nodiscard]] auto ProgressEvents()
 -> rpl::producer<Core::UpdateChecker::Progress>;
 

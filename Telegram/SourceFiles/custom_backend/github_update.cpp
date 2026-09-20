@@ -117,7 +117,6 @@ struct ReadyPackage {
 
 [[nodiscard]] bool IsAllowedManifestUrl(const QUrl &url) {
 	if (DevOverrideActive()) {
-		// The override is the dev-environment signal, same as FOXMES_URL.
 		return true;
 	}
 	const auto host = url.host().toLower();
@@ -377,8 +376,6 @@ void UpdatePackageDownloader::finish(not_null<QNetworkReply*> reply) {
 
 	const auto digest = QString::fromLatin1(hash->result().toHex());
 	if (digest.compare(_manifest.asset.sha256, Qt::CaseInsensitive) != 0) {
-		// The one hard gate: a package whose digest does not match the
-		// manifest is never written out, never executed and never mounted.
 		LOG(("Update Error: FoxMes package sha256 mismatch, expected %1 got %2"
 			).arg(_manifest.asset.sha256).arg(digest));
 		file->cancelWriting();
@@ -509,8 +506,6 @@ namespace {
 		return std::nullopt;
 	}
 
-	// The platform block is optional on purpose: a manifest without one only
-	// costs the silent install, not the notification.
 	auto asset = PackageAsset();
 	const auto key = PlatformKey();
 	if (!key.isEmpty()) {
@@ -678,8 +673,6 @@ void GitHubUpdateChecker::fail() {
 	_failed.fire({});
 }
 
-// Step one: ask fxl-api which version an administrator allowed. Nothing is
-// requested from GitHub until that answer is newer than this build.
 void GitHubUpdateChecker::send() {
 	DEBUG_LOG(("Update Info: FoxMes asking the API for the desktop version."));
 	_checking.fire({});
@@ -732,7 +725,6 @@ void GitHubUpdateChecker::send() {
 	});
 }
 
-// Step two: the GitHub manifest, for the download url and the digest.
 void GitHubUpdateChecker::requestManifest() {
 	abortRequest();
 	if (!_manager) {
@@ -835,8 +827,6 @@ std::shared_ptr<GitHubUpdateChecker> InstanceValue;
 	return InstanceValue;
 }
 
-// The running bundle, not a hardcoded /Applications path: FoxMes may have
-// been dropped anywhere.
 [[nodiscard]] QString InstallLaunch(const QString &package) {
 #ifdef Q_OS_WIN
 	// Per-user install ({localappdata}, PrivilegesRequired=lowest), so the
