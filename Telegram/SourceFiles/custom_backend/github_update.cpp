@@ -52,7 +52,6 @@ const auto kManifestUrl = u"https://github.com/krol44/FoxMesDesktop/"_q
 const auto kReleasePageUrl = u"https://github.com/krol44/FoxMesDesktop/"_q
 	+ u"releases/latest"_q;
 
-// Next check exactly one hour after the previous one completes.
 constexpr auto kRequestTimeoutMs = 30 * 1000;
 // A release package is tens to hundreds of megabytes on a link we do not
 // control, so it gets its own budget rather than the manifest's.
@@ -60,7 +59,12 @@ constexpr auto kPackageTimeoutMs = 30 * 60 * 1000;
 constexpr auto kMaxManifestSize = 16 * 1024;
 constexpr auto kMaxPackageSize = qint64(512) * 1024 * 1024;
 constexpr auto kHashChunkSize = 1024 * 1024;
-constexpr auto kRecheckInterval = 60 * 60 * crl::time(1000);
+// Ten minutes, not an hour: a check costs one small request to fxl-api, and it
+// reaches GitHub only when an administrator has allowed a newer build. The
+// answer is read straight from the settings row, so every client sees the same
+// version the moment it is saved - two clients polling seconds apart can no
+// longer be told different things.
+constexpr auto kRecheckInterval = 10 * 60 * crl::time(1000);
 
 struct PackageAsset {
 	QString url;
@@ -662,15 +666,15 @@ void GitHubUpdateChecker::watchDownloader() {
 }
 
 void GitHubUpdateChecker::reschedule() {
-	// Next check exactly one hour after the previous one completes,
-	// regardless of the outcome.
+	// Counted from the moment the previous check completes, regardless of its
+	// outcome: a slow or failed check must not make the next one overlap it.
 	_timer.callOnce(kRecheckInterval);
 }
 
 void GitHubUpdateChecker::fail() {
 	// A failed check says nothing about the release we already saw:
 	// keep the known available update so a network blip does not hide
-	// the update button until the next successful hourly check.
+	// the update button until the next successful check.
 	_failed.fire({});
 }
 
@@ -854,8 +858,12 @@ std::shared_ptr<GitHubUpdateChecker> InstanceValue;
 	// The bundle cannot rewrite itself while it is running, so a detached
 	// helper waits for this process to exit, swaps the bundle, strips the
 	// quarantine attribute and relaunches.
+	// BundledResourcesPath() already points inside the bundle, at
+	// FoxMes.app/Contents/Resources - the same place base::RegisterBundledResources
+	// loads the .rcc files from. Appending that suffix again is what broke the
+	// macOS install path in 1.5.0 and 1.6.0.
 	const auto script = base::Platform::BundledResourcesPath()
-		+ u"/Contents/Resources/fox_update_macos.sh"_q;
+		+ u"/fox_update_macos.sh"_q;
 	if (!QFile::exists(script)) {
 		return u"helper script is missing"_q;
 	}
@@ -933,18 +941,27 @@ void InstallAndRestart() {
 	const auto ready = InstanceValue->downloader().ready();
 	if (!ready) {
 		return;
-	} else if (!QFile::exists(ready->path)) {
+	}
+	// Whatever goes wrong locally, the release page still lets the user
+	// install by hand - a dead end with only a toast leaves a client that
+	// knows it is outdated and offers no way forward.
+	const auto giveUp = [] {
+		Ui::Toast::Show(u"FoxMes could not start the update, "
+			"opening the release page."_q);
+		OpenReleasePage();
+	};
+	if (!QFile::exists(ready->path)) {
 		// Checked here rather than left to the platform: the macOS helper is
 		// detached, so a missing package there would quit the app and fail
 		// out of sight.
 		LOG(("Update Error: FoxMes package '%1' is gone.").arg(ready->path));
-		Ui::Toast::Show(u"FoxMes could not start the update."_q);
+		giveUp();
 		return;
 	}
 	const auto error = InstallLaunch(ready->path);
 	if (!error.isEmpty()) {
 		LOG(("Update Error: FoxMes cannot install: %1").arg(error));
-		Ui::Toast::Show(u"FoxMes could not start the update."_q);
+		giveUp();
 		return;
 	}
 	Core::Quit();
