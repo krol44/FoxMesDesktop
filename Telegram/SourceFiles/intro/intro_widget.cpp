@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "intro/intro_widget.h"
 #include "custom_backend/github_update.h"
+#include "custom_backend/github_update_ui.h"
 #include "custom_backend/native_runtime.h"
 
 #include "intro/intro_start.h"
@@ -329,13 +330,15 @@ void Widget::checkUpdateStatus() {
 		}
 		const auto stepHasCover = getStep()->hasCover();
 		_update->toggle(!stepHasCover, anim::type::instant);
-		_update->entity()->setClickedCallback([] {
+		_update->entity()->setClickedCallback([=] {
+			if (CustomBackend::Enabled()) {
+				CustomBackend::Updates::ActivateUpdate(_data.controller);
+				return;
+			}
 			const auto checker = Core::UpdateChecker();
 			if (checker.state() == State::Ready) {
 				Core::checkReadyUpdate();
 				Core::Restart();
-			} else if (CustomBackend::Updates::IsReadyToInstall()) {
-				CustomBackend::Updates::InstallAndRestart();
 			} else {
 				CustomBackend::Updates::OpenReleasePage();
 			}

@@ -33,6 +33,29 @@ struct AvailableUpdate {
 	QString version;
 };
 
+enum class Phase {
+	Idle,
+	Checking,
+	Available,
+	Downloading,
+	Ready,
+	Failed,
+	Latest,
+};
+
+struct Status {
+	Phase phase = Phase::Idle;
+	AvailableUpdate available;
+	Core::UpdateChecker::Progress progress = {};
+	bool manualOnly = false;
+};
+
+[[nodiscard]] Status CurrentStatus();
+[[nodiscard]] rpl::producer<Status> StatusValue();
+[[nodiscard]] bool SupportsSelfUpdate();
+void SetAutomaticDownload(bool enabled);
+void DownloadUpdate();
+
 void StartUpdateCheck();
 
 // Stops the periodic poll for good. Hook it to an explicit user request only,

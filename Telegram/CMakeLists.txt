@@ -136,6 +136,8 @@ PRIVATE
     custom_backend/dev_profile.h
     custom_backend/github_update.cpp
     custom_backend/github_update.h
+    custom_backend/github_update_ui.cpp
+    custom_backend/github_update_ui.h
     custom_backend/live_updates_connection.cpp
     custom_backend/live_updates_connection.h
     custom_backend/native_deep_link.cpp

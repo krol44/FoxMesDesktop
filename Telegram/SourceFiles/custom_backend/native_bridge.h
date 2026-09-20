@@ -445,7 +445,15 @@ private:
         History *history,
         const std::vector<qint64> &localIds);
 
+    // Everything a message payload puts on an item that is not the message
+    // itself. Reactions and the disappearing-media lifecycle travel together
+    // because they arrive together: every path that lands a payload on an item
+    // calls this one method, so a new path cannot forget half of it.
+    void applyMessagePayloadState(HistoryItem *item, const QJsonObject &message);
     void applyMessageReactions(HistoryItem *item, const QJsonObject &message);
+public:
+    void applyEphemeralState(HistoryItem *item, const QJsonObject &message);
+private:
     void reloadMessageReactions(History *history, qint64 messageId);
     void applyPeerNotifySettings(
         PeerData *peer,

@@ -1503,6 +1503,12 @@ void ApiWrap::markContentsRead(
 		// fxl-api has no endpoint for "the content of this message was read":
 		// the chat read boundary the bridge reports is the only thing that
 		// keeps a played voice message quiet after a history reload.
+		//
+		// Disappearing media is the exception, and it is the same exception
+		// upstream makes: messages.readMessageContents is what starts the
+		// countdown and spends a "view once", so the bridge sends its own
+		// equivalent from the very same place.
+		CustomBackend::MarkEphemeralViewed(items);
 		return;
 	}
 	if (!markedIds.isEmpty()) {
@@ -1525,6 +1531,7 @@ void ApiWrap::markContentsRead(not_null<HistoryItem*> item) {
 		return;
 	} else if (CustomBackend::Enabled()) {
 		// Cleared locally above; see the overload for the whole set.
+		CustomBackend::MarkEphemeralViewed({ item });
 		return;
 	}
 	const auto ids = MTP_vector<MTPint>(1, MTP_int(item->id));

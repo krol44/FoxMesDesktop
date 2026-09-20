@@ -17,6 +17,7 @@
 class QNetworkReply;
 
 class PeerData;
+class HistoryItem;
 
 namespace Data {
 class ForumTopic;
@@ -134,6 +135,29 @@ void Logout(Main::Session *session, std::function<void()> done = {});
 void AttachSession(Main::Session *session);
 void DetachSession(Main::Session *session);
 [[nodiscard]] NativeBridge *BridgeFor(Main::Session *session);
+
+// Disappearing media, answered by the server through GET /me capabilities.
+// False until it has answered: a picker shown against a server that would
+// refuse the send is worse than no picker at all. The other direction - an old
+// build against a new server - is not held by this flag and cannot be: it is
+// held by the message contract, which never puts the attachment of an
+// ephemeral message into any projection.
+// The bridge's messages.readMessageContents: one call, sent when the content
+// was actually shown, which both spends a "view once" and starts the countdown.
+void MarkEphemeralViewed(
+	const base::flat_set<not_null<HistoryItem*>> &items);
+
+[[nodiscard]] bool EphemeralMediaSupported();
+void SetEphemeralMediaSupported(bool value);
+
+// Points the media of a disappearing message at the url a view session just
+// granted. It lives beside the bridge because the photo path needs
+// UpdateRemotePhotoImages, which owns the size ladder fxl-cdn serves and has
+// no business being copied into an adapter.
+void AttachEphemeralMediaUrl(
+	Main::Session *session,
+	HistoryItem *item,
+	const QString &url);
 
 // Drains the upstream delayed notify-settings queue. Takes the whole queue so
 // the decision of what the bridge can persist lives here and not in apiwrap:

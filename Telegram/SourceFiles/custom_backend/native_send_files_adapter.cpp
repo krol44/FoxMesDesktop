@@ -439,13 +439,23 @@ void SendFiles(
 		}
 		files.push_back(std::move(spec));
 	}
+	auto options = SendOptionsFrom(action.options);
+	// The TTL is a per-file choice, and the wire takes one attachment per
+	// message - but upstream already guarantees the match: SendFilesBox turns
+	// album grouping off for the whole send as soon as any file carries a TTL
+	// (`groupsWay.setGroupFiles(false)`), so a list that reaches here with one
+	// is a list of one. A combination that somehow is not gets refused by the
+	// server rather than silently downgraded to a permanent message.
+	if (!list.files.empty()) {
+		options.mediaTtlSeconds = int(list.files.front().ttlSeconds);
+	}
 	bridge->sendFiles(
 		action.history,
 		std::move(files),
 		caption,
 		ReplyTargetFrom(action.history, action.replyTo),
 		{},
-		SendOptionsFrom(action.options));
+		options);
 }
 
 void SendFileContent(

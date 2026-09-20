@@ -17,6 +17,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "custom_backend/api_client.h"
 #include "custom_backend/native_runtime.h"
 #include "ui/toast/toast.h"
+#include "storage/localstorage.h"
+#include "lang/lang_keys.h"
 
 #include <ksandbox.h>
 
@@ -59,12 +61,7 @@ constexpr auto kPackageTimeoutMs = 30 * 60 * 1000;
 constexpr auto kMaxManifestSize = 16 * 1024;
 constexpr auto kMaxPackageSize = qint64(512) * 1024 * 1024;
 constexpr auto kHashChunkSize = 1024 * 1024;
-// Ten minutes, not an hour: a check costs one small request to fxl-api, and it
-// reaches GitHub only when an administrator has allowed a newer build. The
-// answer is read straight from the settings row, so every client sees the same
-// version the moment it is saved - two clients polling seconds apart can no
-// longer be told different things.
-constexpr auto kRecheckInterval = 10 * 60 * crl::time(1000);
+constexpr auto kRecheckInterval = 60 * 60 * crl::time(1000);
 
 struct PackageAsset {
 	QString url;
@@ -322,6 +319,7 @@ void UpdatePackageDownloader::start(const ManifestInfo &manifest) {
 			finish(reply);
 		}
 	});
+	_progress.fire({ 0, 0, false });
 }
 
 void UpdatePackageDownloader::abortRequest() {
@@ -527,7 +525,10 @@ namespace {
 			} else {
 				LOG(("Update Error: FoxMes manifest has a bad %1 block."
 					).arg(key));
+				return std::nullopt;
 			}
+		} else if (platformValue != object.constEnd()) {
+			return std::nullopt;
 		}
 	}
 
@@ -567,8 +568,10 @@ public:
 	}
 
 	void start() {
+		if (_checkingRequest) {
+			return;
+		}
 		_timer.cancel();
-		abortRequest();
 		if (!_manager) {
 			_manager = std::make_unique<QNetworkAccessManager>();
 		}
@@ -585,10 +588,25 @@ public:
 	// the stack), so tying this to its destructor aborted the very request
 	// that had just been started, and nothing ever rescheduled it.
 	void stop() {
+		++_generation;
+		_checkingRequest = false;
+		_downloadRequested = false;
+		_phase = Phase::Idle;
+		_manifest.reset();
 		_timer.cancel();
 		abortRequest();
 		_downloader.stop();
 		_last.reset();
+		_changed.fire({});
+	}
+
+	void download();
+	void installFailed();
+	[[nodiscard]] Status status() const;
+	[[nodiscard]] rpl::producer<> changed() const {
+		return rpl::merge(
+			_changed.events(),
+			_downloader.progressed() | rpl::to_empty);
 	}
 
 	[[nodiscard]] std::optional<AvailableUpdate> last() const {
@@ -627,6 +645,12 @@ private:
 	qint64 _announcedVersionCode = 0;
 	UpdatePackageDownloader _downloader;
 	bool _watching = false;
+	bool _checkingRequest = false;
+	bool _downloadRequested = false;
+	int _generation = 0;
+	Phase _phase = Phase::Idle;
+	std::optional<ManifestInfo> _manifest;
+	rpl::event_stream<> _changed;
 	rpl::lifetime _lifetime;
 
 	rpl::event_stream<> _checking;
@@ -656,7 +680,13 @@ void GitHubUpdateChecker::watchDownloader() {
 	) | rpl::on_next([=](ReadyPackage package) {
 		auto update = AvailableUpdate{ package.versionCode, package.version };
 		_last = update;
+		_phase = Phase::Ready;
 		_available.fire(std::move(update));
+		_changed.fire({});
+	}, _lifetime);
+	_downloader.failed() | rpl::on_next([=] {
+		_phase = Phase::Failed;
+		_changed.fire({});
 	}, _lifetime);
 }
 
@@ -666,7 +696,44 @@ void GitHubUpdateChecker::reschedule() {
 	_timer.callOnce(kRecheckInterval);
 }
 
+Status GitHubUpdateChecker::status() const {
+	const auto phase = _downloader.downloading()
+		? Phase::Downloading
+		: (_phase == Phase::Failed)
+		? Phase::Failed
+		: _downloader.ready()
+		? Phase::Ready
+		: _phase;
+	return {
+		phase,
+		_last.value_or(AvailableUpdate()),
+		_downloader.progress(),
+		PlatformKey().isEmpty() || (_manifest && !_manifest->asset.valid()),
+	};
+}
+
+void GitHubUpdateChecker::download() {
+	if (_downloader.downloading() || _downloader.ready()) {
+		return;
+	}
+	_downloadRequested = true;
+	start();
+}
+
+void GitHubUpdateChecker::installFailed() {
+	if (const auto ready = _downloader.ready()
+		; ready && !QFile::exists(ready->path)) {
+		_downloader.stop();
+	}
+	_phase = Phase::Failed;
+	_changed.fire({});
+}
+
 void GitHubUpdateChecker::fail() {
+	_checkingRequest = false;
+	_downloadRequested = false;
+	_phase = Phase::Failed;
+	_changed.fire({});
 	// A failed check says nothing about the release we already saw:
 	// keep the known available update so a network blip does not hide
 	// the update button until the next successful check.
@@ -674,12 +741,16 @@ void GitHubUpdateChecker::fail() {
 }
 
 void GitHubUpdateChecker::send() {
+	_checkingRequest = true;
+	_phase = Phase::Checking;
+	_changed.fire({});
 	DEBUG_LOG(("Update Info: FoxMes asking the API for the desktop version."));
 	_checking.fire({});
 
 	const auto weak = base::make_weak(this);
+	const auto generation = _generation;
 	Client().desktopVersion([=](QJsonDocument doc, QString error, int status) {
-		if (!weak) {
+		if (!weak || generation != _generation) {
 			return;
 		}
 		if (!error.isEmpty()) {
@@ -696,12 +767,21 @@ void GitHubUpdateChecker::send() {
 			reschedule();
 			return;
 		}
+		if (_announcedVersionCode != announced->versionCode) {
+			_downloader.stop();
+			_manifest.reset();
+			_last.reset();
+		}
 		_announcedVersionCode = announced->versionCode;
 		if (announced->versionCode <= AppVersion) {
 			DEBUG_LOG(("Update Info: FoxMes %1 (%2) is up to date."
 				).arg(announced->versionCode).arg(announced->version));
 			_last.reset();
 			_downloader.stop();
+			_checkingRequest = false;
+			_downloadRequested = false;
+			_phase = Phase::Latest;
+			_changed.fire({});
 			_isLatest.fire({});
 			reschedule();
 			return;
@@ -716,6 +796,10 @@ void GitHubUpdateChecker::send() {
 					ready->version,
 				};
 				_last = update;
+				_checkingRequest = false;
+				_downloadRequested = false;
+				_phase = Phase::Ready;
+				_changed.fire({});
 				_available.fire(std::move(update));
 				reschedule();
 				return;
@@ -807,8 +891,16 @@ void GitHubUpdateChecker::handleManifest(not_null<QNetworkReply*> reply) {
 		Ui::Toast::Show(u"FoxMes Desktop %1 is available."_q.arg(
 			update.version));
 	}
+	_manifest = *manifest;
+	_checkingRequest = false;
+	_phase = Phase::Available;
+	const auto download = cAutoUpdate() || _downloadRequested;
+	_downloadRequested = false;
 	_available.fire(std::move(update));
-	_downloader.start(*manifest);
+	if (download) {
+		_downloader.start(*manifest);
+	}
+	_changed.fire({});
 }
 
 std::shared_ptr<GitHubUpdateChecker> InstanceValue;
@@ -894,6 +986,35 @@ std::shared_ptr<GitHubUpdateChecker> InstanceValue;
 
 } // namespace
 
+Status CurrentStatus() {
+	return Instance()->status();
+}
+
+rpl::producer<Status> StatusValue() {
+	return rpl::single(rpl::empty) | rpl::then(
+		Instance()->changed()
+	) | rpl::map([] { return CurrentStatus(); });
+}
+
+bool SupportsSelfUpdate() {
+	return !PlatformKey().isEmpty();
+}
+
+void SetAutomaticDownload(bool enabled) {
+	if (cAutoUpdate() == enabled) {
+		return;
+	}
+	cSetAutoUpdate(enabled);
+	Local::writeSettings();
+	if (enabled) {
+		Instance()->start();
+	}
+}
+
+void DownloadUpdate() {
+	Instance()->download();
+}
+
 void StartUpdateCheck() {
 	Instance()->start();
 }
@@ -932,13 +1053,9 @@ void InstallAndRestart() {
 	if (!ready) {
 		return;
 	}
-	// Whatever goes wrong locally, the release page still lets the user
-	// install by hand - a dead end with only a toast leaves a client that
-	// knows it is outdated and offers no way forward.
 	const auto giveUp = [] {
-		Ui::Toast::Show(u"FoxMes could not start the update, "
-			"opening the release page."_q);
-		OpenReleasePage();
+		InstanceValue->installFailed();
+		Ui::Toast::Show(tr::lng_settings_update_fail(tr::now));
 	};
 	if (!QFile::exists(ready->path)) {
 		// Checked here rather than left to the platform: the macOS helper is

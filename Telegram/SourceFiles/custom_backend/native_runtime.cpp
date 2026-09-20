@@ -35,6 +35,22 @@
 namespace CustomBackend {
 namespace {
 
+// Written once per snapshot from the main thread and read by UI guards on the
+// same thread; no locking needed and none pretended.
+bool gEphemeralMediaSupported = false;
+
+} // namespace
+
+bool EphemeralMediaSupported() {
+    return gEphemeralMediaSupported;
+}
+
+void SetEphemeralMediaSupported(bool value) {
+    gEphemeralMediaSupported = value;
+}
+
+namespace {
+
 // The same store the tokens live in: it already carries the dev profile
 // suffix, and the account data here has to follow the tokens.
 using details::Settings;

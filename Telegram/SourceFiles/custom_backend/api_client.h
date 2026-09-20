@@ -43,10 +43,24 @@ struct SendOptions {
     qint64 deliverAt = 0;
     bool deliverWhenOnline = false;
 
+    // mediaTtlSeconds arms disappearing media. 1..60 is a timer;
+    // kMediaTtlOnce is "view once". Zero is an ordinary message. The value
+    // comes from Ui::PreparedFile::ttlSeconds and from the voice/round record
+    // bar, which both already speak the upstream sentinel.
+    int mediaTtlSeconds = 0;
+
     [[nodiscard]] bool scheduled() const {
         return (deliverAt != 0) || deliverWhenOnline;
     }
+    [[nodiscard]] bool ephemeral() const {
+        return mediaTtlSeconds != 0;
+    }
 };
+
+// kMediaTtlOnce mirrors the upstream sentinel both pickers already emit for
+// "view once" (Data::kMaxTtlSeconds). The bridge keeps it as-is on the wire:
+// the server accepts it as an inbound alias of media_ttl_mode = "once".
+inline constexpr auto kMediaTtlOnce = 2147483647;
 
 // Envoy pins a whole upload chain to one fxl-api pod: the chunk session lives
 // in that pod's temp dir and process memory, so an init on pod A followed by a
@@ -200,6 +214,15 @@ public:
         const QJsonArray &entities = {},
         const SendOptions &options = {});
 
+    // Disappearing media: the equivalent of messages.readMessageContents.
+    // One call, sent when the content is actually shown - it both spends a
+    // "view once" and starts the countdown. The attachment itself rides in the
+    // message like any other, so there is nothing else to ask for.
+    void markEphemeralViewed(qint64 messageId, Callback done);
+
+    // Reminders are scheduled messages: they live in their own queue until
+    // they fire, and are then delivered by the server through the same send
+    // path a live message takes.
     void reminders(qint64 chatId, Callback done);
     void createReminder(
         qint64 chatId,

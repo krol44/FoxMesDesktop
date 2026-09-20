@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "core/update_checker.h"
 #include "custom_backend/github_update.h"
+#include "custom_backend/github_update_ui.h"
 #include "custom_backend/native_runtime.h"
 
 #include "platform/platform_specific.h"
@@ -2427,6 +2428,10 @@ bool checkReadyUpdate() {
 }
 
 void UpdateApplication() {
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Updates::ActivateUpdate(Core::App().activePrimaryWindow());
+		return;
+	}
 	if (UpdaterDisabled()) {
 		const auto url = [&] {
 #ifdef OS_WIN_STORE

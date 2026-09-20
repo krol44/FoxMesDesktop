@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "dialogs/dialogs_widget.h"
 
 #include "custom_backend/github_update.h"
+#include "custom_backend/github_update_ui.h"
 #include "custom_backend/native_runtime.h"
 #include "custom_backend/native_search_adapter.h"
 
@@ -2565,13 +2566,15 @@ void Widget::checkUpdateStatus() {
 			st::dialogsInstallUpdateOver,
 			true);
 		_updateTelegram->show();
-		_updateTelegram->setClickedCallback([] {
+		_updateTelegram->setClickedCallback([=] {
+			if (CustomBackend::Enabled()) {
+				CustomBackend::Updates::ActivateUpdate(&controller()->window());
+				return;
+			}
 			const auto checker = Checker();
 			if (checker.state() == Checker::State::Ready) {
 				Core::checkReadyUpdate();
 				Core::Restart();
-			} else if (CustomBackend::Updates::IsReadyToInstall()) {
-				CustomBackend::Updates::InstallAndRestart();
 			} else {
 				CustomBackend::Updates::OpenReleasePage();
 			}

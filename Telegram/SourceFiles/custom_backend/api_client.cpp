@@ -252,6 +252,15 @@ void ApiClient::jsonRequest(
     finish(reply, std::move(done), lane);
 }
 
+// Disappearing media: the equivalent of messages.readMessageContents.
+void ApiClient::markEphemeralViewed(qint64 messageId, Callback done) {
+    jsonRequest(
+        "POST",
+        QString("/messages/%1/viewed").arg(messageId),
+        {},
+        std::move(done));
+}
+
 void ApiClient::acceptTokens(const QJsonDocument &document) {
     if (!document.isObject()) return;
     const auto object = document.object();
@@ -532,6 +541,22 @@ void ApplySendOptions(
     }
 }
 
+// Disappearing media rides on the send that carries the attachment. The
+// sentinel both pickers already emit for "view once" travels as-is: the server
+// accepts it as an inbound alias, so nothing here has to know that a TTL of
+// ~68 years means something else entirely.
+void ApplyMediaTtl(QJsonObject &body, const SendOptions &options) {
+    if (!options.ephemeral()) {
+        return;
+    }
+    if (options.mediaTtlSeconds == kMediaTtlOnce) {
+        body.insert("media_ttl_mode", "once");
+        return;
+    }
+    body.insert("media_ttl_mode", "timer");
+    body.insert("media_ttl_seconds", options.mediaTtlSeconds);
+}
+
 } // namespace
 
 void ApiClient::sendMessageWithDraftRevision(
@@ -574,6 +599,7 @@ void ApiClient::sendMessageWithDraftRevision(
     if (options.silent) {
         body.insert("silent", true);
     }
+    ApplyMediaTtl(body, options);
     jsonRequest("POST", QString("/chats/%1/messages").arg(chatId), QJsonDocument(body), std::move(done));
 }
 
@@ -623,6 +649,11 @@ void ApiClient::sendAlbum(
     if (options.silent) {
         body.insert("silent", true);
     }
+    // A group of one is not an album, and the server folds it back into an
+    // ordinary send. Upstream guarantees the case is the only one possible:
+    // SendFilesBox turns grouping off for the whole send as soon as any file
+    // carries a TTL.
+    ApplyMediaTtl(body, options);
     jsonRequest(
         "POST",
         QString("/chats/%1/messages").arg(chatId),

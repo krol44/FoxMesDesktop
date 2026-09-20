@@ -314,6 +314,67 @@ FullReplyTo ReplyToFromServerId(History *history, ReplyTarget replyTo) {
 // height. The bubble still needs some geometry to lay out.
 constexpr auto kUnknownPhotoSide = 320;
 
+// The media of an EXPIRED disappearing message.
+//
+// Upstream's own representation: "ttl_seconds is there, the file is not" is
+// exactly what messages carry once Telegram stops serving them, and
+// CheckMessageMedia turns it into the service line by itself
+// (history_item_helpers.cpp). The phrase is picked from the media flags, not
+// from a document, so the kind of the lifecycle is what sets them.
+//
+// Live media needs nothing of the sort: it rides with its attachment like any
+// other message, which is the whole point of going back to the upstream model.
+constexpr auto kEphemeralKindPhoto = 1;
+constexpr auto kEphemeralKindVideo = 2;
+constexpr auto kEphemeralKindVoice = 5;
+constexpr auto kEphemeralKindVideoNote = 6;
+
+[[nodiscard]] std::optional<MTPMessageMedia> EphemeralExpiredMedia(
+        const QJsonObject &ephemeral,
+        int ttlSeconds) {
+    const auto kind = ephemeral.value("media_kind").toInt();
+    if (kind == kEphemeralKindPhoto) {
+        using Flag = MTPDmessageMediaPhoto::Flag;
+        return MTP_messageMediaPhoto(
+            MTP_flags(Flag::f_ttl_seconds),
+            MTPPhoto(),
+            MTP_int(ttlSeconds),
+            MTPDocument());
+    }
+    using Flag = MTPDmessageMediaDocument::Flag;
+    auto flags = Flag::f_ttl_seconds | Flag();
+    if (kind == kEphemeralKindVideo) {
+        flags |= Flag::f_video;
+    } else if (kind == kEphemeralKindVoice) {
+        flags |= Flag::f_voice;
+    } else if (kind == kEphemeralKindVideoNote) {
+        flags |= Flag::f_round;
+    } else {
+        return std::nullopt;
+    }
+    return MTP_messageMediaDocument(
+        MTP_flags(flags),
+        MTPDocument(),
+        MTPVector<MTPDocument>(),
+        MTPPhoto(),
+        MTPint(),
+        MTP_int(ttlSeconds));
+}
+
+// The TTL upstream reads. It is what makes the bubble a disappearing one at
+// all: Data::MediaPhoto forces the spoiler on any media carrying ttl_seconds,
+// and Data::MediaFile does the same for a video, so without it there is no
+// blur and no "tap to view" - just an ordinary bubble with nothing in it.
+[[nodiscard]] int EphemeralTtlSeconds(const QJsonObject &ephemeral) {
+    if (ephemeral.value("mode").toString() == u"once"_q) {
+        return kMediaTtlOnce;
+    }
+    const auto seconds = ephemeral.value("ttl_seconds").toInt();
+    return (seconds > 0) ? seconds : kMediaTtlOnce;
+}
+
+// An attachment is rendered inline when its MIME says image and the sender did
+// not pick "send as file".
 bool AttachmentIsPhoto(const QJsonObject &attachment, bool forceFile) {
     if (forceFile || attachment.value("as_file").toBool()) {
         return false;
@@ -632,7 +693,8 @@ MTPMessageMedia MediaFromAttachment(
         not_null<Main::Session*> session,
         const QJsonObject &attachment,
         const LocalAttachment &local,
-        std::optional<int> videoTimestamp = std::nullopt) {
+        std::optional<int> videoTimestamp = std::nullopt,
+        int ttlSeconds = 0) {
     const auto &bytes = local.bytes;
     const auto attachmentId = attachment.value("id").toVariant().toLongLong();
     const auto mediaId = kAttachmentMediaIdOffset + attachmentId;
@@ -651,10 +713,13 @@ MTPMessageMedia MediaFromAttachment(
         if (attachment.value("spoiler").toBool()) {
             photoFlags |= Flag::f_spoiler;
         }
+        if (ttlSeconds > 0) {
+            photoFlags |= Flag::f_ttl_seconds;
+        }
         return MTP_messageMediaPhoto(
             MTP_flags(photoFlags),
             AttachmentPhoto(session, attachment, bytes),
-            MTPint(),
+            MTP_int(ttlSeconds),
             MTPDocument());
     }
 
@@ -800,13 +865,16 @@ MTPMessageMedia MediaFromAttachment(
     if (videoTimestamp.has_value()) {
         mediaFlags |= Flag::f_video_timestamp;
     }
+    if (ttlSeconds > 0) {
+        mediaFlags |= Flag::f_ttl_seconds;
+    }
     return MTP_messageMediaDocument(
         MTP_flags(mediaFlags),
         document,
         MTPVector<MTPDocument>(),
         MTPPhoto(),
         MTP_int(videoTimestamp.value_or(0)),
-        MTPint());
+        MTP_int(ttlSeconds));
 }
 
 // Link preview objects live in their own id range so they can never collide
@@ -1625,6 +1693,15 @@ void NativeBridge::refreshSelf() {
 		// just brought in until the answer arrives again.
 		RememberUser(weak->_session, user);
 		weak->ensureUser(user, false);
+		// What this server can take. The disappearing-media picker is offered
+		// only when it says so.
+		auto ephemeral = false;
+		for (const auto &value : user.value("capabilities").toArray()) {
+			if (value.toString() == u"ephemeral-media-v1"_q) {
+				ephemeral = true;
+			}
+		}
+		SetEphemeralMediaSupported(ephemeral);
 	});
 }
 
@@ -2522,6 +2599,14 @@ std::optional<NativeBridge::PreparedMessage> NativeBridge::prepareMessage(
             "first one is rendered"
             ).arg(messageId).arg(chatId).arg(attachments.size()));
     }
+    // Disappearing media rides with its attachment like any other message -
+    // the upstream model - and the ttl is what makes upstream draw it blurred
+    // and tap-to-view. Once it has expired the server strips the attachment,
+    // and "ttl without a file" is upstream's own way of saying so.
+    const auto ephemeral = message.value("ephemeral").toObject();
+    const auto ephemeralTtl = ephemeral.isEmpty()
+        ? 0
+        : EphemeralTtlSeconds(ephemeral);
     const auto attachment = attachments.isEmpty()
         ? QJsonObject()
         : attachments.at(0).toObject();
@@ -2529,7 +2614,9 @@ std::optional<NativeBridge::PreparedMessage> NativeBridge::prepareMessage(
     // only built when there is no attachment to occupy that slot - which is
     // also how the server decides whether to attach one.
     const auto webPage = message.value("web_page").toObject();
-    auto media = attachment.isEmpty()
+    auto media = (!ephemeral.isEmpty() && attachment.isEmpty())
+        ? EphemeralExpiredMedia(ephemeral, ephemeralTtl)
+        : attachment.isEmpty()
         ? MediaFromWebPage(_session, webPage)
         : std::optional<MTPMessageMedia>(
             MediaFromAttachment(
@@ -2538,7 +2625,8 @@ std::optional<NativeBridge::PreparedMessage> NativeBridge::prepareMessage(
                 local,
                 message.value("video_timestamp").isDouble()
                     ? std::make_optional(message.value("video_timestamp").toInt())
-                    : std::nullopt));
+                    : std::nullopt,
+                ephemeralTtl));
     if (media && webPage.value("above").toBool()) {
         mtpFlags |= Flag::f_invert_media;
     }
@@ -2564,6 +2652,19 @@ std::optional<NativeBridge::PreparedMessage> NativeBridge::prepareMessage(
     if (!(mtpFlags & Flag::f_out)
         && AttachmentPlaysOnce(attachment)
         && (messageId > history->inboxReadTillId().bare)) {
+        mtpFlags |= Flag::f_media_unread;
+    }
+    // For disappearing media the flag is not decoration, it is the difference
+    // between a bubble and a tombstone: ShowTtlMediaAsExpired turns any INCOMING
+    // media that carries ttl_seconds and lacks this flag into the "Expired
+    // photo" service message at construction (history_item.cpp), before the
+    // user can tap it and before a view session is ever asked for. The chat
+    // read boundary must not decide it either - reading the chat is not
+    // opening the media - so the lifecycle answers instead: not opened yet
+    // means not consumed yet.
+    if (!(mtpFlags & Flag::f_out)
+        && !ephemeral.isEmpty()
+        && ephemeral.value("state").toString() == u"pending"_q) {
         mtpFlags |= Flag::f_media_unread;
     }
     // entities is optional too, with the same trap as media: without the flag
@@ -2713,7 +2814,7 @@ HistoryItem *NativeBridge::applyMessage(
                     unixTime(message.value("created_at").toString()));
                 clearPendingSend(pendingLocalId);
             }
-            applyMessageReactions(existing, message);
+            applyMessagePayloadState(existing, message);
             _seenMessages.emplace(SeenKey(chatId, messageId));
             return existing;
         }
@@ -2728,7 +2829,7 @@ HistoryItem *NativeBridge::applyMessage(
             existing->applyEdition(HistoryMessageEdition(
                 _session,
                 prepared->mtp.c_message()));
-            applyMessageReactions(existing, message);
+            applyMessagePayloadState(existing, message);
             _seenMessages.emplace(SeenKey(chatId, messageId));
             return existing;
         }
@@ -2806,7 +2907,7 @@ HistoryItem *NativeBridge::applyMessage(
             history->setUnreadCount(*unreadBefore);
         }
     }
-    applyMessageReactions(item, message);
+    applyMessagePayloadState(item, message);
     history->setChatListTimeId(unixTime(message.value("created_at").toString()));
     history->updateChatListExistence();
     _seenMessages.emplace(SeenKey(chatId, messageId));
@@ -2857,7 +2958,7 @@ HistoryItem *NativeBridge::applyDependencyMessage(
 	}
 	const auto id = MsgId(int32(messageId));
 	if (const auto existing = _session->data().message(history->peer, id)) {
-		applyMessageReactions(existing, message);
+		applyMessagePayloadState(existing, message);
 		return existing;
 	}
 	const auto prepared = prepareMessage(history, message);
@@ -2869,7 +2970,7 @@ HistoryItem *NativeBridge::applyDependencyMessage(
 		prepared->mtp,
 		MessageFlags(),
 		NewMessageType::Existing);
-	applyMessageReactions(item, message);
+	applyMessagePayloadState(item, message);
 	return item;
 }
 
@@ -2927,6 +3028,106 @@ void NativeBridge::requestMessageData(
 				callback();
 			}
 		});
+}
+
+// Points the media of a disappearing message at the url a view session just
+// granted.
+//
+// The photo path goes through UpdateRemotePhotoImages, which registers the
+// fxl-cdn size ladder rather than one original: a bubble that downloads and
+// decodes a 4032x3024 camera shot to draw a thumbnail pins a core, and that is
+// as true for disappearing media as for any other. The document path hands the
+// url to the streaming loader, which is what a video or a voice message is
+// played from.
+void AttachEphemeralMediaUrl(
+        Main::Session *session,
+        HistoryItem *item,
+        const QString &url) {
+    if (!session || !item || url.isEmpty()) {
+        return;
+    }
+    const auto media = item->media();
+    if (!media) {
+        return;
+    }
+    if (const auto document = media->document()) {
+        Streaming::RememberSource(document, url);
+        return;
+    }
+    if (const auto photo = media->photo()) {
+        UpdateRemotePhotoImages(
+            photo,
+            url,
+            photo->width() > 0 ? photo->width() : kUnknownPhotoSide,
+            photo->height() > 0 ? photo->height() : kUnknownPhotoSide,
+            true);
+    }
+}
+
+void NativeBridge::applyMessagePayloadState(
+        HistoryItem *item,
+        const QJsonObject &message) {
+    applyMessageReactions(item, message);
+    applyEphemeralState(item, message);
+}
+
+// The disappearing-media lifecycle as the native item sees it.
+//
+// Expiry is not applied here: the server strips the attachment, prepareMessage
+// turns "ttl without a file" into upstream's own expired media, and upstream
+// draws the service line from it. The one thing left is the deadline, and it
+// goes through applyMediaContentsRead - also upstream's own - which adds the
+// ttl to the moment of opening, so passing it deadline minus ttl arms exactly
+// what the server will enforce and the two cannot drift.
+void NativeBridge::applyEphemeralState(
+        HistoryItem *item,
+        const QJsonObject &message) {
+    if (!item) {
+        return;
+    }
+    const auto ephemeral = message.value("ephemeral").toObject();
+    if (ephemeral.isEmpty()) {
+        return;
+    }
+    // "Once" is not a countdown: upstream clears it when the viewer closes,
+    // and a deadline passed for it would expire the bubble on the spot
+    // (ttlSecondsSingleView).
+    if (ephemeral.value("state").toString() != u"opened"_q
+        || ephemeral.value("mode").toString() != u"timer"_q) {
+        return;
+    }
+    const auto ttl = ephemeral.value("ttl_seconds").toInt();
+    const auto deadline = unixTime(ephemeral.value("expires_at").toString());
+    if (ttl > 0 && deadline > 0) {
+        item->applyMediaContentsRead(deadline - ttl);
+    }
+}
+
+// MarkEphemeralViewed is the bridge's messages.readMessageContents: the one
+// call that spends a "view once" and starts the countdown. It is sent from the
+// same upstream moment, so scrolling, a notification and autodownload can no
+// more reach it here than they can there.
+void MarkEphemeralViewed(
+        const base::flat_set<not_null<HistoryItem*>> &items) {
+    for (const auto &item : items) {
+        const auto media = item->media();
+        if (!media || !media->ttlSeconds() || item->out()) {
+            continue;
+        }
+        const auto session = &item->history()->session();
+        const auto id = item->fullId();
+        ClientFor(session).markEphemeralViewed(
+            id.msg.bare,
+            [session, id](QJsonDocument doc, QString error, int status) {
+                if (!error.isEmpty() || !doc.isObject()) {
+                    return;
+                }
+                const auto strong = session->data().message(id);
+                if (const auto bridge = BridgeFor(session); bridge && strong) {
+                    bridge->applyEphemeralState(strong, doc.object());
+                }
+            });
+    }
 }
 
 void NativeBridge::applyMessageReactions(
@@ -3212,7 +3413,7 @@ void NativeBridge::loadHistoryPage(
 		for (const auto &[id, message] : applied) {
 			const auto item = weak->_session->data().message(history->peer, id);
 			if (!item) continue;
-			weak->applyMessageReactions(item, message);
+			weak->applyMessagePayloadState(item, message);
 			messageIds.push_back(id);
 			if (!firstId || id < firstId) firstId = id;
 			if (id > lastId) lastId = id;
@@ -3271,7 +3472,13 @@ void NativeBridge::loadHistoryPage(
 }
 
 SendOptions SendOptionsFrom(const Api::SendOptions &options) {
-    auto result = SendOptions{ .silent = options.silent };
+    // ttlSeconds is how the voice/round record bar states "view once": the
+    // record bar puts the upstream sentinel here, and losing it was exactly
+    // why the bridge never delivered disappearing voice at all.
+    auto result = SendOptions{
+        .silent = options.silent,
+        .mediaTtlSeconds = int(options.ttlSeconds),
+    };
     if (options.scheduled == Api::kScheduledUntilOnlineTimestamp) {
         // Upstream has no separate flag for "send when online": it marks the
         // case with a sentinel timestamp, and the server takes a flag. The
@@ -3851,6 +4058,10 @@ void NativeBridge::sendFiles(
                         });
                     return;
                 }
+                // options travels here too: the TTL of disappearing media
+                // rides on the send that carries the attachment, and "without
+                // sound" was being dropped on this path for the same reason -
+                // the default argument silently replaced both.
                 weak->client().sendAlbum(chatId, trimmedCaption.text, outgoing, replyTo.messageId, items, forceFile, *posters,
                     [weak, history, localIds, failAll](QJsonDocument doc, QString error, int status) {
                         if (!weak || !history) return;
@@ -3902,7 +4113,7 @@ void NativeBridge::sendFiles(
                         // instead of pretending they were sent.
                         failAll(kSendServerAccepted);
                         weak->_session->data().sendHistoryChangeNotifications();
-                    });
+                    }, options);
                 return;
             }
             const auto fileIndex = (*index)++;
@@ -5243,7 +5454,7 @@ void NativeBridge::dispatchReactionReplace(History *history, qint64 messageId) {
                 if (const auto existing = weak->_session->data().message(
                         history->peer,
                         MsgId(int32(messageId)))) {
-                    weak->applyMessageReactions(existing, data);
+                    weak->applyMessagePayloadState(existing, data);
                 }
                 weak->_session->data().sendHistoryChangeNotifications();
             };
@@ -5302,7 +5513,7 @@ void NativeBridge::reloadMessageReactions(History *history, qint64 messageId) {
         if (const auto existing = weak->_session->data().message(
                 history->peer,
                 MsgId(int32(messageId)))) {
-            weak->applyMessageReactions(existing, doc.object());
+            weak->applyMessagePayloadState(existing, doc.object());
             weak->_session->data().sendHistoryChangeNotifications();
         }
     });
@@ -5870,7 +6081,7 @@ void NativeBridge::handleEvent(const QJsonObject &event) {
                 if (const auto item = _session->data().message(
                         history->peer,
                         MsgId(int32(messageId)))) {
-                    applyMessageReactions(item, data);
+                    applyMessagePayloadState(item, data);
                     _session->data().sendHistoryChangeNotifications();
                 }
             }

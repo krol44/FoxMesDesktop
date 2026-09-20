@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/sections/settings_advanced.h"
 
 #include "custom_backend/github_update.h"
+#include "custom_backend/github_update_ui.h"
 #include "custom_backend/native_runtime.h"
 #include "settings/settings_common_session.h"
 
@@ -1026,6 +1027,10 @@ void BuildSpellcheckerSection(SectionBuilder &builder) {
 }
 
 void BuildUpdateSection(SectionBuilder &builder, bool atTop) {
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Updates::BuildUpdateSettings(builder, atTop);
+		return;
+	}
 	if (!HasUpdate()) {
 		return;
 	}
@@ -1378,7 +1383,7 @@ const auto kMeta = BuildHelper({
 }, [](SectionBuilder &builder) {
 	const auto autoUpdate = cAutoUpdate();
 
-	if (!autoUpdate && !CustomBackend::Enabled()) {
+	if (!autoUpdate || CustomBackend::Enabled()) {
 		BuildUpdateSection(builder, true);
 	}
 	BuildDataStorageSection(builder);
@@ -1464,102 +1469,7 @@ void SetupUpdate(not_null<Ui::VerticalLayout*> container) {
 	}
 
 	if (CustomBackend::Enabled()) {
-		// FoxMes bridge: hide the auto-installer toggle, the beta channel
-		// and the download progress; keep current version, "check now",
-		// status text and a button opening the GitHub release page.
-		const auto version = tr::lng_settings_current_version(
-			tr::now,
-			lt_version,
-			currentVersionText());
-		const auto texts = Ui::CreateChild<rpl::event_stream<QString>>(
-			container.get());
-
-		const auto check = container->add(object_ptr<Button>(
-			container,
-			tr::lng_settings_check_now(),
-			st::settingsButtonNoIcon));
-		const auto update = Ui::CreateChild<Button>(
-			check,
-			tr::lng_update_telegram(),
-			st::settingsUpdate);
-		update->hide();
-		check->widthValue() | rpl::on_next([=](int width) {
-			update->resizeToWidth(width);
-			update->moveToLeft(0, 0);
-		}, update->lifetime());
-
-		const auto label = Ui::CreateChild<Ui::FlatLabel>(
-			check,
-			texts->events(),
-			st::settingsUpdateState);
-		rpl::combine(
-			check->widthValue(),
-			label->widthValue()
-		) | rpl::on_next([=] {
-			label->moveToLeft(
-				st::settingsUpdateStatePosition.x(),
-				st::settingsUpdateStatePosition.y());
-		}, label->lifetime());
-		label->setAttribute(Qt::WA_TransparentForMouseEvents);
-
-		const auto setDefaultStatus = [=](const Core::UpdateChecker &checker) {
-			using State = Core::UpdateChecker::State;
-			switch (checker.state()) {
-			case State::Ready:
-				texts->fire(tr::lng_settings_update_ready(tr::now));
-				update->show();
-				break;
-			default:
-				if (!CustomBackend::Updates::IsAvailable()) {
-					texts->fire_copy(version);
-					break;
-				}
-				const auto available = CustomBackend::Updates::CurrentAvailable();
-				texts->fire(tr::lng_settings_update_available(
-					tr::now,
-					lt_version,
-					available.version));
-				update->show();
-				break;
-			}
-		};
-
-		Core::UpdateChecker checker;
-		checker.checking() | rpl::on_next([=] {
-			texts->fire(tr::lng_settings_update_checking(tr::now));
-		}, container->lifetime());
-		checker.isLatest() | rpl::on_next([=] {
-			texts->fire(tr::lng_settings_latest_installed(tr::now));
-		}, container->lifetime());
-		checker.failed() | rpl::on_next([=] {
-			texts->fire(tr::lng_settings_update_fail(tr::now));
-		}, container->lifetime());
-		CustomBackend::Updates::AvailableEvents(
-		) | rpl::on_next([=](CustomBackend::Updates::AvailableUpdate available) {
-			texts->fire(tr::lng_settings_update_available(
-				tr::now,
-				lt_version,
-				available.version));
-			update->show();
-		}, container->lifetime());
-		setDefaultStatus(checker);
-
-		check->addClickHandler([] {
-			Core::UpdateChecker().start();
-		});
-		update->setClickedCallback([] {
-			const auto checker = Core::UpdateChecker();
-			if (checker.state() == Core::UpdateChecker::State::Ready) {
-				if (!Core::UpdaterDisabled()) {
-					Core::checkReadyUpdate();
-				}
-				Core::Restart();
-			} else if (CustomBackend::Updates::IsReadyToInstall()) {
-				CustomBackend::Updates::InstallAndRestart();
-			} else {
-				CustomBackend::Updates::OpenReleasePage();
-			}
-		});
+		CustomBackend::Updates::SetupUpdateSettings(container);
 		return;
 	}
 

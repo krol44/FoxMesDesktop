@@ -63,6 +63,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_channel.h"
 #include "data/data_document.h"
 #include "data/data_media_types.h"
+#include "custom_backend/native_runtime.h"
 #include "data/data_user.h"
 #include "data/data_peer_values.h" // Data::AmPremiumValue.
 #include "data/data_premium_limits.h"
@@ -1699,7 +1700,11 @@ void SendFilesBox::pushBlock(int from, int till) {
 				|| file.type == Ui::PreparedFile::Type::Video)
 			&& ttlUser
 			&& !ttlUser->isSelf()
-			&& !ttlUser->isBot();
+			&& !ttlUser->isBot()
+			// UI guard: the picker is offered only when this server takes the
+			// send, so a choice that would be refused is never shown.
+			&& (!CustomBackend::Enabled()
+				|| CustomBackend::EphemeralMediaSupported());
 		if (canSetTtl) {
 			auto submenu = std::make_unique<Ui::PopupMenu>(
 				state->menu.get(),
