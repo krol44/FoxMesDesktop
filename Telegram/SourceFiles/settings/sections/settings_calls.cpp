@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/sections/settings_calls.h"
 
+#include "custom_backend/native_calls_adapter.h"
 #include "custom_backend/native_runtime.h"
 #include "api/api_authorizations.h"
 #include "apiwrap.h"
@@ -386,32 +387,42 @@ void BuildOtherSection(SectionBuilder &builder) {
 		.keywords = { u"calls"_q, u"accept"_q, u"system"_q },
 	});
 
-	// FoxMes bridge: "Accept calls on this device" is a per-authorization
-	// Telegram setting - it toggles account.setAuthorizationSettings for the
-	// current session - and there is nothing behind it here until calls exist.
-	if (!CustomBackend::Enabled()) {
-		const auto api = &session->api();
-		const auto authorizations = &api->authorizations();
+	// FoxMes bridge: the same switch, backed by the per-device call setting
+	// instead of an MTProto authorization. Both are "this device": upstream
+	// stores it on the authorization, the bridge on the FoxMes session.
+	const auto bridged = CustomBackend::Enabled();
+	const auto api = &session->api();
+	const auto authorizations = &api->authorizations();
+	if (!bridged) {
 		authorizations->reload();
+	}
+	const auto acceptCalls = builder.addButton({
+		.id = u"calls/accept"_q,
+		.title = tr::lng_settings_call_accept_calls(),
+		.st = &st::settingsButtonNoIcon,
+		.toggled = bridged
+			? (CustomBackend::Calls::AcceptCallsValue(session)
+				| rpl::type_erased)
+			: (authorizations->callsDisabledHereValue()
+				| rpl::map(!rpl::mappers::_1)
+				| rpl::type_erased),
+		.keywords = { u"accept"_q, u"receive"_q, u"incoming"_q },
+		.highlight = { .rippleShape = true },
+	});
 
-		const auto acceptCalls = builder.addButton({
-			.id = u"calls/accept"_q,
-			.title = tr::lng_settings_call_accept_calls(),
-			.st = &st::settingsButtonNoIcon,
-			.toggled = authorizations->callsDisabledHereValue()
-				| rpl::map(!rpl::mappers::_1),
-			.keywords = { u"accept"_q, u"receive"_q, u"incoming"_q },
-			.highlight = { .rippleShape = true },
-		});
-
-		if (acceptCalls) {
-			acceptCalls->toggledChanges(
-			) | rpl::filter([=](bool value) {
-				return (value == authorizations->callsDisabledHere());
-			}) | rpl::on_next([=](bool value) {
+	if (acceptCalls) {
+		acceptCalls->toggledChanges(
+		) | rpl::filter([=](bool value) {
+			return bridged
+				? (value != CustomBackend::Calls::AcceptCallsCurrent(session))
+				: (value == authorizations->callsDisabledHere());
+		}) | rpl::on_next([=](bool value) {
+			if (bridged) {
+				CustomBackend::Calls::SetAcceptCalls(session, value);
+			} else {
 				authorizations->toggleCallsDisabledHere(!value);
-			}, acceptCalls->lifetime());
-		}
+			}
+		}, acceptCalls->lifetime());
 	}
 
 	builder.addButton({
@@ -438,13 +449,7 @@ void BuildCallsSectionContent(
 		rpl::variable<bool> *testingMicrophone = nullptr) {
 	BuildOutputSection(builder);
 	BuildInputSection(builder, testingMicrophone);
-	if (!CustomBackend::Enabled()) {
-		// FoxMes bridge: there are no calls yet, so the separate call
-		// playback/capture pair has nothing to configure. The speaker,
-		// microphone and camera choosers above stay: voice and round video
-		// messages are recorded and played through exactly those devices.
-		BuildCallDevicesSection(builder);
-	}
+	BuildCallDevicesSection(builder);
 	BuildCameraSection(builder);
 	BuildOtherSection(builder);
 }
@@ -664,7 +669,7 @@ Calls::Calls(
 : Section(parent, controller) {
 	if (!CustomBackend::Enabled()) {
 		// Only the "Accept calls on this device" toggle reads this list, and
-		// the FoxMes section above does not build that toggle.
+		// under the bridge that toggle is backed by the FoxMes session instead.
 		controller->session().api().authorizations().reload();
 	}
 

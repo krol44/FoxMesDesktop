@@ -107,6 +107,14 @@ build_patch_list() {
 
   add_patch "$ROOT/Telegram/build/foxmes/release-notes.md" \
     "FoxMes Desktop $ov" "FoxMes Desktop $nv"
+
+  # The release checklist repeats the bump command and the tag name.
+  add_patch "$ROOT/RELEASE.md" \
+    "make version VERSION=$ov" "make version VERSION=$nv"
+  add_patch "$ROOT/RELEASE.md" \
+    "git tag v$ov" "git tag v$nv"
+  add_patch "$ROOT/RELEASE.md" \
+    "git push origin v$ov" "git push origin v$nv"
 }
 
 apply_patches() {

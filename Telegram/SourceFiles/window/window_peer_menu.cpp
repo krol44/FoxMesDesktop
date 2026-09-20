@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/window_peer_menu.h"
 
+#include "custom_backend/native_meet_adapter.h"
 #include "custom_backend/native_runtime.h"
 #include "custom_backend/native_wallpaper_adapter.h"
 #include "custom_backend/native_scheduled_adapter.h"
@@ -310,6 +311,7 @@ private:
 	void addHidePromotion();
 	void addTogglePin();
 	void addToggleMuteSubmenu(bool addSeparator);
+	void addCreateMeet();
 	void addSupportInfo();
 	void addInfo();
 	void addStoryArchive();
@@ -691,6 +693,22 @@ void Filler::addStoryArchive() {
 				Info::Stories::ArchiveId()));
 		}
 	}, &st::menuIconStoriesArchiveSection);
+}
+
+// FoxMes bridge: booking a meet room used to sit on the handset button of the
+// top bar. That button is a call again, so the action moved here - to the menu
+// of the open chat only, which is where the web offers it too.
+void Filler::addCreateMeet() {
+	if (!CustomBackend::Meet::Available(_peer)) {
+		return;
+	}
+	const auto history = _thread ? _thread->owningHistory().get() : nullptr;
+	if (!history) {
+		return;
+	}
+	_addAction(u"Create Meet"_q, [=] {
+		CustomBackend::Meet::Start(history);
+	}, &st::menuIconPhone);
 }
 
 void Filler::addToggleFolder() {
@@ -1975,6 +1993,7 @@ void Filler::fillHistoryActions() {
 	addToggleMuteSubmenu(true);
 	addCreateTopic();
 	addInfo();
+	addCreateMeet();
 	addViewAsTopics();
 	addManageChat();
 	addStoryArchive();

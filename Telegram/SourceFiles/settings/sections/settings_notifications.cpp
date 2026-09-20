@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/sections/settings_notifications.h"
 
+#include "custom_backend/native_calls_adapter.h"
 #include "custom_backend/native_runtime.h"
 #include "settings/settings_common_session.h"
 
@@ -1328,23 +1329,39 @@ void BuildCallNotificationsSection(SectionBuilder &builder) {
 	});
 
 	const auto session = builder.session();
+	// The same switch as in Settings -> Devices, and deliberately the same
+	// state behind it: see settings_calls.cpp for why the bridge answers it
+	// from the FoxMes session instead of an MTProto authorization.
+	const auto bridged = CustomBackend::Enabled();
 	const auto authorizations = &session->api().authorizations();
-	authorizations->reload();
+	if (!bridged) {
+		authorizations->reload();
+	}
 
 	const auto acceptCalls = builder.addButton({
 		.id = u"notifications/calls/accept"_q,
 		.title = tr::lng_settings_call_accept_calls(),
 		.icon = { &st::menuIconCallsReceive },
-		.toggled = authorizations->callsDisabledHereValue()
-			| rpl::map([](bool disabled) { return !disabled; }),
+		.toggled = bridged
+			? (CustomBackend::Calls::AcceptCallsValue(session)
+				| rpl::type_erased)
+			: (authorizations->callsDisabledHereValue()
+				| rpl::map([](bool disabled) { return !disabled; })
+				| rpl::type_erased),
 		.keywords = { u"calls"_q, u"receive"_q, u"incoming"_q },
 	});
 	if (acceptCalls) {
 		acceptCalls->toggledChanges(
 		) | rpl::filter([=](bool toggled) {
-			return (toggled == authorizations->callsDisabledHere());
+			return bridged
+				? (toggled != CustomBackend::Calls::AcceptCallsCurrent(session))
+				: (toggled == authorizations->callsDisabledHere());
 		}) | rpl::on_next([=](bool toggled) {
-			authorizations->toggleCallsDisabledHere(!toggled);
+			if (bridged) {
+				CustomBackend::Calls::SetAcceptCalls(session, toggled);
+			} else {
+				authorizations->toggleCallsDisabledHere(!toggled);
+			}
 		}, acceptCalls->lifetime());
 	}
 }
@@ -1628,11 +1645,7 @@ void BuildNotificationsSectionContent(SectionBuilder &builder) {
 	BuildNotifyViewSection(builder);
 	BuildNotifyTypeSection(builder);
 	BuildEventNotificationsSection(builder);
-	// Calls are not part of FoxMes: the toggle is backed by MTProto
-	// authorizations, and there is nothing here to accept a call on.
-	if (!CustomBackend::DisableWhile) {
-		BuildCallNotificationsSection(builder);
-	}
+	BuildCallNotificationsSection(builder);
 	BuildBadgeCounterSection(builder);
 	BuildSystemIntegrationAndAdvancedSection(builder);
 }

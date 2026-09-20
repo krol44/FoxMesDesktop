@@ -1093,8 +1093,7 @@ void TopBar::setupActions(not_null<Window::SessionController*> controller) {
 	if (chechMax()) {
 		return;
 	}
-	if (!CustomBackend::DisableWhile
-		&& !isSide
+	if (!isSide
 		&& user
 		&& !user->sharedMediaInfo()
 		&& !user->isInaccessible()

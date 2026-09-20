@@ -23,6 +23,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "calls/group/calls_group_common.h"
 #include "calls/group/calls_group_invite_controller.h"
 #include "calls/calls_instance.h"
+#include "custom_backend/native_calls_adapter.h"
+#include "custom_backend/native_runtime.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_item_helpers.h"
@@ -549,24 +551,8 @@ void BoxController::loadMoreRows() {
 		return;
 	}
 
-	_loadRequestId = _api.request(MTPmessages_Search(
-		MTP_flags(0),
-		MTP_inputPeerEmpty(),
-		MTP_string(), // q
-		MTP_inputPeerEmpty(),
-		MTPInputPeer(), // saved_peer_id
-		MTPVector<MTPReaction>(), // saved_reaction
-		MTPint(), // top_msg_id
-		MTP_inputMessagesFilterPhoneCalls(MTP_flags(0)),
-		MTP_int(0), // min_date
-		MTP_int(0), // max_date
-		MTP_int(_offsetId),
-		MTP_int(0), // add_offset
-		MTP_int(_offsetId ? kFirstPageCount : kPerPageCount),
-		MTP_int(0), // max_id
-		MTP_int(0), // min_id
-		MTP_long(0) // hash
-	)).done([this](const MTPmessages_Messages &result) {
+	const auto limit = _offsetId ? kFirstPageCount : kPerPageCount;
+	const auto received = [=](const MTPmessages_Messages &result) {
 		_loadRequestId = 0;
 
 		auto handleResult = [&](auto &data) {
@@ -587,6 +573,39 @@ void BoxController::loadMoreRows() {
 		} break;
 		default: Unexpected("Type of messages.Messages (Calls::BoxController::preloadRows)");
 		}
+	};
+	if (CustomBackend::Enabled()) {
+		// The list is a view over the service messages calls leave behind, and
+		// the bridge serves them directly: there is no message search here to
+		// filter by call.
+		_loadRequestId = -1;
+		CustomBackend::Calls::LoadHistory(
+			&session(),
+			MsgId(_offsetId),
+			limit,
+			received,
+			[=] { _loadRequestId = 0; _allLoaded = true; });
+		return;
+	}
+	_loadRequestId = _api.request(MTPmessages_Search(
+		MTP_flags(0),
+		MTP_inputPeerEmpty(),
+		MTP_string(), // q
+		MTP_inputPeerEmpty(),
+		MTPInputPeer(), // saved_peer_id
+		MTPVector<MTPReaction>(), // saved_reaction
+		MTPint(), // top_msg_id
+		MTP_inputMessagesFilterPhoneCalls(MTP_flags(0)),
+		MTP_int(0), // min_date
+		MTP_int(0), // max_date
+		MTP_int(_offsetId),
+		MTP_int(0), // add_offset
+		MTP_int(limit),
+		MTP_int(0), // max_id
+		MTP_int(0), // min_id
+		MTP_long(0) // hash
+	)).done([=](const MTPmessages_Messages &result) {
+		received(result);
 	}).fail([this] {
 		_loadRequestId = 0;
 	}).send();
@@ -751,9 +770,27 @@ void ClearCallsBox(
 			st::boxPadding.bottom(),
 			st::boxPadding.right(),
 			st::boxPadding.bottom()));
+	if (CustomBackend::Enabled()) {
+		// Clearing the list is per participant under the bridge: the row is
+		// shared, so there is nothing "for everyone" to do - see sendRequest.
+		revokeCheckbox->hide();
+	}
 
 	const auto api = &window->session().api();
 	const auto sendRequest = [=](bool revoke, auto self) -> void {
+		if (CustomBackend::Enabled()) {
+			// The row of a call is shared by both participants, so clearing
+			// the list hides it for whoever asked and leaves the other side
+			// their history - "also for the other party" has nothing to act
+			// on here.
+			CustomBackend::Calls::ClearHistory(&api->session(), [=] {
+				api->session().data().destroyAllCallItems();
+				if (const auto strong = weak.get()) {
+					strong->closeBox();
+				}
+			});
+			return;
+		}
 		using Flag = MTPmessages_DeletePhoneCallHistory::Flag;
 		api->request(MTPmessages_DeletePhoneCallHistory(
 			MTP_flags(revoke ? Flag::f_revoke : Flag(0))

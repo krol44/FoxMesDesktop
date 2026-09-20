@@ -18,6 +18,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/mtproto_dh_utils.h"
 #include "core/application.h"
 #include "core/core_settings.h"
+#include "custom_backend/native_calls_adapter.h"
+#include "custom_backend/native_runtime.h"
 #include "main/session/session_show.h"
 #include "main/main_app_config.h"
 #include "main/main_session.h"
@@ -510,10 +512,7 @@ void Instance::refreshDhConfig() {
 	Expects(!_currentCall->conferenceInvite());
 
 	const auto weak = base::make_weak(_currentCall);
-	_currentCall->user()->session().api().request(MTPmessages_GetDhConfig(
-		MTP_int(_cachedDhConfig->version),
-		MTP_int(MTP::ModExpFirst::kRandomPowerSize)
-	)).done([=](const MTPmessages_DhConfig &result) {
+	const auto received = [=](const MTPmessages_DhConfig &result) {
 		const auto call = weak.get();
 		const auto random = updateDhConfig(result);
 		if (!call) {
@@ -525,12 +524,28 @@ void Instance::refreshDhConfig() {
 		} else {
 			_delegate->callFailed(call);
 		}
-	}).fail([=] {
+	};
+	const auto failed = [=] {
 		const auto call = weak.get();
 		if (!call) {
 			return;
 		}
 		_delegate->callFailed(call);
+	};
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Calls::RequestDhConfig(
+			&_currentCall->user()->session(),
+			received,
+			[=](const QString &) { failed(); });
+		return;
+	}
+	_currentCall->user()->session().api().request(MTPmessages_GetDhConfig(
+		MTP_int(_cachedDhConfig->version),
+		MTP_int(MTP::ModExpFirst::kRandomPowerSize)
+	)).done([=](const MTPmessages_DhConfig &result) {
+		received(result);
+	}).fail([=] {
+		failed();
 	}).send();
 }
 
@@ -577,15 +592,27 @@ void Instance::refreshServerConfig(not_null<Main::Session*> session) {
 		return;
 	}
 	_serverConfigRequestSession = session;
-	session->api().request(MTPphone_GetCallConfig(
-	)).done([=](const MTPDataJSON &result) {
+	const auto received = [=](const QByteArray &json) {
 		_serverConfigRequestSession = nullptr;
 		_lastServerConfigUpdateTime = crl::now();
 
-		const auto &json = result.c_dataJSON().vdata().v;
 		UpdateConfig(std::string(json.data(), json.size()));
-	}).fail([=] {
+	};
+	const auto failed = [=] {
 		_serverConfigRequestSession = nullptr;
+	};
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Calls::RequestCallConfig(
+			session,
+			received,
+			[=](const QString &) { failed(); });
+		return;
+	}
+	session->api().request(MTPphone_GetCallConfig(
+	)).done([=](const MTPDataJSON &result) {
+		received(result.c_dataJSON().vdata().v);
+	}).fail([=] {
+		failed();
 	}).send();
 }
 
@@ -699,6 +726,16 @@ void Instance::handleCallUpdate(
 			const auto flags = phoneCall.is_video()
 				? MTPphone_DiscardCall::Flag::f_video
 				: MTPphone_DiscardCall::Flag(0);
+			if (CustomBackend::Enabled()) {
+				CustomBackend::Calls::DiscardCall(
+					session,
+					phoneCall.vid().v,
+					0,
+					MTP_phoneCallDiscardReasonBusy(),
+					phoneCall.is_video(),
+					nullptr);
+				return;
+			}
 			session->api().request(MTPphone_DiscardCall(
 				MTP_flags(flags),
 				MTP_inputPhoneCall(phoneCall.vid(), phoneCall.vaccess_hash()),

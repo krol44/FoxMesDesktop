@@ -857,6 +857,92 @@ void ApiClient::createMeet(qint64 chatId, const QString &operationId, Callback d
     }), std::move(done));
 }
 
+void ApiClient::callConfig(Callback done) {
+    jsonRequest("GET", u"/calls/config"_q, QJsonDocument(), std::move(done));
+}
+
+void ApiClient::callDhConfig(Callback done) {
+    jsonRequest("GET", u"/calls/dh-config"_q, QJsonDocument(), std::move(done));
+}
+
+void ApiClient::requestCall(
+        qint64 chatId,
+        const QByteArray &gaHash,
+        bool video,
+        const QJsonObject &protocol,
+        const QString &operationId,
+        Callback done) {
+    jsonRequest("POST", u"/calls"_q, QJsonDocument(QJsonObject{
+        {"chat_id", chatId},
+        {"g_a_hash", QString::fromLatin1(gaHash.toBase64())},
+        {"video", video},
+        {"protocol", protocol},
+        {"operation_id", operationId.isEmpty()
+            ? QUuid::createUuid().toString(QUuid::WithoutBraces)
+            : operationId},
+    }), std::move(done));
+}
+
+void ApiClient::callReceived(qint64 callId, Callback done) {
+    jsonRequest("POST", QString("/calls/%1/received").arg(callId), QJsonDocument(QJsonObject{}), std::move(done));
+}
+
+void ApiClient::callAccept(qint64 callId, const QByteArray &gb, Callback done) {
+    jsonRequest("POST", QString("/calls/%1/accept").arg(callId), QJsonDocument(QJsonObject{
+        {"g_b", QString::fromLatin1(gb.toBase64())},
+    }), std::move(done));
+}
+
+void ApiClient::callConfirm(
+        qint64 callId,
+        const QByteArray &ga,
+        qint64 keyFingerprint,
+        Callback done) {
+    jsonRequest("POST", QString("/calls/%1/confirm").arg(callId), QJsonDocument(QJsonObject{
+        {"g_a", QString::fromLatin1(ga.toBase64())},
+        {"key_fingerprint", keyFingerprint},
+    }), std::move(done));
+}
+
+void ApiClient::callDiscard(
+        qint64 callId,
+        const QString &reason,
+        int duration,
+        Callback done) {
+    jsonRequest("POST", QString("/calls/%1/discard").arg(callId), QJsonDocument(QJsonObject{
+        {"reason", reason},
+        {"duration", duration},
+    }), std::move(done));
+}
+
+void ApiClient::callSignaling(qint64 callId, const QByteArray &data, Callback done) {
+    jsonRequest("POST", QString("/calls/%1/signaling").arg(callId), QJsonDocument(QJsonObject{
+        {"data", QString::fromLatin1(data.toBase64())},
+    }), std::move(done));
+}
+
+void ApiClient::callSettings(Callback done) {
+    jsonRequest("GET", u"/calls/settings"_q, QJsonDocument(), std::move(done));
+}
+
+void ApiClient::callSettingsUpdate(bool acceptCalls, Callback done) {
+    jsonRequest("PUT", u"/calls/settings"_q, QJsonDocument(QJsonObject{
+        {"accept_calls", acceptCalls},
+    }), std::move(done));
+}
+
+void ApiClient::callHistory(qint64 offsetId, int limit, Callback done) {
+    auto path = QString("/calls/history?limit=%1").arg(limit);
+    if (offsetId > 0) {
+        path += QString("&offset_id=%1").arg(offsetId);
+    }
+    jsonRequest("GET", path, QJsonDocument(), std::move(done));
+}
+
+void ApiClient::callHistoryClear(Callback done) {
+    jsonRequest("DELETE", u"/calls/history"_q, QJsonDocument(), std::move(done));
+}
+
 void ApiClient::markDelivered(
         qint64 chatId,
         const QList<qint64> &messageIds,

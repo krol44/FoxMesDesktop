@@ -17,6 +17,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "calls/calls_panel.h"
 #include "core/application.h"
 #include "core/core_settings.h"
+#include "custom_backend/native_calls_adapter.h"
+#include "custom_backend/native_runtime.h"
 #include "data/data_group_call.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
@@ -347,32 +349,24 @@ void Call::startOutgoing() {
 	const auto flags = _videoCapture
 		? MTPphone_RequestCall::Flag::f_video
 		: MTPphone_RequestCall::Flag(0);
-	_api.request(MTPphone_RequestCall(
-		MTP_flags(flags),
-		_user->inputUser(),
-		MTP_int(base::RandomValue<int32>()),
-		MTP_bytes(_gaHash),
-		MTP_phoneCallProtocol(
-			MTP_flags(MTPDphoneCallProtocol::Flag::f_udp_p2p
-				| MTPDphoneCallProtocol::Flag::f_udp_reflector),
-			MTP_int(kMinLayer),
-			MTP_int(tgcalls::Meta::MaxLayer()),
-			MTP_vector(CollectVersionsForApi()))
-	)).done([=](const MTPphone_PhoneCall &result) {
-		Expects(result.type() == mtpc_phone_phoneCall);
-
-		setState(State::Waiting);
-
-		const auto &call = result.c_phone_phoneCall();
-		_user->session().data().processUsers(call.vusers());
-		if (call.vphone_call().type() != mtpc_phoneCallWaiting) {
+	const auto protocol = MTP_phoneCallProtocol(
+		MTP_flags(MTPDphoneCallProtocol::Flag::f_udp_p2p
+			| MTPDphoneCallProtocol::Flag::f_udp_reflector),
+		MTP_int(kMinLayer),
+		MTP_int(tgcalls::Meta::MaxLayer()),
+		MTP_vector(CollectVersionsForApi()));
+	// One copy of the completion, shared by both transports: the bridge
+	// substitutes how the answer arrives, never what is done with it. The
+	// state change stays at each call site so the order against processUsers()
+	// is exactly what it was.
+	const auto requested = [=](const MTPPhoneCall &phoneCall) {
+		if (phoneCall.type() != mtpc_phoneCallWaiting) {
 			LOG(("Call Error: Expected phoneCallWaiting in response to "
 				"phone.requestCall()"));
 			finish(FinishType::Failed);
 			return;
 		}
 
-		const auto &phoneCall = call.vphone_call();
 		const auto &waitingCall = phoneCall.c_phoneCallWaiting();
 		_id = waitingCall.vid().v;
 		_accessHash = waitingCall.vaccess_hash().v;
@@ -388,8 +382,39 @@ void Call::startOutgoing() {
 		const auto &config = _user->session().serverConfig();
 		_discardByTimeoutTimer.callOnce(config.callReceiveTimeoutMs);
 		handleUpdate(phoneCall);
-	}).fail([this](const MTP::Error &error) {
-		handleRequestError(error.type());
+	};
+	const auto failed = [=](const QString &error) {
+		handleRequestError(error);
+	};
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Calls::RequestCall(
+			_user,
+			_gaHash,
+			(_videoCapture != nullptr),
+			protocol,
+			[=](const MTPPhoneCall &phoneCall) {
+				setState(State::Waiting);
+				requested(phoneCall);
+			},
+			failed);
+		return;
+	}
+	_api.request(MTPphone_RequestCall(
+		MTP_flags(flags),
+		_user->inputUser(),
+		MTP_int(base::RandomValue<int32>()),
+		MTP_bytes(_gaHash),
+		protocol
+	)).done([=](const MTPphone_PhoneCall &result) {
+		Expects(result.type() == mtpc_phone_phoneCall);
+
+		setState(State::Waiting);
+
+		const auto &call = result.c_phone_phoneCall();
+		_user->session().data().processUsers(call.vusers());
+		requested(call.vphone_call());
+	}).fail([=](const MTP::Error &error) {
+		failed(error.type());
 	}).send();
 }
 
@@ -398,14 +423,28 @@ void Call::startIncoming() {
 	Expects(_state.current() == State::Starting);
 	Expects(!conferenceInvite());
 
-	_api.request(MTPphone_ReceivedCall(
-		MTP_inputPhoneCall(MTP_long(_id), MTP_long(_accessHash))
-	)).done([=] {
+	const auto received = [=] {
 		if (_state.current() == State::Starting) {
 			setState(State::WaitingIncoming);
 		}
+	};
+	const auto failed = [=](const QString &error) {
+		handleRequestError(error);
+	};
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Calls::ReceivedCall(
+			&_user->session(),
+			_id,
+			received,
+			failed);
+		return;
+	}
+	_api.request(MTPphone_ReceivedCall(
+		MTP_inputPhoneCall(MTP_long(_id), MTP_long(_accessHash))
+	)).done([=] {
+		received();
 	}).fail([=](const MTP::Error &error) {
-		handleRequestError(error.type());
+		failed(error.type());
 	}).send();
 }
 
@@ -483,30 +522,47 @@ void Call::actuallyAnswer() {
 	} else {
 		_answerAfterDhConfigReceived = false;
 	}
-	_api.request(MTPphone_AcceptCall(
-		MTP_inputPhoneCall(MTP_long(_id), MTP_long(_accessHash)),
-		MTP_bytes(_gb),
-		MTP_phoneCallProtocol(
-			MTP_flags(MTPDphoneCallProtocol::Flag::f_udp_p2p
-				| MTPDphoneCallProtocol::Flag::f_udp_reflector),
-			MTP_int(kMinLayer),
-			MTP_int(tgcalls::Meta::MaxLayer()),
-			MTP_vector(CollectVersionsForApi()))
-	)).done([=](const MTPphone_PhoneCall &result) {
-		Expects(result.type() == mtpc_phone_phoneCall);
-
-		const auto &call = result.c_phone_phoneCall();
-		_user->session().data().processUsers(call.vusers());
-		if (call.vphone_call().type() != mtpc_phoneCallWaiting) {
+	const auto protocol = MTP_phoneCallProtocol(
+		MTP_flags(MTPDphoneCallProtocol::Flag::f_udp_p2p
+			| MTPDphoneCallProtocol::Flag::f_udp_reflector),
+		MTP_int(kMinLayer),
+		MTP_int(tgcalls::Meta::MaxLayer()),
+		MTP_vector(CollectVersionsForApi()));
+	const auto accepted = [=](const MTPPhoneCall &phoneCall) {
+		if (phoneCall.type() != mtpc_phoneCallWaiting) {
 			LOG(("Call Error: "
 				"Not phoneCallWaiting in response to phone.acceptCall."));
 			finish(FinishType::Failed);
 			return;
 		}
 
-		handleUpdate(call.vphone_call());
+		handleUpdate(phoneCall);
+	};
+	const auto failed = [=](const QString &error) {
+		handleRequestError(error);
+	};
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Calls::AcceptCall(
+			&_user->session(),
+			_id,
+			_gb,
+			protocol,
+			accepted,
+			failed);
+		return;
+	}
+	_api.request(MTPphone_AcceptCall(
+		MTP_inputPhoneCall(MTP_long(_id), MTP_long(_accessHash)),
+		MTP_bytes(_gb),
+		protocol
+	)).done([=](const MTPphone_PhoneCall &result) {
+		Expects(result.type() == mtpc_phone_phoneCall);
+
+		const auto &call = result.c_phone_phoneCall();
+		_user->session().data().processUsers(call.vusers());
+		accepted(call.vphone_call());
 	}).fail([=](const MTP::Error &error) {
-		handleRequestError(error.type());
+		failed(error.type());
 	}).send();
 }
 
@@ -677,17 +733,32 @@ void Call::startWaitingTrack() {
 void Call::sendSignalingData(const QByteArray &data) {
 	Expects(!conferenceInvite());
 
+	const auto sent = [=](bool success) {
+		if (!success) {
+			finish(FinishType::Failed);
+		}
+	};
+	const auto failed = [=](const QString &error) {
+		handleRequestError(error);
+	};
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Calls::SendSignalingData(
+			&_user->session(),
+			_id,
+			data,
+			sent,
+			failed);
+		return;
+	}
 	_api.request(MTPphone_SendSignalingData(
 		MTP_inputPhoneCall(
 			MTP_long(_id),
 			MTP_long(_accessHash)),
 		MTP_bytes(data)
 	)).done([=](const MTPBool &result) {
-		if (!mtpIsTrue(result)) {
-			finish(FinishType::Failed);
-		}
+		sent(mtpIsTrue(result));
 	}).fail([=](const MTP::Error &error) {
-		handleRequestError(error.type());
+		failed(error.type());
 	}).send();
 }
 
@@ -966,31 +1037,49 @@ void Call::confirmAcceptedCall(const MTPDphoneCallAccepted &call) {
 	_keyFingerprint = ComputeFingerprint(_authKey);
 
 	setState(State::ExchangingKeys);
-	_api.request(MTPphone_ConfirmCall(
-		MTP_inputPhoneCall(MTP_long(_id), MTP_long(_accessHash)),
-		MTP_bytes(_ga),
-		MTP_long(_keyFingerprint),
-		MTP_phoneCallProtocol(
-			MTP_flags(MTPDphoneCallProtocol::Flag::f_udp_p2p
-				| MTPDphoneCallProtocol::Flag::f_udp_reflector),
-			MTP_int(kMinLayer),
-			MTP_int(tgcalls::Meta::MaxLayer()),
-			MTP_vector(CollectVersionsForApi()))
-	)).done([=](const MTPphone_PhoneCall &result) {
-		Expects(result.type() == mtpc_phone_phoneCall);
-
-		const auto &call = result.c_phone_phoneCall();
-		_user->session().data().processUsers(call.vusers());
-		if (call.vphone_call().type() != mtpc_phoneCall) {
+	const auto protocol = MTP_phoneCallProtocol(
+		MTP_flags(MTPDphoneCallProtocol::Flag::f_udp_p2p
+			| MTPDphoneCallProtocol::Flag::f_udp_reflector),
+		MTP_int(kMinLayer),
+		MTP_int(tgcalls::Meta::MaxLayer()),
+		MTP_vector(CollectVersionsForApi()));
+	const auto confirmed = [=](const MTPPhoneCall &phoneCall) {
+		if (phoneCall.type() != mtpc_phoneCall) {
 			LOG(("Call Error: Expected phoneCall in response to "
 				"phone.confirmCall()"));
 			finish(FinishType::Failed);
 			return;
 		}
 
-		createAndStartController(call.vphone_call().c_phoneCall());
+		createAndStartController(phoneCall.c_phoneCall());
+	};
+	const auto failed = [=](const QString &error) {
+		handleRequestError(error);
+	};
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Calls::ConfirmCall(
+			&_user->session(),
+			_id,
+			_ga,
+			_keyFingerprint,
+			protocol,
+			confirmed,
+			failed);
+		return;
+	}
+	_api.request(MTPphone_ConfirmCall(
+		MTP_inputPhoneCall(MTP_long(_id), MTP_long(_accessHash)),
+		MTP_bytes(_ga),
+		MTP_long(_keyFingerprint),
+		protocol
+	)).done([=](const MTPphone_PhoneCall &result) {
+		Expects(result.type() == mtpc_phone_phoneCall);
+
+		const auto &call = result.c_phone_phoneCall();
+		_user->session().data().processUsers(call.vusers());
+		confirmed(call.vphone_call());
 	}).fail([=](const MTP::Error &error) {
-		handleRequestError(error.type());
+		failed(error.type());
 	}).send();
 }
 
@@ -1576,6 +1665,16 @@ void Call::finish(
 	}
 	const auto session = &_user->session();
 	const auto weak = base::make_weak(this);
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Calls::DiscardCall(
+			session,
+			_id,
+			duration,
+			reason,
+			(flags != MTPphone_DiscardCall::Flag(0)),
+			crl::guard(weak, [=] { setState(finalState); }));
+		return;
+	}
 	session->api().request(MTPphone_DiscardCall( // We send 'discard' here.
 		MTP_flags(flags),
 		MTP_inputPhoneCall(

@@ -7,7 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_top_bar_widget.h"
 
-#include "custom_backend/native_meet_adapter.h"
 #include "custom_backend/native_runtime.h"
 #include "history/history.h"
 #include "history/view/history_view_send_action.h"
@@ -317,12 +316,6 @@ void TopBarWidget::call(Calls::StartOutgoingCallArgs args) {
 	if (_controller->showFrozenError()) {
 		return;
 	} else if (const auto peer = _activeChat.key.peer()) {
-		if (CustomBackend::Enabled()) {
-			if (const auto history = _activeChat.key.history()) {
-				CustomBackend::Meet::Start(history);
-			}
-			return;
-		}
 		if (const auto user = peer->asUser()) {
 			Core::App().calls().startOutgoingCall(user, std::move(args));
 		}
@@ -435,11 +428,6 @@ void TopBarWidget::showGroupCallMenu(not_null<PeerData*> peer) {
 }
 
 void TopBarWidget::showCallMenu() {
-	if (CustomBackend::Enabled()) {
-		// The menu offers a voice and a video call. FoxMes has neither: the
-		// button books a meet room, and that is a single action.
-		return;
-	}
 	const auto created = createMenu(_call, false);
 	if (!created) {
 		return;
@@ -1411,9 +1399,7 @@ void TopBarWidget::updateControlsVisibility() {
 		}
 		return false;
 	}();
-	_call->setVisible((!CustomBackend::Enabled()
-			|| CustomBackend::Meet::Available(_activeChat.key.peer()))
-		&& historyMode
+	_call->setVisible(historyMode
 		&& callsEnabled
 		&& !_chooseForReportReason);
 	const auto groupCallsEnabled = [&] {

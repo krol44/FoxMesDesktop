@@ -717,13 +717,15 @@ void MainMenu::setupMenu() {
 			)->setClickedCallback([=] {
 				controller->show(PrepareContactsBox(controller));
 			});
-			addAction(
-				tr::lng_menu_calls(),
-				{ &st::menuIconPhone }
-			)->setClickedCallback([=] {
-				::Calls::ShowCallsBox(controller);
-			});
 		}
+		// FoxMes bridge: the recent calls list is served by the bridge, so it
+		// lives outside the block that hides group and channel creation.
+		addAction(
+			tr::lng_menu_calls(),
+			{ &st::menuIconPhone }
+		)->setClickedCallback([=] {
+			::Calls::ShowCallsBox(controller);
+		});
 		addAction(
 			tr::lng_saved_messages(),
 			{ &st::menuIconSavedMessages }

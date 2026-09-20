@@ -299,6 +299,35 @@ public:
     // link itself is sent into the chat as an ordinary message afterwards,
     // exactly like the "create meet" action of fxl-web does.
     void createMeet(qint64 chatId, const QString &operationId, Callback done);
+
+    // Calls. The shapes on the wire mirror the MTProto constructors the
+    // upstream call state machine expects; see native_calls_adapter.
+    void callConfig(Callback done);
+    void callDhConfig(Callback done);
+    void requestCall(
+        qint64 chatId,
+        const QByteArray &gaHash,
+        bool video,
+        const QJsonObject &protocol,
+        const QString &operationId,
+        Callback done);
+    void callReceived(qint64 callId, Callback done);
+    void callAccept(qint64 callId, const QByteArray &gb, Callback done);
+    void callConfirm(
+        qint64 callId,
+        const QByteArray &ga,
+        qint64 keyFingerprint,
+        Callback done);
+    void callDiscard(
+        qint64 callId,
+        const QString &reason,
+        int duration,
+        Callback done);
+    void callSignaling(qint64 callId, const QByteArray &data, Callback done);
+    void callSettings(Callback done);
+    void callSettingsUpdate(bool acceptCalls, Callback done);
+    void callHistory(qint64 offsetId, int limit, Callback done);
+    void callHistoryClear(Callback done);
     // First-touch delivery acknowledgement for messages that actually reached
     // this device, batched by the bridge.
     void markDelivered(

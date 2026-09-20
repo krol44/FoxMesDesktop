@@ -151,6 +151,8 @@ PRIVATE
     custom_backend/native_delete_adapter.h
     custom_backend/native_chat_state_adapter.cpp
     custom_backend/native_chat_state_adapter.h
+    custom_backend/native_calls_adapter.cpp
+    custom_backend/native_calls_adapter.h
     custom_backend/native_meet_adapter.cpp
     custom_backend/native_meet_adapter.h
     custom_backend/native_send_files_adapter.cpp

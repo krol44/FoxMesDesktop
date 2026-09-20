@@ -550,6 +550,12 @@ private:
         HistoryLoaded done = {});
     void deferMessageEvent(const QString &type, const QJsonObject &data);
     void drainDeferredMessageEvents();
+    [[nodiscard]] std::optional<PreparedMessage> prepareCallMessage(
+        History *history,
+        const QJsonObject &message,
+        const QJsonObject &call,
+        qint64 messageId,
+        qint64 senderId);
     [[nodiscard]] qint64 chatIdFor(History *history) const;
     [[nodiscard]] History *historyForChatId(qint64 chatId) const;
     [[nodiscard]] PeerId peerForChatId(qint64 chatId) const;

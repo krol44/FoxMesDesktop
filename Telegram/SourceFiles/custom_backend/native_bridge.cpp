@@ -5,6 +5,7 @@
 #include "custom_backend/native_wallpaper_adapter.h"
 
 #include "custom_backend/api_client.h"
+#include "custom_backend/native_calls_adapter.h"
 #include "custom_backend/native_delete_adapter.h"
 #include "custom_backend/native_reactions_adapter.h"
 #include "custom_backend/native_runtime.h"
@@ -2453,6 +2454,18 @@ std::optional<NativeBridge::PreparedMessage> NativeBridge::prepareMessage(
     const auto senderId = message.value("sender_id").toVariant().toLongLong();
     if (senderId <= 0) return std::nullopt;
 
+    // A finished call is the one message here that is not a message: upstream
+    // draws it from a service action, and the whole body below - text,
+    // entities, media, reactions - has nothing to describe it with.
+    if (const auto call = message.value("call"); call.isObject()) {
+        return prepareCallMessage(
+            history,
+            message,
+            call.toObject(),
+            messageId,
+            senderId);
+    }
+
     using Flag = MTPDmessage::Flag;
     auto mtpFlags = Flag::f_from_id | Flag();
     if (senderId == client().meId()) {
@@ -2681,6 +2694,37 @@ std::optional<NativeBridge::PreparedMessage> NativeBridge::prepareMessage(
     }
     return PreparedMessage{
         .mtp = std::move(mtp),
+        .messageId = MsgId(int32(messageId)),
+        .senderId = senderId,
+    };
+}
+
+// prepareCallMessage turns the "foxCall" node the server left in the chat into
+// the service message upstream already knows how to draw
+// (history_item.cpp, MTPDmessageActionPhoneCall -> Data::MediaCall). Nothing
+// about the rendering is ours: we only restate the outcome.
+std::optional<NativeBridge::PreparedMessage> NativeBridge::prepareCallMessage(
+        History *history,
+        const QJsonObject &message,
+        const QJsonObject &call,
+        qint64 messageId,
+        qint64 senderId) {
+    _messageRevisions[SeenKey(
+        message.value("chat_id").toVariant().toLongLong(),
+        messageId)] = qMax<qint64>(
+            message.value("revision").toVariant().toLongLong(),
+            1);
+    return PreparedMessage{
+        .mtp = Calls::BuildCallMessage(
+            history->peer->id,
+            (senderId == client().meId()),
+            MsgId(int32(messageId)),
+            senderId,
+            call.value("call_id").toVariant().toLongLong(),
+            call.value("reason").toString(),
+            call.value("duration").toInt(),
+            call.value("video").toBool(),
+            unixTime(message.value("created_at").toString())),
         .messageId = MsgId(int32(messageId)),
         .senderId = senderId,
     };
@@ -5918,6 +5962,12 @@ void NativeBridge::handleEvent(const QJsonObject &event) {
 		resyncAfterGap(sequence, sequence);
 		return;
 	}
+
+    // A call event is not chat state: it drives the upstream call machine
+    // through Calls::Instance and has nothing to say to the chat list.
+    if (Calls::HandleEvent(_session, type, data)) {
+        return;
+    }
 
     if (type == u"message.created"_q || type == u"message.updated"_q) {
         const auto chatId = data.value("chat_id").toVariant().toLongLong();
