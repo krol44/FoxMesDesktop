@@ -1,3 +1,7 @@
+1.7.1 (21.09.26)
+
+- Fix bugs
+
 1.7.0 (21.09.26)
 
 - Disappearing Messages

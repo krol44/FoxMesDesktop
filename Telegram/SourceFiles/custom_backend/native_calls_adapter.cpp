@@ -105,6 +105,23 @@ namespace {
 	});
 }
 
+// One line per call form for the log: the bridge is the only place that sees
+// what the server actually answered, and upstream logs none of it.
+[[nodiscard]] QString Describe(const QJsonObject &data) {
+	auto versions = QStringList();
+	for (const auto &version : data.value("protocol").toObject()
+			.value("library_versions").toArray()) {
+		versions.push_back(version.toString());
+	}
+	return u"%1 id=%2 reason=%3 connections=%4 p2p=%5 versions=[%6]"_q
+		.arg(data.value("_").toString())
+		.arg(Number(data, "id"))
+		.arg(data.value("reason").toString())
+		.arg(data.value("connections").toArray().size())
+		.arg(data.value("p2p_allowed").toBool() ? 1 : 0)
+		.arg(versions.join(','));
+}
+
 [[nodiscard]] std::optional<MTPPhoneCall> ParseCall(const QJsonObject &data) {
 	const auto type = data.value("_").toString();
 	const auto id = MTP_long(Number(data, "id"));
@@ -215,16 +232,36 @@ namespace {
 // The bridge answers with a contract error string; upstream shows anything it
 // does not recognise verbatim, so the ones it does recognise must come through
 // untouched and the rest must not reach the user as server jargon.
-[[nodiscard]] QString ErrorText(const QJsonDocument &doc, const QString &error) {
+[[nodiscard]] QString ErrorText(
+		const QJsonDocument &doc,
+		const QString &error,
+		int status) {
 	const auto code = doc.isObject()
 		? doc.object().value("code").toString()
 		: QString();
-	if (code == u"call_busy"_q) {
+	if (status == 404) {
+		// The call is already gone: it timed out, the other side hung up, or
+		// this client outlived its own call. Upstream ends the call on an
+		// empty error and says nothing - and there is nothing to say, the
+		// call is over either way. A box with the server's own words here was
+		// the "call not found" the user saw.
+		return QString();
+	} else if (code == u"call_busy"_q) {
 		return code;
+	} else if (code == u"call_version_mismatch"_q) {
+		// No call library version the two builds share. Upstream already has
+		// a box for "their app is too old", which is what this is.
+		return u"PARTICIPANT_VERSION_OUTDATED"_q;
 	} else if (code == u"call_peer_unsupported"_q) {
 		// Upstream already has a box for "their app cannot take calls", and
 		// no FoxMes Desktop on the other side is exactly that case.
 		return u"PARTICIPANT_VERSION_OUTDATED"_q;
+	} else if (code == u"call_peer_offline"_q) {
+		// None of their devices is connected, and without push nothing would
+		// ring. Upstream has no string for this; the server sends one ready
+		// to show, and upstream shows an unknown error text verbatim.
+		const auto message = doc.object().value("message").toString();
+		return message.isEmpty() ? code : message;
 	} else if (code == u"call_peer_refuses"_q) {
 		// Every device of theirs has "Accept calls" switched off. Upstream
 		// says this as a privacy setting, which is what the switch is.
@@ -237,16 +274,46 @@ namespace {
 	return (session && Enabled()) ? &ClientFor(session) : nullptr;
 }
 
+// The protocol of this device as the server wants it. Both ends of a call send
+// it: the version of the call library has to exist on both, and the desktop
+// and the phone do not register the same set.
+[[nodiscard]] QJsonObject ProtocolJson(const MTPPhoneCallProtocol &protocol) {
+	const auto &fields = protocol.c_phoneCallProtocol();
+	auto versions = QJsonArray();
+	for (const auto &version : fields.vlibrary_versions().v) {
+		versions.push_back(QString::fromUtf8(version.v));
+	}
+	return QJsonObject{
+		{"min_layer", fields.vmin_layer().v},
+		{"max_layer", fields.vmax_layer().v},
+		{"library_versions", versions},
+		{"udp_p2p", fields.is_udp_p2p()},
+		{"udp_reflector", fields.is_udp_reflector()},
+	};
+}
+
 void AnswerCall(
+		const char *what,
 		const QJsonDocument &doc,
 		const QString &error,
+		int status,
 		const Done &done,
 		const Fail &fail) {
 	if (!error.isEmpty()) {
+		LOG(("FoxMes Call: %1 failed, status %2, error '%3', body %4").arg(
+			QString::fromLatin1(what),
+			QString::number(status),
+			error,
+			QString::fromUtf8(doc.toJson(QJsonDocument::Compact))));
 		if (fail) {
-			fail(ErrorText(doc, error));
+			fail(ErrorText(doc, error, status));
 		}
 		return;
+	}
+	if (doc.isObject()) {
+		LOG(("FoxMes Call: %1 -> %2").arg(
+			QString::fromLatin1(what),
+			Describe(doc.object().value("call").toObject())));
 	}
 	const auto call = doc.isObject()
 		? ParseCall(doc.object().value("call").toObject())
@@ -279,18 +346,7 @@ void RequestCall(
 		}
 		return;
 	}
-	const auto &fields = protocol.c_phoneCallProtocol();
-	auto versions = QJsonArray();
-	for (const auto &version : fields.vlibrary_versions().v) {
-		versions.push_back(QString::fromUtf8(version.v));
-	}
-	const auto payload = QJsonObject{
-		{"min_layer", fields.vmin_layer().v},
-		{"max_layer", fields.vmax_layer().v},
-		{"library_versions", versions},
-		{"udp_p2p", fields.is_udp_p2p()},
-		{"udp_reflector", fields.is_udp_reflector()},
-	};
+	const auto payload = ProtocolJson(protocol);
 	const auto hash = Copy(gaHash);
 	const auto weak = base::make_weak(session);
 	// A call is placed from an open private chat, and the server needs that
@@ -314,8 +370,8 @@ void RequestCall(
 			video,
 			payload,
 			QUuid::createUuid().toString(QUuid::WithoutBraces),
-			[=](QJsonDocument doc, QString error, int) {
-				AnswerCall(doc, error, done, fail);
+			[=](QJsonDocument doc, QString error, int status) {
+				AnswerCall("request", doc, error, status, done, fail);
 			});
 	});
 }
@@ -329,10 +385,10 @@ void ReceivedCall(
 	if (!client) {
 		return;
 	}
-	client->callReceived(qint64(callId), [=](QJsonDocument doc, QString error, int) {
+	client->callReceived(qint64(callId), [=](QJsonDocument doc, QString error, int status) {
 		if (!error.isEmpty()) {
 			if (fail) {
-				fail(ErrorText(doc, error));
+				fail(ErrorText(doc, error, status));
 			}
 		} else if (done) {
 			done();
@@ -351,11 +407,13 @@ void AcceptCall(
 	if (!client) {
 		return;
 	}
-	// The protocol travels with the request that created the call; both sides
-	// already agreed on it, and re-stating it here would be a second source.
-	client->callAccept(qint64(callId), Copy(gb), [=](QJsonDocument doc, QString error, int) {
-		AnswerCall(doc, error, done, fail);
-	});
+	client->callAccept(
+		qint64(callId),
+		Copy(gb),
+		ProtocolJson(protocol),
+		[=](QJsonDocument doc, QString error, int status) {
+			AnswerCall("accept", doc, error, status, done, fail);
+		});
 }
 
 void ConfirmCall(
@@ -374,8 +432,8 @@ void ConfirmCall(
 		qint64(callId),
 		Copy(ga),
 		qint64(keyFingerprint),
-		[=](QJsonDocument doc, QString error, int) {
-			AnswerCall(doc, error, done, fail);
+		[=](QJsonDocument doc, QString error, int status) {
+			AnswerCall("confirm", doc, error, status, done, fail);
 		});
 }
 
@@ -393,6 +451,10 @@ void DiscardCall(
 		}
 		return;
 	}
+	LOG(("FoxMes Call: discard id=%1 reason=%2 duration=%3").arg(
+		QString::number(qint64(callId)),
+		ReasonText(reason),
+		QString::number(duration)));
 	// Upstream settles its final state on either outcome: a hang-up the server
 	// never heard still ends the call on this side.
 	client->callDiscard(
@@ -416,10 +478,10 @@ void SendSignalingData(
 	if (!client) {
 		return;
 	}
-	client->callSignaling(qint64(callId), data, [=](QJsonDocument doc, QString error, int) {
+	client->callSignaling(qint64(callId), data, [=](QJsonDocument doc, QString error, int status) {
 		if (!error.isEmpty()) {
 			if (fail) {
-				fail(ErrorText(doc, error));
+				fail(ErrorText(doc, error, status));
 			}
 		} else if (done) {
 			done(true);
@@ -476,22 +538,23 @@ void RequestCallConfig(
 
 namespace {
 
-// Accepting calls is a property of this device, so the state is per session and
-// dies with it. It starts as "accepts" and is corrected by the first answer:
-// the switch has to draw something before the request comes back, and a device
-// that has never been touched does accept calls.
-struct AcceptCallsState {
-	rpl::variable<bool> value = true;
+// Both switches are properties of this device, so the state is per session and
+// dies with it. The defaults are the ones the server answers for a device that
+// has never been touched: it accepts calls, and it keeps media on the relay.
+// They have to draw something before the first answer comes back.
+struct CallDeviceState {
+	rpl::variable<bool> acceptCalls = true;
+	rpl::variable<bool> allowP2P = false;
 	bool requested = false;
 };
 
-base::flat_map<not_null<Main::Session*>, std::unique_ptr<AcceptCallsState>> gAcceptCalls;
+base::flat_map<not_null<Main::Session*>, std::unique_ptr<CallDeviceState>> gCallDevice;
 
-[[nodiscard]] AcceptCallsState &AcceptCallsFor(not_null<Main::Session*> session) {
-	auto &state = gAcceptCalls[session];
+[[nodiscard]] CallDeviceState &CallDeviceFor(not_null<Main::Session*> session) {
+	auto &state = gCallDevice[session];
 	if (!state) {
-		state = std::make_unique<AcceptCallsState>();
-		session->lifetime().add([session] { gAcceptCalls.remove(session); });
+		state = std::make_unique<CallDeviceState>();
+		session->lifetime().add([session] { gCallDevice.remove(session); });
 	}
 	if (!state->requested) {
 		state->requested = true;
@@ -502,11 +565,15 @@ base::flat_map<not_null<Main::Session*>, std::unique_ptr<AcceptCallsState>> gAcc
 				if (!strong || !error.isEmpty() || !doc.isObject()) {
 					return;
 				}
-				const auto i = gAcceptCalls.find(not_null(strong));
-				if (i != end(gAcceptCalls)) {
-					i->second->value = doc.object()
+				const auto i = gCallDevice.find(not_null(strong));
+				if (i != end(gCallDevice)) {
+					const auto data = doc.object();
+					i->second->acceptCalls = data
 						.value("accept_calls")
 						.toBool(true);
+					i->second->allowP2P = data
+						.value("p2p_allowed")
+						.toBool(false);
 				}
 			});
 		}
@@ -514,22 +581,42 @@ base::flat_map<not_null<Main::Session*>, std::unique_ptr<AcceptCallsState>> gAcc
 	return *state;
 }
 
+void SaveCallDevice(
+		not_null<Main::Session*> session,
+		const QJsonObject &settings) {
+	if (const auto client = ClientOrNull(session)) {
+		client->callSettingsUpdate(
+			settings,
+			[](QJsonDocument, QString, int) {});
+	}
+}
+
 } // namespace
 
 rpl::producer<bool> AcceptCallsValue(not_null<Main::Session*> session) {
-	return AcceptCallsFor(session).value.value();
+	return CallDeviceFor(session).acceptCalls.value();
 }
 
 bool AcceptCallsCurrent(not_null<Main::Session*> session) {
-	return AcceptCallsFor(session).value.current();
+	return CallDeviceFor(session).acceptCalls.current();
 }
 
 void SetAcceptCalls(not_null<Main::Session*> session, bool accept) {
-	auto &state = AcceptCallsFor(session);
-	state.value = accept;
-	if (const auto client = ClientOrNull(session)) {
-		client->callSettingsUpdate(accept, [](QJsonDocument, QString, int) {});
-	}
+	CallDeviceFor(session).acceptCalls = accept;
+	SaveCallDevice(session, QJsonObject{ { "accept_calls", accept } });
+}
+
+rpl::producer<bool> AllowP2PValue(not_null<Main::Session*> session) {
+	return CallDeviceFor(session).allowP2P.value();
+}
+
+bool AllowP2PCurrent(not_null<Main::Session*> session) {
+	return CallDeviceFor(session).allowP2P.current();
+}
+
+void SetAllowP2P(not_null<Main::Session*> session, bool allow) {
+	CallDeviceFor(session).allowP2P = allow;
+	SaveCallDevice(session, QJsonObject{ { "p2p_allowed", allow } });
 }
 
 MTPMessage BuildCallMessage(
@@ -599,17 +686,23 @@ void LoadHistory(
 		}
 		const auto me = client->meId();
 		auto messages = QVector<MTPMessage>();
+		auto skipped = 0;
 		for (const auto &entry : data.value("calls").toArray()) {
 			const auto call = entry.toObject();
-			const auto chatId = call.value("chat_id").toVariant().toLongLong();
-			const auto history = target->historyForChat(chatId);
+			const auto peerId = call.value("peer_id").toVariant().toLongLong();
 			const auto messageId = call.value("message_id").toVariant().toLongLong();
-			if (!history || messageId <= 0 || messageId > INT32_MAX) {
+			if (peerId <= 0 || messageId <= 0 || messageId > INT32_MAX) {
+				++skipped;
 				continue;
 			}
+			// The row is addressed by the other participant, not by the chat:
+			// a call with somebody whose dialog has not been loaded yet has no
+			// history object, and looking the chat up first dropped the row
+			// silently.
+			const auto peer = peerFromUser(UserId(peerId));
 			const auto outgoing = call.value("outgoing").toBool();
 			messages.push_back(BuildCallMessage(
-				history->peer->id,
+				peer,
 				outgoing,
 				MsgId(int32(messageId)),
 				outgoing ? me : call.value("peer_id").toVariant().toLongLong(),
@@ -618,6 +711,10 @@ void LoadHistory(
 				call.value("duration").toInt(),
 				call.value("video").toBool(),
 				TimeId(call.value("date").toInt())));
+		}
+		if (skipped > 0) {
+			LOG(("FoxMes: %1 of %2 calls have no message to show.").arg(
+				skipped).arg(data.value("calls").toArray().size()));
 		}
 		const auto complete = (messages.size() < limit);
 		const auto count = int(messages.size());
@@ -675,6 +772,7 @@ bool HandleEvent(
 				MTP_bytes(Bytes(data, "data"))));
 		return true;
 	}
+	LOG(("FoxMes Call: event %1 %2").arg(type, Describe(data)));
 	const auto call = ParseCall(data);
 	if (!call) {
 		return true;

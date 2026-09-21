@@ -900,16 +900,23 @@ void ShowCallsBox(
 		Ui::AddDivider(groupCalls->entity());
 		Ui::AddSkip(groupCalls->entity());
 
-		const auto button = AddCreateCallButton(
-			box->verticalLayout(),
-			window,
-			crl::guard(box, [=] { box->closeBox(); }));
-		button->events(
-		) | rpl::filter([=](not_null<QEvent*> e) {
-			return (e->type() == QEvent::Enter);
-		}) | rpl::on_next([=] {
-			state->callsDelegate.peerListMouseLeftGeometry();
-		}, button->lifetime());
+		// FoxMes bridge: a conference call is a group call, and the bridge
+		// has no group calls - the entry would open a room nobody can join.
+		auto button = (Ui::SettingsButton*)nullptr;
+		if (!CustomBackend::Enabled()) {
+			button = AddCreateCallButton(
+				box->verticalLayout(),
+				window,
+				crl::guard(box, [=] { box->closeBox(); }));
+		}
+		if (button) {
+			button->events(
+			) | rpl::filter([=](not_null<QEvent*> e) {
+				return (e->type() == QEvent::Enter);
+			}) | rpl::on_next([=] {
+				state->callsDelegate.peerListMouseLeftGeometry();
+			}, button->lifetime());
+		}
 
 		const auto content = box->addRow(
 			object_ptr<PeerListContent>(box, &state->callsController),
@@ -955,7 +962,7 @@ void ShowCallsBox(
 			return true;
 		});
 
-		if (highlightStartCall) {
+		if (highlightStartCall && button) {
 			box->showFinishes(
 			) | rpl::take(1) | rpl::on_next([=] {
 				Settings::HighlightWidget(button);

@@ -1477,6 +1477,7 @@ HistoryItem *NativeBridge::createPendingFileMessage(
         ReplyTarget replyTo,
         const LocalAttachment &local,
         uint64 groupedId,
+        int mediaTtlSeconds,
         std::shared_ptr<Data::DocumentMedia> &keepMedia) {
     if (!history) {
         return nullptr;
@@ -1485,6 +1486,15 @@ HistoryItem *NativeBridge::createPendingFileMessage(
     flags |= MessageFlag::HasFromId;
     if (replyTo) {
         flags |= MessageFlag::HasReplyInfo;
+    }
+    // The optimistic bubble is what the sender looks at for the whole upload,
+    // and a disappearing one has to look disappearing from the first frame:
+    // the ttl is what makes upstream cover the media with the spoiler and draw
+    // "tap to view". Without it the send was an ordinary bubble that only
+    // turned blurred after a restart, because updateSentMedia() keeps the
+    // local media's own ttl and the arriving DTO could not add one.
+    if (mediaTtlSeconds != 0) {
+        flags |= MessageFlag::MediaIsUnread;
     }
     const auto localId = _session->data().nextLocalMessageId();
     const auto attachment = AttachmentObjectFromUpload(
@@ -1513,7 +1523,12 @@ HistoryItem *NativeBridge::createPendingFileMessage(
         .replyTo = ReplyToFromServerId(history, replyTo),
         .date = base::unixtime::now(),
         .groupedId = groupedId,
-    }, caption, MediaFromAttachment(_session, attachment, local)).get();
+    }, caption, MediaFromAttachment(
+        _session,
+        attachment,
+        local,
+        std::nullopt,
+        mediaTtlSeconds)).get();
 }
 
 void NativeBridge::rememberPendingSend(
@@ -2662,8 +2677,14 @@ std::optional<NativeBridge::PreparedMessage> NativeBridge::prepareMessage(
     // read boundary must not decide it either - reading the chat is not
     // opening the media - so the lifecycle answers instead: not opened yet
     // means not consumed yet.
-    if (!(mtpFlags & Flag::f_out)
-        && !ephemeral.isEmpty()
+    //
+    // The OUTGOING copy carries it for as long, and MTProto sets it there too:
+    // it is the sender's "not looked at yet". It is also what arms the item -
+    // the constructor only creates the self-destruct component when ttl media
+    // is unread (history_item.cpp) - so without it the sender's bubble had
+    // nothing to burn and outlived the recipient's, which is the whole reason
+    // an opened photo kept hanging around blurred on the other device.
+    if (!ephemeral.isEmpty()
         && ephemeral.value("state").toString() == u"pending"_q) {
         mtpFlags |= Flag::f_media_unread;
     }
@@ -3089,11 +3110,24 @@ void NativeBridge::applyEphemeralState(
     if (ephemeral.isEmpty()) {
         return;
     }
-    // "Once" is not a countdown: upstream clears it when the viewer closes,
-    // and a deadline passed for it would expire the bubble on the spot
-    // (ttlSecondsSingleView).
-    if (ephemeral.value("state").toString() != u"opened"_q
-        || ephemeral.value("mode").toString() != u"timer"_q) {
+    const auto state = ephemeral.value("state").toString();
+    if (state == u"expired"_q) {
+        item->clearMediaAsExpired();
+        return;
+    }
+    if (state != u"opened"_q) {
+        return;
+    }
+    // "Once" is not a countdown: upstream clears it when the viewer closes.
+    // Only the SENDER's copy is cleared from the lifecycle here - his own
+    // screen has no other signal that the media is spent, and a reload has to
+    // leave him the tombstone rather than a bubble he could tap open again.
+    // The viewer's copy is never touched from here: ttlSecondsSingleView would
+    // expire it on the spot, under the viewer he has open right now.
+    if (ephemeral.value("mode").toString() != u"timer"_q) {
+        if (item->out()) {
+            item->clearMediaAsExpired();
+        }
         return;
     }
     const auto ttl = ephemeral.value("ttl_seconds").toInt();
@@ -3101,6 +3135,38 @@ void NativeBridge::applyEphemeralState(
     if (ttl > 0 && deadline > 0) {
         item->applyMediaContentsRead(deadline - ttl);
     }
+}
+
+// applyEphemeralViewed is updateReadMessagesContents as the other device sees
+// it: the sender learns that the recipient opened the media, and from that
+// moment his own copy lives on the same clock as theirs.
+//
+// The body is upstream's own (Api::Updates::applyUpdate, mtpc_
+// updateReadMessagesContents): clear the unread-media flag, repaint, hand the
+// read date to applyMediaContentsRead. It decides the rest - "once" burns on
+// the spot, a timer is armed at readDate + ttl - so the two devices expire
+// from the same instant without the bridge computing anything of its own.
+//
+// The viewer never gets this event: the server sends it to everyone but them,
+// exactly as MTProto does, because applying it to their own copy would clear
+// a "once" photo out from under the open viewer.
+void NativeBridge::applyEphemeralViewed(
+        HistoryItem *item,
+        const QJsonObject &message) {
+    if (!item) {
+        return;
+    }
+    const auto ephemeral = message.value("ephemeral").toObject();
+    if (ephemeral.isEmpty()) {
+        return;
+    }
+    if (!item->isUnreadMedia() && !item->isUnreadMention()) {
+        return;
+    }
+    item->markMediaAndMentionRead();
+    _session->data().requestItemRepaint(item);
+    item->applyMediaContentsRead(unixTime(
+        ephemeral.value("opened_at").toString()));
 }
 
 // MarkEphemeralViewed is the bridge's messages.readMessageContents: the one
@@ -3933,6 +3999,7 @@ void NativeBridge::sendFiles(
             replyTo,
             local,
             groupedId,
+            options.mediaTtlSeconds,
             keepMedia);
         if (!item) {
             for (const auto localId : localIds) {
@@ -6082,6 +6149,26 @@ void NativeBridge::handleEvent(const QJsonObject &event) {
                         history->peer,
                         MsgId(int32(messageId)))) {
                     applyMessagePayloadState(item, data);
+                    _session->data().sendHistoryChangeNotifications();
+                }
+            }
+        }
+    } else if (type == u"message.viewed"_q || type == u"message.expired"_q) {
+        // Lifecycle patches, not message cards: the item is already here and
+        // upstream has a method for each of them. A message that is not loaded
+        // needs neither - the history page carries the state with it.
+        const auto chatId = data.value("chat_id").toVariant().toLongLong();
+        const auto messageId = data.value("id").toVariant().toLongLong();
+        if (chatId > 0 && messageId > 0 && messageId <= INT32_MAX) {
+            if (const auto history = historyForChatId(chatId)) {
+                if (const auto item = _session->data().message(
+                        history->peer,
+                        MsgId(int32(messageId)))) {
+                    if (type == u"message.viewed"_q) {
+                        applyEphemeralViewed(item, data);
+                    } else {
+                        item->clearMediaAsExpired();
+                    }
                     _session->data().sendHistoryChangeNotifications();
                 }
             }

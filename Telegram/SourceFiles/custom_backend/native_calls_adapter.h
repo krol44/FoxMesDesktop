@@ -111,6 +111,14 @@ void ClearHistory(not_null<Main::Session*> session, Plain done);
 [[nodiscard]] bool AcceptCallsCurrent(not_null<Main::Session*> session);
 void SetAcceptCalls(not_null<Main::Session*> session, bool accept);
 
+// The direct path is off unless both devices allow it: it shows the other side
+// this machine's address, and one side agreeing to that is not enough. With it
+// off the call always goes through fxl-rtc.
+[[nodiscard]] rpl::producer<bool> AllowP2PValue(
+	not_null<Main::Session*> session);
+[[nodiscard]] bool AllowP2PCurrent(not_null<Main::Session*> session);
+void SetAllowP2P(not_null<Main::Session*> session, bool allow);
+
 // Live updates arrive as WebSocket events rather than MTProto updates. The
 // bridge turns them back into the update upstream expects and feeds them to
 // Calls::Instance, which is why the incoming half needs no upstream hook at

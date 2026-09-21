@@ -909,9 +909,17 @@ void ApiClient::callReceived(qint64 callId, Callback done) {
     jsonRequest("POST", QString("/calls/%1/received").arg(callId), QJsonDocument(QJsonObject{}), std::move(done));
 }
 
-void ApiClient::callAccept(qint64 callId, const QByteArray &gb, Callback done) {
+void ApiClient::callAccept(
+        qint64 callId,
+        const QByteArray &gb,
+        const QJsonObject &protocol,
+        Callback done) {
+    // The protocol of the answering device travels with the answer: the server
+    // needs both lists to pick a call library version that exists on both
+    // sides, and the two builds do not register the same set.
     jsonRequest("POST", QString("/calls/%1/accept").arg(callId), QJsonDocument(QJsonObject{
         {"g_b", QString::fromLatin1(gb.toBase64())},
+        {"protocol", protocol},
     }), std::move(done));
 }
 
@@ -947,10 +955,10 @@ void ApiClient::callSettings(Callback done) {
     jsonRequest("GET", u"/calls/settings"_q, QJsonDocument(), std::move(done));
 }
 
-void ApiClient::callSettingsUpdate(bool acceptCalls, Callback done) {
-    jsonRequest("PUT", u"/calls/settings"_q, QJsonDocument(QJsonObject{
-        {"accept_calls", acceptCalls},
-    }), std::move(done));
+void ApiClient::callSettingsUpdate(
+        const QJsonObject &settings,
+        Callback done) {
+    jsonRequest("PUT", u"/calls/settings"_q, QJsonDocument(settings), std::move(done));
 }
 
 void ApiClient::callHistory(qint64 offsetId, int limit, Callback done) {

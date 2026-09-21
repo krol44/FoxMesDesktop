@@ -312,7 +312,11 @@ public:
         const QString &operationId,
         Callback done);
     void callReceived(qint64 callId, Callback done);
-    void callAccept(qint64 callId, const QByteArray &gb, Callback done);
+    void callAccept(
+        qint64 callId,
+        const QByteArray &gb,
+        const QJsonObject &protocol,
+        Callback done);
     void callConfirm(
         qint64 callId,
         const QByteArray &ga,
@@ -325,7 +329,7 @@ public:
         Callback done);
     void callSignaling(qint64 callId, const QByteArray &data, Callback done);
     void callSettings(Callback done);
-    void callSettingsUpdate(bool acceptCalls, Callback done);
+    void callSettingsUpdate(const QJsonObject &settings, Callback done);
     void callHistory(qint64 offsetId, int limit, Callback done);
     void callHistoryClear(Callback done);
     void markDelivered(

@@ -425,6 +425,29 @@ void BuildOtherSection(SectionBuilder &builder) {
 		}, acceptCalls->lifetime());
 	}
 
+	// FoxMes bridge: the direct path is a per-device switch too, and it only
+	// takes effect when both devices allow it - the server ands the two. With
+	// it off every call goes through fxl-rtc, which is the default.
+	if (bridged) {
+		const auto peerToPeer = builder.addButton({
+			.id = u"calls/peer-to-peer"_q,
+			.title = tr::lng_settings_calls_peer_to_peer_title(),
+			.st = &st::settingsButtonNoIcon,
+			.toggled = CustomBackend::Calls::AllowP2PValue(session)
+				| rpl::type_erased,
+			.keywords = { u"p2p"_q, u"peer"_q, u"direct"_q },
+			.highlight = { .rippleShape = true },
+		});
+		if (peerToPeer) {
+			peerToPeer->toggledChanges(
+			) | rpl::filter([=](bool value) {
+				return value != CustomBackend::Calls::AllowP2PCurrent(session);
+			}) | rpl::on_next([=](bool value) {
+				CustomBackend::Calls::SetAllowP2P(session, value);
+			}, peerToPeer->lifetime());
+		}
+	}
+
 	builder.addButton({
 		.id = u"calls/system-prefs"_q,
 		.title = tr::lng_settings_call_open_system_prefs(),
@@ -442,6 +465,9 @@ void BuildOtherSection(SectionBuilder &builder) {
 	});
 
 	builder.addSkip();
+	if (bridged) {
+		builder.addDividerText(tr::lng_settings_peer_to_peer_about());
+	}
 }
 
 void BuildCallsSectionContent(

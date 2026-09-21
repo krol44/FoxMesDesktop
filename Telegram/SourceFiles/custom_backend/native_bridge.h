@@ -452,6 +452,9 @@ private:
     void applyMessagePayloadState(HistoryItem *item, const QJsonObject &message);
     void applyMessageReactions(HistoryItem *item, const QJsonObject &message);
 public:
+    void applyEphemeralViewed(
+        HistoryItem *item,
+        const QJsonObject &message);
     void applyEphemeralState(HistoryItem *item, const QJsonObject &message);
 private:
     void reloadMessageReactions(History *history, qint64 messageId);
@@ -562,6 +565,7 @@ private:
         ReplyTarget replyTo,
         const LocalAttachment &local,
         uint64 groupedId,
+        int mediaTtlSeconds,
         std::shared_ptr<Data::DocumentMedia> &keepMedia);
     void rememberPendingSend(
         not_null<HistoryItem*> item,
