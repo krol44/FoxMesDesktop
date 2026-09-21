@@ -82,8 +82,15 @@ namespace {
 		MTP_string(data.value("password").toString()));
 }
 
-[[nodiscard]] MTPPhoneCallDiscardReason ParseReason(const QString &reason) {
-	if (reason == u"missed"_q) {
+[[nodiscard]] MTPPhoneCallDiscardReason ParseReason(
+		const QString &reason,
+		const QString &slug = QString()) {
+	if (reason == u"migrate_conference_call"_q && !slug.isEmpty()) {
+		// The call moved into a group call; upstream finds it by the slug and
+		// joins (Call::finishByMigration).
+		return MTP_phoneCallDiscardReasonMigrateConferenceCall(
+			MTP_string(slug));
+	} else if (reason == u"missed"_q) {
 		return MTP_phoneCallDiscardReasonMissed();
 	} else if (reason == u"busy"_q) {
 		return MTP_phoneCallDiscardReasonBusy();
@@ -100,8 +107,19 @@ namespace {
 		return u"busy"_q;
 	}, [](const MTPDphoneCallDiscardReasonDisconnect &) {
 		return u"disconnect"_q;
+	}, [](const MTPDphoneCallDiscardReasonMigrateConferenceCall &) {
+		return u"migrate_conference_call"_q;
 	}, [](const auto &) {
 		return u"hangup"_q;
+	});
+}
+
+[[nodiscard]] QString ReasonSlug(const MTPPhoneCallDiscardReason &reason) {
+	return reason.match([](
+			const MTPDphoneCallDiscardReasonMigrateConferenceCall &data) {
+		return qs(data.vslug());
+	}, [](const auto &) {
+		return QString();
 	});
 }
 
@@ -206,6 +224,11 @@ namespace {
 		}
 		if (data.value("p2p_allowed").toBool()) {
 			flags |= Flag::f_p2p_allowed;
+		}
+		if (data.value("conference_supported").toBool()) {
+			// Shows "Add People" in the call panel: the server can take the
+			// call on as a group call.
+			flags |= Flag::f_conference_supported;
 		}
 		auto connections = QVector<MTPPhoneConnection>();
 		for (const auto &connection : data.value("connections").toArray()) {
@@ -461,6 +484,7 @@ void DiscardCall(
 		qint64(callId),
 		ReasonText(reason),
 		duration,
+		ReasonSlug(reason),
 		[=](QJsonDocument, QString, int) {
 			if (done) {
 				done();
@@ -652,6 +676,59 @@ MTPMessage BuildCallMessage(
 			MTP_long(callId),
 			ParseReason(reason),
 			MTP_int(duration)),
+		MTPMessageReactions(),
+		MTPint()); // ttl_period
+}
+
+MTPMessage BuildConferenceMessage(
+		PeerId peerId,
+		bool out,
+		MsgId messageId,
+		qint64 senderId,
+		const QJsonObject &call,
+		TimeId date) {
+	using Flag = MTPDmessageService::Flag;
+	auto flags = Flag::f_from_id | Flag();
+	if (out) {
+		flags |= Flag::f_out;
+	}
+	using ActionFlag = MTPDmessageActionConferenceCall::Flag;
+	auto actionFlags = MTPDmessageActionConferenceCall::Flags();
+	const auto state = call.value("state").toString();
+	const auto duration = call.value("duration").toInt();
+	if (state == u"missed"_q) {
+		actionFlags |= ActionFlag::f_missed;
+	} else if (state == u"active"_q) {
+		actionFlags |= ActionFlag::f_active;
+	} else if (state == u"ended"_q && duration > 0) {
+		actionFlags |= ActionFlag::f_duration;
+	}
+	if (call.value("video").toBool()) {
+		actionFlags |= ActionFlag::f_video;
+	}
+	auto participants = QVector<MTPPeer>();
+	for (const auto &id : call.value("participants").toArray()) {
+		const auto userId = id.toVariant().toLongLong();
+		if (userId > 0) {
+			participants.push_back(MTP_peerUser(MTP_long(userId)));
+		}
+	}
+	if (!participants.isEmpty()) {
+		actionFlags |= ActionFlag::f_other_participants;
+	}
+	return MTP_messageService(
+		MTP_flags(flags),
+		MTP_int(messageId.bare),
+		MTP_peerUser(MTP_long(senderId)),
+		peerToMTP(peerId),
+		MTPPeer(), // saved_peer_id
+		MTPMessageReplyHeader(),
+		MTP_int(date),
+		MTP_messageActionConferenceCall(
+			MTP_flags(actionFlags),
+			MTP_long(Number(call, "call_id")),
+			MTP_int(duration),
+			MTP_vector<MTPPeer>(std::move(participants))),
 		MTPMessageReactions(),
 		MTPint()); // ttl_period
 }

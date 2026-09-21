@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "mtproto/mtp_instance.h"
+#include "custom_backend/native_conference_adapter.h"
 #include "custom_backend/native_runtime.h"
 
 #include "mtproto/details/mtproto_dcenter.h"
@@ -1026,6 +1027,15 @@ void Instance::Private::sendRequest(
 		crl::time msCanWait,
 		bool needsLayer,
 		mtpRequestId afterRequestId) {
+	if (CustomBackend::Enabled()
+		&& CustomBackend::Conferences::Intercepts(request)) {
+		// FoxMes bridge: group call requests are answered by fxl-api and come
+		// back through processCallback, as if a DC had answered.
+		request->requestId = requestId;
+		storeRequest(requestId, request, std::move(callbacks));
+		CustomBackend::Conferences::Intercept(_instance, requestId, request);
+		return;
+	}
 	const auto session = getSession(shiftedDcId);
 
 	request->requestId = requestId;

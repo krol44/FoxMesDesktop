@@ -938,11 +938,28 @@ void ApiClient::callDiscard(
         qint64 callId,
         const QString &reason,
         int duration,
+        const QString &slug,
         Callback done) {
-    jsonRequest("POST", QString("/calls/%1/discard").arg(callId), QJsonDocument(QJsonObject{
+    auto body = QJsonObject{
         {"reason", reason},
         {"duration", duration},
-    }), std::move(done));
+    };
+    if (!slug.isEmpty()) {
+        body.insert("slug", slug);
+    }
+    jsonRequest("POST", QString("/calls/%1/discard").arg(callId), QJsonDocument(body), std::move(done));
+}
+
+void ApiClient::conferenceRequest(
+        const QByteArray &method,
+        const QString &path,
+        const QJsonObject &body,
+        Callback done) {
+    jsonRequest(
+        method,
+        path,
+        (method == "GET") ? QJsonDocument() : QJsonDocument(body),
+        std::move(done));
 }
 
 void ApiClient::callSignaling(qint64 callId, const QByteArray &data, Callback done) {

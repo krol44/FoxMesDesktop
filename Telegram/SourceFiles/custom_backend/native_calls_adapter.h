@@ -94,6 +94,19 @@ void RequestCallConfig(
 	bool video,
 	TimeId date);
 
+// An invitation to a group call: the same foxCall message, drawn as
+// messageActionConferenceCall. Its state changes while the call goes on -
+// ringing, joined, missed, over - and upstream reads that state from the
+// action flags (Data::ComputeCallData), so the server's "state" maps onto
+// exactly those flags.
+[[nodiscard]] MTPMessage BuildConferenceMessage(
+	PeerId peerId,
+	bool out,
+	MsgId messageId,
+	qint64 senderId,
+	const QJsonObject &call,
+	TimeId date);
+
 void LoadHistory(
 	not_null<Main::Session*> session,
 	MsgId offsetId,

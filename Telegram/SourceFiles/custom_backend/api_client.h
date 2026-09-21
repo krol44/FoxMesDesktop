@@ -326,12 +326,21 @@ public:
         qint64 callId,
         const QString &reason,
         int duration,
+        const QString &slug,
         Callback done);
     void callSignaling(qint64 callId, const QByteArray &data, Callback done);
     void callSettings(Callback done);
     void callSettingsUpdate(const QJsonObject &settings, Callback done);
     void callHistory(qint64 offsetId, int limit, Callback done);
     void callHistoryClear(Callback done);
+    // Group calls. The conference adapter owns the paths and bodies: it
+    // answers upstream's phone.* requests one to one, and a method per route
+    // here would only repeat them.
+    void conferenceRequest(
+        const QByteArray &method,
+        const QString &path,
+        const QJsonObject &body,
+        Callback done);
     void markDelivered(
         qint64 chatId,
         const QList<qint64> &messageIds,

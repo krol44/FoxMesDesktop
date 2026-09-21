@@ -900,15 +900,10 @@ void ShowCallsBox(
 		Ui::AddDivider(groupCalls->entity());
 		Ui::AddSkip(groupCalls->entity());
 
-		// FoxMes bridge: a conference call is a group call, and the bridge
-		// has no group calls - the entry would open a room nobody can join.
-		auto button = (Ui::SettingsButton*)nullptr;
-		if (!CustomBackend::Enabled()) {
-			button = AddCreateCallButton(
-				box->verticalLayout(),
-				window,
-				crl::guard(box, [=] { box->closeBox(); }));
-		}
+		const auto button = AddCreateCallButton(
+			box->verticalLayout(),
+			window,
+			crl::guard(box, [=] { box->closeBox(); }));
 		if (button) {
 			button->events(
 			) | rpl::filter([=](not_null<QEvent*> e) {

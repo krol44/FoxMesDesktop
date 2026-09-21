@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "calls/calls_instance.h"
 #include "core/application.h"
 #include "boxes/peer_lists_box.h"
+#include "custom_backend/native_runtime.h"
 #include "data/data_user.h"
 #include "data/data_channel.h"
 #include "data/data_session.h"
@@ -482,7 +483,10 @@ ConfInviteController::ConfInviteController(
 , _st(st)
 , _alreadyIn(std::move(alreadyIn))
 , _prioritize(std::move(prioritize))
-, _shareLink(std::move(shareLink)) {
+, _shareLink(CustomBackend::Enabled()
+	// FoxMes bridge: calls are joined by invitation only, no public links.
+	? Fn<void()>()
+	: std::move(shareLink)) {
 	if (!_shareLink) {
 		_skip.reserve(_prioritize.size());
 		for (const auto &user : _prioritize) {

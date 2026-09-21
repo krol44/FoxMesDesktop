@@ -6,6 +6,7 @@
 
 #include "custom_backend/api_client.h"
 #include "custom_backend/native_calls_adapter.h"
+#include "custom_backend/native_conference_adapter.h"
 #include "custom_backend/native_delete_adapter.h"
 #include "custom_backend/native_reactions_adapter.h"
 #include "custom_backend/native_runtime.h"
@@ -2765,6 +2766,19 @@ std::optional<NativeBridge::PreparedMessage> NativeBridge::prepareCallMessage(
         messageId)] = qMax<qint64>(
             message.value("revision").toVariant().toLongLong(),
             1);
+    if (call.value("conference").toBool()) {
+        return PreparedMessage{
+            .mtp = Calls::BuildConferenceMessage(
+                history->peer->id,
+                (senderId == client().meId()),
+                MsgId(int32(messageId)),
+                senderId,
+                call,
+                unixTime(message.value("created_at").toString())),
+            .messageId = MsgId(int32(messageId)),
+            .senderId = senderId,
+        };
+    }
     return PreparedMessage{
         .mtp = Calls::BuildCallMessage(
             history->peer->id,
@@ -2845,6 +2859,14 @@ HistoryItem *NativeBridge::applyMessage(
             // update can then leave the replacement detached from the block.
             auto prepared = prepareMessage(history, message);
             if (!prepared) {
+                return existing;
+            }
+            if (prepared->mtp.type() == mtpc_messageService) {
+                // A service record changes in place too: an invitation to a
+                // group call goes from ringing to joined to over.
+                existing->applyEdition(prepared->mtp.c_messageService());
+                applyMessagePayloadState(existing, message);
+                _seenMessages.emplace(SeenKey(chatId, messageId));
                 return existing;
             }
             existing->applyEdition(HistoryMessageEdition(
@@ -6110,6 +6132,9 @@ void NativeBridge::handleEvent(const QJsonObject &event) {
 		return;
 	}
 
+    if (Conferences::HandleEvent(_session, type, data)) {
+        return;
+    }
     if (Calls::HandleEvent(_session, type, data)) {
         return;
     }

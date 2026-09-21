@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "calls/group/calls_group_viewport.h"
 #include "calls/calls_emoji_fingerprint.h"
 #include "calls/calls_instance.h"
+#include "custom_backend/native_runtime.h"
 #include "data/data_channel.h"
 #include "data/data_chat.h"
 #include "data/data_user.h"
@@ -1904,7 +1905,8 @@ void Members::setupAddMember(not_null<GroupCall*> call) {
 		delete _addMemberButton.current();
 		_addMemberButton = addMember.data();
 		_layout->insert(baseIndex, std::move(addMember));
-		if (conference) {
+		// FoxMes bridge: calls are joined by invitation only, no public links.
+		if (conference && !CustomBackend::Enabled()) {
 			auto shareLink = Settings::CreateButtonWithIcon(
 				_layout.get(),
 				tr::lng_group_invite_share(),

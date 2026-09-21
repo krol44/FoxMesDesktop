@@ -387,16 +387,18 @@ void Call::startOutgoing() {
 		handleRequestError(error);
 	};
 	if (CustomBackend::Enabled()) {
+		// Unlike _api requests, bridge requests outlive the call: every
+		// callback below is guarded, a late reply must not reach a dead call.
 		CustomBackend::Calls::RequestCall(
 			_user,
 			_gaHash,
 			(_videoCapture != nullptr),
 			protocol,
-			[=](const MTPPhoneCall &phoneCall) {
+			crl::guard(this, [=](const MTPPhoneCall &phoneCall) {
 				setState(State::Waiting);
 				requested(phoneCall);
-			},
-			failed);
+			}),
+			crl::guard(this, failed));
 		return;
 	}
 	_api.request(MTPphone_RequestCall(
@@ -435,8 +437,8 @@ void Call::startIncoming() {
 		CustomBackend::Calls::ReceivedCall(
 			&_user->session(),
 			_id,
-			received,
-			failed);
+			crl::guard(this, received),
+			crl::guard(this, failed));
 		return;
 	}
 	_api.request(MTPphone_ReceivedCall(
@@ -547,8 +549,8 @@ void Call::actuallyAnswer() {
 			_id,
 			_gb,
 			protocol,
-			accepted,
-			failed);
+			crl::guard(this, accepted),
+			crl::guard(this, failed));
 		return;
 	}
 	_api.request(MTPphone_AcceptCall(
@@ -746,8 +748,8 @@ void Call::sendSignalingData(const QByteArray &data) {
 			&_user->session(),
 			_id,
 			data,
-			sent,
-			failed);
+			crl::guard(this, sent),
+			crl::guard(this, failed));
 		return;
 	}
 	_api.request(MTPphone_SendSignalingData(
@@ -1063,8 +1065,8 @@ void Call::confirmAcceptedCall(const MTPDphoneCallAccepted &call) {
 			_ga,
 			_keyFingerprint,
 			protocol,
-			confirmed,
-			failed);
+			crl::guard(this, confirmed),
+			crl::guard(this, failed));
 		return;
 	}
 	_api.request(MTPphone_ConfirmCall(
