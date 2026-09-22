@@ -382,8 +382,11 @@ void DownloadAsset(
     FetchAsset(url, [weakSession, id, emoji](
             bool ok,
             const QByteArray &body,
-            const QString&) {
-        const auto normalized = ok
+            const QString &contentType) {
+        // A video sticker is stored on fxl-cdn as WebM already: the source is
+        // the animation itself and has no still to normalize.
+        const auto video = ok && contentType.startsWith(u"video/webm"_q);
+        const auto normalized = (ok && !video)
             ? NormalizeToSquareWebp(body)
             : QByteArray();
         const auto i = PendingAssets().find(id);
@@ -391,9 +394,12 @@ void DownloadAsset(
             return ok;
         }
         i->second.source = normalized;
+        if (video) {
+            i->second.animated = body;
+        }
         i->second.sourceDone = true;
         BuildDownloadedAsset(weakSession, id, emoji);
-        return ok && !normalized.isEmpty();
+        return ok && (video || !normalized.isEmpty());
     });
 
     FetchAsset(AnimatedUrl(url), [weakSession, id, emoji](
@@ -407,7 +413,10 @@ void DownloadAsset(
             : QByteArray();
         const auto i = PendingAssets().find(id);
         if (i != PendingAssets().end()) {
-            i->second.animated = webm;
+            // Never clears: a WebM source may have filled it already.
+            if (!webm.isEmpty()) {
+                i->second.animated = webm;
+            }
             i->second.animatedDone = true;
             BuildDownloadedAsset(weakSession, id, emoji);
         } else if (ok && !webm.isEmpty()) {

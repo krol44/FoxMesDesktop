@@ -226,6 +226,7 @@ public:
     // than through peerLoaded(): an event must not depend on whether the peer
     // finished loading. Null when the chat is unknown.
     [[nodiscard]] History *historyForChat(qint64 chatId) const;
+    [[nodiscard]] bool hasChat(PeerId peerId) const;
     // Resolves the FoxMes chat id of a history, creating the direct chat when
     // it does not exist yet. Public so adapters can address a chat without
     // keeping a second copy of that lookup. An id of 0 means the chat could
@@ -398,6 +399,7 @@ private:
     PeerData *peerForChat(const QJsonObject &chat);
     void applyChatConfig(PeerData *peer, const QJsonObject &chat);
     void applyChats(const QJsonDocument &doc);
+    void removeChat(qint64 chatId);
     void rebuildPinnedOrder();
     void applyChatSettingsPatch(const QJsonObject &data);
     void loadCachedChats();
@@ -635,6 +637,9 @@ private:
     // the pending entry a replay replaces, and dies with the entry once the
     // send finally lands.
     std::unordered_map<QString, int> _sendReplays;
+    // Server dialog membership is independent of message history. Remove both
+    // mappings before native deletion so list updates cannot revive the chat.
+    uint64_t _chatsRequestGeneration = 0;
     std::unordered_map<uint64_t, qint64> _chatByPeer;
     std::unordered_map<qint64, uint64_t> _peerByChat;
     // Canonical pinned order from the server: chatId -> dense rank (>0),

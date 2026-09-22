@@ -315,6 +315,61 @@ namespace {
 	};
 }
 
+// The call.* events seen while an outgoing request waits for its answer.
+//
+// The peer can answer before the request does: a device already in a call
+// discards with "busy" the moment call.requested reaches it, and that
+// call.discarded can come over the socket before the HTTP answer. Until the
+// answer Calls::Call has no id, drops the update as somebody else's, and the
+// caller rings "Waiting" for good. MTProto never shows this order - an RPC
+// result comes before the updates it causes - so the events of the call the
+// request created are replayed right after its answer.
+struct EarlyEvent {
+	base::weak_ptr<Main::Session> session;
+	uint64 callId = 0;
+	MTPPhoneCall call;
+};
+
+struct EarlyEvents {
+	int requestsInFlight = 0;
+	std::vector<EarlyEvent> events;
+};
+
+[[nodiscard]] EarlyEvents &Early() {
+	static auto result = EarlyEvents();
+	return result;
+}
+
+void NoteEarlyEvent(
+		not_null<Main::Session*> session,
+		uint64 callId,
+		const MTPPhoneCall &call) {
+	auto &early = Early();
+	if (early.requestsInFlight > 0) {
+		early.events.push_back({ base::make_weak(session), callId, call });
+	}
+}
+
+// Ends one request and hands back the events of its call, if it created one.
+[[nodiscard]] std::vector<EarlyEvent> TakeEarlyEvents(uint64 callId) {
+	auto &early = Early();
+	auto result = std::vector<EarlyEvent>();
+	if (callId) {
+		for (auto i = begin(early.events); i != end(early.events);) {
+			if (i->callId == callId) {
+				result.push_back(std::move(*i));
+				i = early.events.erase(i);
+			} else {
+				++i;
+			}
+		}
+	}
+	if (early.requestsInFlight > 0 && !--early.requestsInFlight) {
+		early.events.clear();
+	}
+	return result;
+}
+
 void AnswerCall(
 		const char *what,
 		const QJsonDocument &doc,
@@ -372,6 +427,7 @@ void RequestCall(
 	const auto payload = ProtocolJson(protocol);
 	const auto hash = Copy(gaHash);
 	const auto weak = base::make_weak(session);
+	++Early().requestsInFlight;
 	// A call is placed from an open private chat, and the server needs that
 	// chat: it is what proves the two may call each other at all. Resolution
 	// runs first and the completion still fires exactly once, after the answer.
@@ -379,9 +435,11 @@ void RequestCall(
 		const auto strong = weak.get();
 		const auto client = ClientOrNull(strong);
 		if (!client) {
+			(void)TakeEarlyEvents(0);
 			return;
 		}
 		if (chatId <= 0) {
+			(void)TakeEarlyEvents(0);
 			if (fail) {
 				fail(u"CALL_CHAT_UNRESOLVED"_q);
 			}
@@ -394,7 +452,20 @@ void RequestCall(
 			payload,
 			QUuid::createUuid().toString(QUuid::WithoutBraces),
 			[=](QJsonDocument doc, QString error, int status) {
+				const auto callId = (error.isEmpty() && doc.isObject())
+					? uint64(Number(doc.object().value("call").toObject(), "id"))
+					: uint64(0);
+				const auto early = TakeEarlyEvents(callId);
 				AnswerCall("request", doc, error, status, done, fail);
+				for (const auto &event : early) {
+					if (const auto session = event.session.get()) {
+						LOG(("FoxMes Call: replaying an event that came before "
+							"the request answer, call %1").arg(callId));
+						Core::App().calls().handleUpdate(
+							session,
+							MTP_updatePhoneCall(event.call));
+					}
+				}
 			});
 	});
 }
@@ -778,6 +849,18 @@ void LoadHistory(
 			// silently.
 			const auto peer = peerFromUser(UserId(peerId));
 			const auto outgoing = call.value("outgoing").toBool();
+			if (call.value("conference").toBool()) {
+				// An invitation to a group call: the same message the chat
+				// shows, built the same way.
+				messages.push_back(BuildConferenceMessage(
+					peer,
+					outgoing,
+					MsgId(int32(messageId)),
+					outgoing ? me : peerId,
+					call,
+					TimeId(call.value("date").toInt())));
+				continue;
+			}
 			messages.push_back(BuildCallMessage(
 				peer,
 				outgoing,
@@ -854,6 +937,7 @@ bool HandleEvent(
 	if (!call) {
 		return true;
 	}
+	NoteEarlyEvent(session, uint64(Number(data, "id")), *call);
 	Core::App().calls().handleUpdate(session, MTP_updatePhoneCall(*call));
 	return true;
 }

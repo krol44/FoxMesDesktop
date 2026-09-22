@@ -295,6 +295,7 @@ private:
 	set("just_joined", Flag::f_just_joined);
 	set("versioned", Flag::f_versioned);
 	set("self", Flag::f_self);
+	set("video_joined", Flag::f_video_joined);
 	const auto activeDate = data.value("active_date").toInt();
 	if (activeDate) {
 		flags |= Flag::f_active_date;

@@ -3,6 +3,7 @@
 #include "custom_backend/native_bridge.h"
 #include "custom_backend/native_runtime.h"
 #include "history/history.h"
+#include "data/data_peer.h"
 #include "main/main_session.h"
 
 namespace CustomBackend {
@@ -35,6 +36,14 @@ void SetChatUnreadMark(not_null<History*> history, bool unread) {
         return;
     }
     bridge->setChatUnreadMark(history, unread);
+}
+
+bool ShouldBeInChatList(not_null<const History*> history) {
+    const auto bridge = BridgeFor(&history->session());
+    return bridge
+        && history->folderKnown()
+        && !history->peer->migrateTo()
+        && bridge->hasChat(history->peer->id);
 }
 
 } // namespace CustomBackend

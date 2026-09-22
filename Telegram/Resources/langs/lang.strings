@@ -395,6 +395,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_fox_mes_code" = "Code from fxl.ru";
 "lng_fox_mes_get_code" = "Get code";
 "lng_fox_mes_connect" = "Connect";
+"lng_fox_mes_copy_auth_url" = "Copy auth url";
+"lng_fox_mes_auth_url_copied" = "Auth url copied to clipboard.";
+"lng_fox_mes_auth_url_missing" = "Preparing the link. Try again in a moment.";
 "lng_fox_mes_link_failed" = "Unable to get a link. Please try again.";
 "lng_fox_mes_invalid_link" = "The server returned an invalid pairing link.";
 "lng_fox_mes_browser_failed" = "Unable to open the browser. Please try again.";

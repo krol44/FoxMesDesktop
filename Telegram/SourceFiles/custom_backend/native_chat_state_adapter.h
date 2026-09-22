@@ -22,4 +22,6 @@ void ReadHistory(
 
 void SetChatUnreadMark(not_null<History*> history, bool unread);
 
+[[nodiscard]] bool ShouldBeInChatList(not_null<const History*> history);
+
 } // namespace CustomBackend

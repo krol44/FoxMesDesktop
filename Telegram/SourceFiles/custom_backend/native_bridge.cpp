@@ -1210,8 +1210,11 @@ NativeBridge::NativeBridge(Main::Session *session)
     ChatThemes::Request(_session);
     loadContacts();
     refreshReactionsCatalog();
-	loadCachedChats();
-	reloadChats();
+    // Chat-list hooks need BridgeFor(), registered after this constructor.
+    QTimer::singleShot(0, this, [this] {
+        loadCachedChats();
+        reloadChats();
+    });
 	_eventSeq = std::max<qint64>(0, client().eventSequence());
 	_liveUpdates = std::make_unique<LiveUpdatesConnection>(
 		this,
@@ -1681,12 +1684,24 @@ void NativeBridge::ensureUser(const QJsonObject &user, bool contact) {
 	if (avatarUrl.isEmpty()) {
 		data->setUserpic(PhotoId(), ImageLocation(), false);
 	} else {
+		const auto photoId = AvatarPhotoId(revision);
 		data->setUserpic(
-			AvatarPhotoId(revision),
+			photoId,
 			ImageLocation(
 				DownloadLocation{ PlainUrlLocation{ avatarUrl } },
 				160,
 				160),
+			false);
+		// The userpic names a photo, and upstream opens that photo, not the
+		// userpic, wherever it shows the avatar large: the short info card
+		// blurs the small userpic and waits for the photo's large image,
+		// asking users.getFullUser for it while the photo is empty. FoxMes
+		// has one avatar image, so it is the photo's large size as well.
+		UpdateRemotePhotoImages(
+			_session->data().photo(photoId),
+			avatarUrl,
+			kUnknownPhotoSide,
+			kUnknownPhotoSide,
 			false);
 	}
 	_session->changes().peerUpdated(
@@ -2099,9 +2114,10 @@ void NativeBridge::loadDefaultNotifySettings() {
 }
 
 void NativeBridge::reloadChats() {
+    const auto generation = ++_chatsRequestGeneration;
     const auto weak = QPointer<NativeBridge>(this);
-    client().chatsLight([weak](QJsonDocument doc, QString error, int status) {
-        if (!weak) return;
+    client().chatsLight([weak, generation](QJsonDocument doc, QString error, int status) {
+        if (!weak || generation != weak->_chatsRequestGeneration) return;
         if (status == 401) {
             const auto account = &weak->_session->account();
             ClearLogin(weak->_session);
@@ -2123,6 +2139,13 @@ void NativeBridge::reloadChats() {
 
 void NativeBridge::applyChats(const QJsonDocument &doc) {
     if (!doc.isArray()) return;
+    auto missing = _peerByChat;
+    for (const auto &entry : doc.array()) {
+        missing.erase(entry.toObject().value("id").toVariant().toLongLong());
+    }
+    for (const auto &[chatId, peerId] : missing) {
+        removeChat(chatId);
+    }
     _pinnedRanks.clear();
     for (const auto &entry : doc.array()) {
         if (!entry.isObject()) continue;
@@ -2357,6 +2380,39 @@ void NativeBridge::finishInitialLoadIfReady() {
         && _chatsDone
         && !_session->data().contactsLoaded().current()) {
         _session->data().contactsLoaded() = true;
+    }
+}
+
+bool NativeBridge::hasChat(PeerId peerId) const {
+    return _chatByPeer.find(peerId.value) != _chatByPeer.end();
+}
+
+void NativeBridge::removeChat(qint64 chatId) {
+    const auto i = _peerByChat.find(chatId);
+    if (i == _peerByChat.end()) {
+        return;
+    }
+    const auto peerId = PeerId(i->second);
+    _peerByChat.erase(i);
+    const auto peer = _chatByPeer.find(peerId.value);
+    if (peer == _chatByPeer.end() || peer->second != chatId) {
+        return;
+    }
+    _chatByPeer.erase(peer);
+    _pinnedRanks.erase(chatId);
+    _bottomLoadedChats.erase(chatId);
+    if (const auto history = _session->data().historyLoaded(peerId)) {
+        _session->data().deleteConversationLocally(history->peer);
+    }
+    const auto cached = QJsonDocument::fromJson(LoadChatsCache(_session));
+    if (cached.isArray()) {
+        auto remaining = QJsonArray();
+        for (const auto &entry : cached.array()) {
+            if (entry.toObject().value("id").toVariant().toLongLong() != chatId) {
+                remaining.push_back(entry);
+            }
+        }
+        SaveChatsCache(_session, QJsonDocument(remaining).toJson(QJsonDocument::Compact));
     }
 }
 
@@ -4840,7 +4896,7 @@ void NativeBridge::deleteHistory(History *history, bool deleteConversation) {
             return;
         }
         if (deleteConversation) {
-            weak->_session->data().deleteConversationLocally(history->peer);
+            weak->removeChat(chatId);
         } else {
             const auto object = doc.object();
             weak->removeHistoryThrough(
@@ -6272,9 +6328,7 @@ void NativeBridge::handleEvent(const QJsonObject &event) {
         reloadChats();
 	} else if (type == u"chat.deleted"_q) {
 		const auto chatId = data.value("chat_id").toVariant().toLongLong();
-		if (const auto history = historyForChatId(chatId)) {
-			_session->data().deleteConversationLocally(history->peer);
-		}
+		removeChat(chatId);
 		reloadChats();
 	} else if (type == u"user.updated"_q || type == u"user.created"_q) {
 		if (data.value("id").toVariant().toLongLong() == client().meId()) {

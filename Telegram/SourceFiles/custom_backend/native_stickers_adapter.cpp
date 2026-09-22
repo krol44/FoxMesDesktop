@@ -55,6 +55,19 @@ base::flat_map<DocumentId, std::shared_ptr<Data::DocumentMedia>> &MediaCache() {
 	return value;
 }
 
+// The footer icon of each set, kept alive for the same reason as MediaCache:
+// the set thumbnail is in-memory, and StickersSet only holds a weak view.
+// Keyed by the set object, not its id: ids are derived from the category name
+// and repeat across the sessions of two accounts.
+base::flat_map<
+	not_null<Data::StickersSet*>,
+	std::shared_ptr<Data::StickersSetThumbnailView>> &IconCache() {
+	static auto value = base::flat_map<
+		not_null<Data::StickersSet*>,
+		std::shared_ptr<Data::StickersSetThumbnailView>>();
+	return value;
+}
+
 base::flat_map<not_null<Main::Session*>, State> &States() {
 	static auto value = base::flat_map<not_null<Main::Session*>, State>();
 	return value;
@@ -139,6 +152,32 @@ base::flat_map<not_null<Main::Session*>, State> &States() {
 	return document;
 }
 
+// Gives the set its footer icon: the first sticker of the pack. Upstream sizes
+// and draws the icon from the set thumbnail (or the first sticker's own
+// thumbnail), and a catalog set has neither, so the footer cell stayed empty.
+// A WebM thumbnail is what StickersListFooter animates.
+void SetIcon(
+		not_null<Main::Session*> session,
+		not_null<Data::StickersSet*> set,
+		const Reactions::Asset &asset) {
+	const auto type = asset.mime.startsWith(u"video/webm"_q)
+		? StickerType::Webm
+		: StickerType::Webp;
+	set->setThumbnail(
+		ImageWithLocation{
+			.location = ImageLocation(
+				DownloadLocation{ InMemoryLocation{ asset.content } },
+				kStickerSide,
+				kStickerSide),
+			.bytes = asset.content,
+			.bytesCount = int(asset.content.size()),
+		},
+		type);
+	auto view = set->createThumbnailView();
+	view->set(session, asset.content);
+	IconCache()[set] = std::move(view);
+}
+
 // Adds the sticker for one row, creating its set if this is the first entry of
 // that category. Incremental on purpose: assets land one network reply at a
 // time, and rebuilding the whole panel on each of them would be quadratic in
@@ -159,10 +198,19 @@ void ApplyOne(
 		// The still was replaced by the animation. The document keeps its id -
 		// the panel is painting it right now - so only the bytes behind it are
 		// swapped, and the next frame comes from the new content.
-		const auto id = StickerDocumentId(SetIdFor(item.category), item.id);
+		const auto setId = SetIdFor(item.category);
+		const auto id = StickerDocumentId(setId, item.id);
 		if (const auto j = MediaCache().find(id); j != MediaCache().end()) {
 			j->second->setBytes(asset.content);
 			i->second = asset.mime;
+			const auto &sets = session->data().stickers().sets();
+			if (const auto k = sets.find(setId); k != sets.end()) {
+				const auto set = k->second.get();
+				if (!set->stickers.isEmpty()
+					&& set->stickers.front()->id == id) {
+					SetIcon(session, set, asset);
+				}
+			}
 			session->data().stickers().notifyUpdated(
 				Data::StickersType::Stickers);
 		}
@@ -193,6 +241,9 @@ void ApplyOne(
 		return;
 	}
 	state.alts[item.id] = asset.mime;
+	if (i->second->stickers.isEmpty()) {
+		SetIcon(session, i->second.get(), asset);
+	}
 	i->second->stickers.push_back(document);
 	i->second->count = i->second->stickers.size();
 	stickers.setLastUpdate(crl::now());
@@ -208,6 +259,9 @@ void Clear(not_null<Main::Session*> session) {
 	auto &sets = stickers.setsRef();
 	auto &order = stickers.setsOrderRef();
 	for (const auto setId : state.setIds) {
+		if (const auto i = sets.find(setId); i != sets.end()) {
+			IconCache().remove(i->second.get());
+		}
 		sets.remove(setId);
 		order.removeOne(setId);
 	}

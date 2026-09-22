@@ -85,13 +85,32 @@ introNextButton: RoundButton(defaultActiveButton) {
 		font: font(boxFontSize semibold);
 	}
 }
-introFoxMesCodeButton: RoundButton(defaultLightButton) {
-	width: 220px;
-	height: 34px;
-	radius: 6px;
-	textTop: 8px;
-	style: TextStyle(semiboldTextStyle) {
-		font: font(boxFontSize semibold);
+introFoxMesColumnWidth: 300px;
+introFoxMesLogoSize: 40px;
+introFoxMesHeaderHeight: 44px;
+introFoxMesHeaderSkip: 12px;
+introFoxMesNameFont: font(22px semibold);
+introFoxMesDividerHeight: 22px;
+introFoxMesDividerSkip: 14px;
+introFoxMesBadgeSize: 22px;
+introFoxMesBadgeFont: font(13px semibold);
+introFoxMesDividerFirstTop: 54px;
+introFoxMesButtonsTop: 84px;
+introFoxMesButtonsSkip: 10px;
+introFoxMesDividerSecondTop: 134px;
+introFoxMesFieldTop: 162px;
+introFoxMesStepButton: RoundButton(introNextButton) {
+	textFg: lightButtonFg;
+	textFgOver: lightButtonFgOver;
+	numbersTextFg: lightButtonFg;
+	numbersTextFgOver: lightButtonFgOver;
+	textBg: windowBgOver;
+	textBgOver: windowBgRipple;
+	width: 145px;
+	height: 40px;
+	textTop: 10px;
+	ripple: RippleAnimation(defaultRippleAnimation) {
+		color: windowBgRipple;
 	}
 }
 introFragmentIcon: icon{{ "fragment", activeButtonFg }};
