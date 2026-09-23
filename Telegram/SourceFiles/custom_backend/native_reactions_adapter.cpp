@@ -32,55 +32,101 @@
 namespace CustomBackend::Reactions {
 namespace {
 
-std::vector<CatalogItem> &CatalogStorage() {
-    static auto values = std::vector<CatalogItem>();
-    return values;
-}
-
-int &MaxSelectedStorage() {
-    static auto value = 3;
-    return value;
-}
-
-// The two usage orders the server keeps per user (chat_user_emojis): most
-// used and most recently used, as catalog ids. Upstream fills the same two
-// lists from messages.getTopReactions/getRecentReactions, and the picker
-// reads them as concat(top, recent, full) - see LookupPossibleReactions.
-std::vector<DocumentId> &TopUsageStorage() {
-    static auto values = std::vector<DocumentId>();
-    return values;
-}
-
-std::vector<DocumentId> &RecentUsageStorage() {
-    static auto values = std::vector<DocumentId>();
-    return values;
-}
-
 constexpr auto kStaticEmojiSize = 100;
 
-// Bridge reactions are custom-emoji reactions: upstream identifies them by
-// DocumentId, not by the emoji string, and that is what routes the inline
-// badge through Ui::Text::CustomEmoji instead of the single cached frame
-// Reactions::resolveImageFor() bakes for plain emoji reactions.
+// Two requests per catalog entry: the source, which is the fallback when the
+// alt carries no animation, and the emoji_webm rendition, which is preferred
+// whenever fxl-cdn really had something to transcode.
 //
-// The DocumentId is the emojis.id the server sent: it arrives inside the
-// payload itself, so Build() can answer synchronously, long before (or
-// without ever) the asset behind it downloading. Minting it from the emoji is
-// not an option - the same characters legitimately sit in two catalog groups
-// and would collapse into one document.
-//
-// The emoji of a row, for the text a send carries under its entity. Filled
-// from the catalog, so a row that ever reached upstream resolves without
-// touching Data::Session.
-base::flat_map<DocumentId, QString> &EmojiByDocumentId() {
-    static auto value = base::flat_map<DocumentId, QString>();
+// The document is built once, after both answers are in, and never rebuilt
+// from the other variant: a reaction is one custom-emoji DocumentId, and
+// CustomEmojiManager caches a Ui::CustomEmoji::Instance per id, so swapping
+// the content under a live id would leave already-painted badges on the old
+// renderer until restart. The only case that still swaps is a retry after a
+// failed emoji_webm request, which is why that failure is retryable.
+struct PendingAsset final {
+    QByteArray source; // Normalized still, empty when unusable.
+    QByteArray animated; // WebM, empty when the alt has no animation.
+    bool sourceDone = false;
+    bool animatedDone = false;
+};
+
+// Everything the bridge knows about reactions, per account - the same split
+// upstream has, where Data::Reactions and CustomEmojiManager belong to one
+// Data::Session. Nothing here may be shared between two logged in accounts:
+// a DocumentData is an object of one Data::Session, and a document handed to
+// the other account is never announced to its CustomEmojiManager, so every
+// reaction and sticker message there stays an empty placeholder.
+struct State final {
+    std::vector<CatalogItem> catalog;
+    int maxSelected = 3;
+
+    // The two usage orders the server keeps per user (chat_user_emojis):
+    // most used and most recently used, as catalog ids. Upstream fills the
+    // same two lists from messages.getTopReactions/getRecentReactions, and
+    // the picker reads them as concat(top, recent, full) - see
+    // LookupPossibleReactions.
+    std::vector<DocumentId> topUsage;
+    std::vector<DocumentId> recentUsage;
+
+    // Bridge reactions are custom-emoji reactions: upstream identifies them
+    // by DocumentId, not by the emoji string, and that is what routes the
+    // inline badge through Ui::Text::CustomEmoji instead of the single cached
+    // frame Reactions::resolveImageFor() bakes for plain emoji reactions.
+    //
+    // The DocumentId is the emojis.id the server sent: it arrives inside the
+    // payload itself, so Build() can answer synchronously, long before (or
+    // without ever) the asset behind it downloading. Minting it from the
+    // emoji is not an option - the same characters legitimately sit in two
+    // catalog groups and would collapse into one document.
+    //
+    // The emoji of a row, for the text a send carries under its entity.
+    // Filled from the catalog, so a row that ever reached upstream resolves
+    // without touching Data::Session.
+    base::flat_map<DocumentId, QString> emojiByDocumentId;
+
+    // The media view that owns each reaction document's bytes. A reaction
+    // document exists only in memory: nothing uploads or downloads it, so the
+    // only copy of its content is the one held here.
+    base::flat_map<DocumentId, std::shared_ptr<Data::DocumentMedia>> media;
+    base::flat_map<DocumentId, not_null<DocumentData*>> documents;
+
+    // The asset bytes behind each row. Kept so the stickers panel can build
+    // its own documents from them: it needs the same picture carrying sticker
+    // attributes instead of custom-emoji ones, and downloading the whole
+    // catalog a second time for that would double the traffic of every login.
+    base::flat_map<DocumentId, Asset> assets;
+    base::flat_map<DocumentId, PendingAsset> pending;
+    QSet<QString> requested;
+
+    // Fires once per row whose asset just landed, so a panel built before the
+    // download finished can rebuild instead of staying empty until the next
+    // catalog refresh.
+    rpl::event_stream<DocumentId> assetLoaded;
+    rpl::event_stream<> catalogChanged;
+};
+
+base::flat_map<not_null<Main::Session*>, std::unique_ptr<State>> &States() {
+    static auto value = base::flat_map<
+        not_null<Main::Session*>,
+        std::unique_ptr<State>>();
     return value;
 }
 
-[[nodiscard]] QString EmojiForDocumentId(DocumentId id) {
-    const auto &map = EmojiByDocumentId();
-    const auto i = map.find(id);
-    return (i == map.end()) ? QString() : i->second;
+[[nodiscard]] State &StateFor(not_null<Main::Session*> session) {
+    auto &slot = States()[session];
+    if (!slot) {
+        slot = std::make_unique<State>();
+    }
+    return *slot;
+}
+
+// For network answers: the account may have logged out while the request was
+// in flight, and recreating its state then would leave an entry keyed by a
+// dead session that the next one allocated at the same address inherits.
+[[nodiscard]] State *FindState(Main::Session *session) {
+    const auto i = session ? States().find(session) : States().end();
+    return (i == States().end()) ? nullptr : i->second.get();
 }
 
 // Renders a native Unicode emoji into a transparent square WebP that the ink
@@ -151,42 +197,6 @@ base::flat_map<DocumentId, QString> &EmojiByDocumentId() {
     return buffer;
 }
 
-// The media view that owns each reaction document's bytes, keyed by catalog
-// id like DocumentCache(). A reaction document exists only in memory: nothing
-// uploads or downloads it, so the only copy of its content is the one held
-// here.
-base::flat_map<DocumentId, std::shared_ptr<Data::DocumentMedia>> &MediaCache() {
-    static base::flat_map<DocumentId, std::shared_ptr<Data::DocumentMedia>> value;
-    return value;
-}
-
-base::flat_map<DocumentId, DocumentData*> &DocumentCache() {
-    static auto value = base::flat_map<DocumentId, DocumentData*>();
-    return value;
-}
-
-// The asset bytes behind each row. Kept so the stickers panel can build its
-// own documents from them: it needs the same picture carrying sticker
-// attributes instead of custom-emoji ones, and downloading the whole catalog a
-// second time for that would double the traffic of every login.
-base::flat_map<DocumentId, Asset> &AssetCache() {
-    static auto value = base::flat_map<DocumentId, Asset>();
-    return value;
-}
-
-// Fires once per row whose asset just landed, so a panel built before the
-// download finished can rebuild instead of staying empty until the next
-// catalog refresh.
-rpl::event_stream<DocumentId> &AssetLoadedStream() {
-    static auto value = rpl::event_stream<DocumentId>();
-    return value;
-}
-
-rpl::event_stream<> &CatalogChangedStream() {
-    static auto value = rpl::event_stream<>();
-    return value;
-}
-
 // Builds the in-memory custom-emoji document behind one reaction.
 //
 // documentAttributeCustomEmoji, not documentAttributeSticker: it is what
@@ -200,6 +210,7 @@ rpl::event_stream<> &CatalogChangedStream() {
 // belongs to is the id, which is what every cache here is keyed by.
 [[nodiscard]] DocumentData *CustomEmojiDocument(
         not_null<Main::Session*> session,
+        State &state,
         DocumentId id,
         const QString &emoji,
         const QByteArray &content,
@@ -242,8 +253,8 @@ rpl::event_stream<> &CatalogChangedStream() {
     // its frame generator and the reaction renders as an empty placeholder.
     auto media = document->createMediaView();
     media->setBytes(content);
-    MediaCache()[id] = std::move(media);
-    DocumentCache()[id] = document;
+    state.media[id] = std::move(media);
+    state.documents.insert_or_assign(id, document);
     // A reaction can be painted before its asset exists: the badge asks
     // CustomEmojiManager for this id, finds no document and parks a loader
     // in the resolve state, which under the bridge nothing would ever
@@ -276,17 +287,27 @@ QNetworkAccessManager &AssetManager() {
 // main thread for every outcome, a transport error included, so a caller
 // waiting on two responses always gets both; returning false means the asset
 // was unusable and the request may be retried on the next catalog refresh.
+// Nothing runs once the account has logged out in the meantime.
+//
+// Deduplicated per account, not per process: upstream has every session ask
+// for its own reactions, and an answer can only build documents for the
+// session that asked. The transport is the one shared part, like upstream's
+// WebLoadManager.
 void FetchAsset(
+        base::weak_ptr<Main::Session> weakSession,
         const QString &url,
         Fn<bool(
+            not_null<Main::Session*> session,
+            State &state,
             bool ok,
             const QByteArray &body,
             const QString &contentType)> apply) {
-    static QSet<QString> requested;
-    if (requested.contains(url)) {
+    const auto session = weakSession.get();
+    const auto state = FindState(session);
+    if (!state || state->requested.contains(url)) {
         return;
     }
-    requested.insert(url);
+    state->requested.insert(url);
     // The dev profile needs the documented TLS exception, because fxl-cdn
     // serves a certificate that does not match cdn.fxl.test and every asset
     // would fail the handshake.
@@ -297,89 +318,75 @@ void FetchAsset(
     QObject::connect(reply, &QNetworkReply::sslErrors, reply, [reply, auth] {
         AllowDownloadTls(reply, auth);
     });
-    QObject::connect(reply, &QNetworkReply::finished, reply, [url, reply, apply] {
+    QObject::connect(reply, &QNetworkReply::finished, reply, [=] {
         reply->deleteLater();
-        if (reply->error() != QNetworkReply::NoError) {
-            if (!apply(false, {}, {})) {
-                requested.remove(url);
-            }
+        const auto session = weakSession.get();
+        const auto state = FindState(session);
+        if (!state) {
             return;
         }
-        const auto contentType = reply->header(
-            QNetworkRequest::ContentTypeHeader).toString();
-        if (!apply(true, reply->readAll(), contentType)) {
-            requested.remove(url);
+        const auto ok = (reply->error() == QNetworkReply::NoError);
+        const auto contentType = ok
+            ? reply->header(QNetworkRequest::ContentTypeHeader).toString()
+            : QString();
+        const auto body = ok ? reply->readAll() : QByteArray();
+        if (!apply(session, *state, ok, body, contentType)) {
+            state->requested.remove(url);
         }
     });
 }
 
-void RefreshReactions(base::weak_ptr<Main::Session> weakSession) {
-    crl::on_main(weakSession, [weakSession] {
-        if (const auto strong = weakSession.get()) {
-            strong->data().reactions().refreshDefault();
-        }
+void RefreshReactions(not_null<Main::Session*> session) {
+    crl::on_main(session.get(), [=] {
+        session->data().reactions().refreshDefault();
     });
 }
 
-// Two requests per catalog entry: the source, which is the fallback when the
-// alt carries no animation, and the emoji_webm rendition, which is preferred
-// whenever fxl-cdn really had something to transcode.
-//
-// The document is built once, after both answers are in, and never rebuilt
-// from the other variant: a reaction is one custom-emoji DocumentId, and
-// CustomEmojiManager caches a Ui::CustomEmoji::Instance per id, so swapping
-// the content under a live id would leave already-painted badges on the old
-// renderer until restart. The only case that still swaps is a retry after a
-// failed emoji_webm request, which is why that failure is retryable.
-struct PendingAsset final {
-    QByteArray source; // Normalized still, empty when unusable.
-    QByteArray animated; // WebM, empty when the alt has no animation.
-    bool sourceDone = false;
-    bool animatedDone = false;
-};
-
-base::flat_map<DocumentId, PendingAsset> &PendingAssets() {
-    static auto value = base::flat_map<DocumentId, PendingAsset>();
-    return value;
+void AssetBuilt(
+        not_null<Main::Session*> session,
+        State &state,
+        DocumentId id,
+        Asset asset) {
+    state.assets[id] = std::move(asset);
+    RefreshReactions(session);
+    state.assetLoaded.fire_copy(id);
 }
 
 void BuildDownloadedAsset(
-        base::weak_ptr<Main::Session> weakSession,
+        not_null<Main::Session*> session,
+        State &state,
         DocumentId id,
         const QString &emoji) {
-    const auto i = PendingAssets().find(id);
-    if (i == PendingAssets().end()
+    const auto i = state.pending.find(id);
+    if (i == state.pending.end()
         || !i->second.sourceDone
         || !i->second.animatedDone) {
         return;
     }
     const auto pending = i->second;
-    PendingAssets().erase(i);
-    const auto session = weakSession.get();
-    if (!session) {
-        return;
-    }
+    state.pending.erase(i);
     const auto animated = !pending.animated.isEmpty();
     const auto content = animated ? pending.animated : pending.source;
     const auto mime = animated ? u"video/webm"_q : u"image/webp"_q;
-    const auto built = CustomEmojiDocument(session, id, emoji, content, mime);
-    if (built) {
-        AssetCache()[id] = Asset{ .content = content, .mime = mime };
-        RefreshReactions(weakSession);
-        AssetLoadedStream().fire_copy(id);
+    if (CustomEmojiDocument(session, state, id, emoji, content, mime)) {
+        AssetBuilt(session, state, id, { .content = content, .mime = mime });
     }
 }
 
 void DownloadAsset(
-        base::weak_ptr<Main::Session> weakSession,
+        not_null<Main::Session*> session,
+        State &state,
         DocumentId id,
         const QString &emoji,
         const QString &url) {
-    if (!PendingAssets().contains(id)) {
-        PendingAssets().emplace(id, PendingAsset());
+    if (!state.pending.contains(id)) {
+        state.pending.emplace(id, PendingAsset());
     }
+    const auto weak = base::make_weak(session);
 
-    FetchAsset(url, [weakSession, id, emoji](
+    FetchAsset(weak, url, [id, emoji](
+            not_null<Main::Session*> session,
+            State &state,
             bool ok,
             const QByteArray &body,
             const QString &contentType) {
@@ -389,8 +396,8 @@ void DownloadAsset(
         const auto normalized = (ok && !video)
             ? NormalizeToSquareWebp(body)
             : QByteArray();
-        const auto i = PendingAssets().find(id);
-        if (i == PendingAssets().end()) {
+        const auto i = state.pending.find(id);
+        if (i == state.pending.end()) {
             return ok;
         }
         i->second.source = normalized;
@@ -398,11 +405,13 @@ void DownloadAsset(
             i->second.animated = body;
         }
         i->second.sourceDone = true;
-        BuildDownloadedAsset(weakSession, id, emoji);
+        BuildDownloadedAsset(session, state, id, emoji);
         return ok && (video || !normalized.isEmpty());
     });
 
-    FetchAsset(AnimatedUrl(url), [weakSession, id, emoji](
+    FetchAsset(weak, AnimatedUrl(url), [id, emoji](
+            not_null<Main::Session*> session,
+            State &state,
             bool ok,
             const QByteArray &body,
             const QString &contentType) {
@@ -411,31 +420,24 @@ void DownloadAsset(
         const auto webm = (ok && contentType.startsWith(u"video/webm"_q))
             ? body
             : QByteArray();
-        const auto i = PendingAssets().find(id);
-        if (i != PendingAssets().end()) {
+        const auto i = state.pending.find(id);
+        if (i != state.pending.end()) {
             // Never clears: a WebM source may have filled it already.
             if (!webm.isEmpty()) {
                 i->second.animated = webm;
             }
             i->second.animatedDone = true;
-            BuildDownloadedAsset(weakSession, id, emoji);
-        } else if (ok && !webm.isEmpty()) {
+            BuildDownloadedAsset(session, state, id, emoji);
+        } else if (!webm.isEmpty()) {
             // A retry that finally produced the animation: rebuild over the
             // still that was put in place while this request kept failing.
-            if (const auto session = weakSession.get()) {
-                if (CustomEmojiDocument(
-                        session,
-                        id,
-                        emoji,
-                        webm,
-                        u"video/webm"_q)) {
-                    AssetCache()[id] = Asset{
-                        .content = webm,
-                        .mime = u"video/webm"_q,
-                    };
-                    RefreshReactions(weakSession);
-                    AssetLoadedStream().fire_copy(id);
-                }
+            const auto mime = u"video/webm"_q;
+            if (CustomEmojiDocument(session, state, id, emoji, webm, mime)) {
+                AssetBuilt(
+                    session,
+                    state,
+                    id,
+                    { .content = webm, .mime = mime });
             }
         }
         // A transport error is worth another attempt; an echoed original is
@@ -564,7 +566,9 @@ MTPMessageReactions Build(
         MTPVector<MTPMessageReactor>());
 }
 
-void SetAvailableCatalog(const std::vector<CatalogItem> &items) {
+void SetAvailableCatalog(
+        not_null<Main::Session*> session,
+        const std::vector<CatalogItem> &items) {
     auto entries = std::vector<CatalogItem>();
     entries.reserve(items.size());
     for (const auto &item : items) {
@@ -579,47 +583,55 @@ void SetAvailableCatalog(const std::vector<CatalogItem> &items) {
     // The emoji of every row is registered here, not when a document is
     // built: SendChosen() and the outgoing entities need it for rows whose
     // asset is still downloading.
+    auto &state = StateFor(session);
     for (const auto &entry : entries) {
-        EmojiByDocumentId()[entry.id] = entry.emoji;
+        state.emojiByDocumentId[entry.id] = entry.emoji;
     }
-    CatalogStorage() = std::move(entries);
-    CatalogChangedStream().fire({});
+    state.catalog = std::move(entries);
+    state.catalogChanged.fire({});
 }
 
 void SetUsageLists(
+        not_null<Main::Session*> session,
         const std::vector<DocumentId> &top,
         const std::vector<DocumentId> &recent) {
-    TopUsageStorage() = top;
-    RecentUsageStorage() = recent;
+    auto &state = StateFor(session);
+    state.topUsage = top;
+    state.recentUsage = recent;
 }
 
-int MaxSelectedReactions() {
-    return MaxSelectedStorage();
+int MaxSelectedReactions(not_null<Main::Session*> session) {
+    return StateFor(session).maxSelected;
 }
 
-void SetMaxSelectedReactions(int value) {
+void SetMaxSelectedReactions(not_null<Main::Session*> session, int value) {
     if (value < 1) {
         return;
     }
-    MaxSelectedStorage() = value;
+    StateFor(session).maxSelected = value;
 }
 
-std::vector<Data::Reaction> BuildAvailableReactions(Main::Session *session) {
+std::vector<Data::Reaction> BuildAvailableReactions(
+		not_null<Main::Session*> session) {
+	auto &state = StateFor(session);
 	auto result = std::vector<Data::Reaction>();
-	result.reserve(CatalogStorage().size());
-	for (const auto &entry : CatalogStorage()) {
+	result.reserve(state.catalog.size());
+	for (const auto &entry : state.catalog) {
 		if (entry.emoji.isEmpty()) {
 			continue;
 		}
-		const auto i = DocumentCache().find(entry.id);
-		auto icon = (i == DocumentCache().end()) ? nullptr : i->second;
-		if (!icon && session) {
+		const auto i = state.documents.find(entry.id);
+		auto icon = (i == state.documents.end())
+			? nullptr
+			: i->second.get();
+		if (!icon) {
 			if (!entry.assetUrl.isEmpty()) {
 				// The uploaded artwork is what this row is. The emoji is only
 				// its caption, so recognising it as a native Unicode emoji
 				// must not replace the picture with a font glyph.
 				DownloadAsset(
-					base::make_weak(not_null{ session }),
+					session,
+					state,
 					entry.id,
 					entry.emoji,
 					entry.assetUrl);
@@ -628,6 +640,7 @@ std::vector<Data::Reaction> BuildAvailableReactions(Main::Session *session) {
 					; !webp.isEmpty()) {
 					icon = CustomEmojiDocument(
 						session,
+						state,
 						entry.id,
 						entry.emoji,
 						webp,
@@ -726,8 +739,9 @@ void ApplyDefault(
 				}
 			}
 		};
-		resolveUsage(TopUsageStorage(), self._topIds, self._top);
-		resolveUsage(RecentUsageStorage(), self._recentIds, self._recent);
+		const auto &state = StateFor(session);
+		resolveUsage(state.topUsage, self._topIds, self._top);
+		resolveUsage(state.recentUsage, self._recentIds, self._recent);
 		if (self._waitingForReactions) {
 			self._waitingForReactions = false;
 			self.resolveReactionImages();
@@ -743,16 +757,11 @@ void ApplyDefault(
 	});
 }
 
-void ClearSessionCaches() {
-	// DocumentCache()/MediaCache()/EmojiByDocumentId() are process-lifetime
-	// statics, but the DocumentData they point to belongs to the
-	// Data::Session that is going away: called from ~Reactions(), i.e. once
-	// per session teardown, so the next login rebuilds every entry against
-	// its own fresh documents instead of reusing dangling pointers.
-	DocumentCache().clear();
-	MediaCache().clear();
-	EmojiByDocumentId().clear();
-	AssetCache().clear();
+void ClearSession(not_null<Main::Session*> session) {
+	// The documents and media views belong to the Data::Session going away,
+	// so they go with it - exactly as they would inside upstream's
+	// Data::Reactions. Other accounts keep theirs untouched.
+	States().remove(session);
 }
 
 void SendChosen(
@@ -773,11 +782,11 @@ void SendChosen(
 	}
 }
 
-QString AssetUrlFor(DocumentId id) {
+QString AssetUrlFor(not_null<Main::Session*> session, DocumentId id) {
     if (!id) {
         return QString();
     }
-    for (const auto &entry : CatalogStorage()) {
+    for (const auto &entry : StateFor(session).catalog) {
         if (entry.id == id) {
             return entry.assetUrl;
         }
@@ -785,26 +794,28 @@ QString AssetUrlFor(DocumentId id) {
     return QString();
 }
 
-QString EmojiFor(DocumentId id) {
-    return EmojiForDocumentId(id);
+QString EmojiFor(not_null<Main::Session*> session, DocumentId id) {
+    const auto &map = StateFor(session).emojiByDocumentId;
+    const auto i = map.find(id);
+    return (i == map.end()) ? QString() : i->second;
 }
 
-Asset AssetFor(DocumentId id) {
-    const auto &cache = AssetCache();
-    const auto i = cache.find(id);
-    return (i == cache.end()) ? Asset() : i->second;
+Asset AssetFor(not_null<Main::Session*> session, DocumentId id) {
+    const auto &assets = StateFor(session).assets;
+    const auto i = assets.find(id);
+    return (i == assets.end()) ? Asset() : i->second;
 }
 
-rpl::producer<DocumentId> AssetLoaded() {
-    return AssetLoadedStream().events();
+rpl::producer<DocumentId> AssetLoaded(not_null<Main::Session*> session) {
+    return StateFor(session).assetLoaded.events();
 }
 
-rpl::producer<> CatalogChanged() {
-    return CatalogChangedStream().events();
+rpl::producer<> CatalogChanged(not_null<Main::Session*> session) {
+    return StateFor(session).catalogChanged.events();
 }
 
-std::vector<CatalogItem> Catalog() {
-    return CatalogStorage();
+std::vector<CatalogItem> Catalog(not_null<Main::Session*> session) {
+    return StateFor(session).catalog;
 }
 
 } // namespace CustomBackend::Reactions

@@ -136,19 +136,19 @@ void AttachSession(Main::Session *session);
 void DetachSession(Main::Session *session);
 [[nodiscard]] NativeBridge *BridgeFor(Main::Session *session);
 
-// Disappearing media, answered by the server through GET /me capabilities.
-// False until it has answered: a picker shown against a server that would
-// refuse the send is worse than no picker at all. The other direction - an old
-// build against a new server - is not held by this flag and cannot be: it is
-// held by the message contract, which never puts the attachment of an
-// ephemeral message into any projection.
 // The bridge's messages.readMessageContents: one call, sent when the content
 // was actually shown, which both spends a "view once" and starts the countdown.
 void MarkEphemeralViewed(
 	const base::flat_set<not_null<HistoryItem*>> &items);
 
-[[nodiscard]] bool EphemeralMediaSupported();
-void SetEphemeralMediaSupported(bool value);
+// Disappearing media, answered by the server through GET /me capabilities.
+// False until it has answered: a picker shown against a server that would
+// refuse the send is worse than no picker at all. The other direction - an old
+// build against a new server - is not held by this flag and cannot be: it is
+// held by the message contract, which never puts the attachment of an
+// ephemeral message into any projection. Per account, since each one asks
+// its own server session.
+[[nodiscard]] bool EphemeralMediaSupported(Main::Session *session);
 
 // Points the media of a disappearing message at the url a view session just
 // granted. It lives beside the bridge because the photo path needs

@@ -360,6 +360,9 @@ public:
 	[[nodiscard]] rpl::producer<LiveUpdatesStatus> liveUpdatesStatusValue() const;
 	void restartLiveUpdates();
 	void stopLiveUpdates();
+	[[nodiscard]] bool ephemeralMediaSupported() const {
+		return _ephemeralMediaSupported;
+	}
 	void trackWindow(Window::SessionController *controller);
 	void requestMessageData(
 		PeerData *peer,
@@ -392,10 +395,10 @@ private:
     // it covers. The web page draft is what the composer's preview settings
     // produced; it rides on the link entity it belongs to, because that is the
     // link mark the server hangs the choice on.
-    [[nodiscard]] static QJsonArray entitiesToJson(
+    [[nodiscard]] QJsonArray entitiesToJson(
         const EntitiesInText &entities,
         const QString &text,
-        const Data::WebPageDraft &webPage = {});
+        const Data::WebPageDraft &webPage = {}) const;
     PeerData *peerForChat(const QJsonObject &chat);
     void applyChatConfig(PeerData *peer, const QJsonObject &chat);
     void applyChats(const QJsonDocument &doc);
@@ -757,6 +760,9 @@ private:
 	bool _chatsDone = false;
 	bool _reactionsRefreshScheduled = false;
 	bool _reactionUsageRefreshScheduled = false;
+	// Whether this account's server takes disappearing media, from GET /me
+	// capabilities. False until it has answered.
+	bool _ephemeralMediaSupported = false;
 	std::unique_ptr<LiveUpdatesConnection> _liveUpdates;
 
 };

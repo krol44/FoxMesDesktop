@@ -43,11 +43,6 @@ void ApplyDefault(
 void SendChosen(
 	not_null<Main::Session*> session,
 	not_null<::HistoryItem*> item);
-// Drops every process-lifetime cache keyed by raw DocumentData* (the
-// documents themselves die with the owning Data::Session): must run once
-// per session teardown, or the next login's BuildAvailableReactions() hands
-// out dangling pointers left over from the previous one.
-void ClearSessionCaches();
 } // namespace CustomBackend::Reactions
 
 namespace Data {

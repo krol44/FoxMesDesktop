@@ -34,6 +34,12 @@ fi
 # to produce a universal bundle.
 ARCHS="${ARCHS:-$(uname -m)}"
 
+# cmake_helpers defaults CMAKE_OSX_DEPLOYMENT_TARGET to 10.13, and Xcode 27
+# refuses to build anything below 12.0. Keep the dev build on the same 13.0 as
+# the release (Telegram/build/foxmes/build-macos.sh), so a local run compiles
+# against the same minimum the shipped binary does.
+DEPLOYMENT_TARGET="${DEPLOYMENT_TARGET:-13.0}"
+
 JOBS="$(sysctl -n hw.logicalcpu 2>/dev/null || printf '8')"
 # Reconfigure with QT unset: cmake/external/qt/package.cmake writes an
 # exported QT into the qt_requested cache entry with FORCE, so a QT that
@@ -45,6 +51,7 @@ JOBS="$(sysctl -n hw.logicalcpu 2>/dev/null || printf '8')"
 # one its microphone and camera access, silently.
 env -u QT cmake -S "${PROJECT_DIR}" -B "${BUILD_DIR}" \
   -DCMAKE_OSX_ARCHITECTURES="${ARCHS}" \
+  -DCMAKE_OSX_DEPLOYMENT_TARGET="${DEPLOYMENT_TARGET}" \
   -DFOXMES_LOCAL_BUILD=ON
 cmake --build "${BUILD_DIR}" --config "${BUILD_CONFIG}" --target Telegram -j"${JOBS}"
 

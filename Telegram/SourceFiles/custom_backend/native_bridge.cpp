@@ -1049,7 +1049,9 @@ PhotoId AvatarPhotoId(const QString &revision) {
 	return PhotoId(value ? value : 1);
 }
 
-Data::AllowedReactions ParseAllowedReactions(const QJsonObject &chat) {
+Data::AllowedReactions ParseAllowedReactions(
+        not_null<Main::Session*> session,
+        const QJsonObject &chat) {
     Data::AllowedReactions result;
     result.type = Data::AllowedReactionsType::Some;
     // Server contract: catalog /reactions reports {max_selected}. A per-chat
@@ -1058,7 +1060,7 @@ Data::AllowedReactions ParseAllowedReactions(const QJsonObject &chat) {
     const auto chatMax = chat.value("max_selected").toInt();
     result.maxCount = chatMax > 0
         ? chatMax
-        : Reactions::MaxSelectedReactions();
+        : Reactions::MaxSelectedReactions(session);
     const auto reactions = chat.value("available_reactions").toArray();
     for (const auto &entry : reactions) {
         const auto emoji = entry.toObject().value("emoji").toString();
@@ -1360,7 +1362,7 @@ std::optional<MTPMessageMedia> NativeBridge::WebPageMedia(
 QJsonArray NativeBridge::entitiesToJson(
         const EntitiesInText &entities,
         const QString &text,
-        const Data::WebPageDraft &webPage) {
+        const Data::WebPageDraft &webPage) const {
     // Which link the composer's preview settings belong to. The chosen url is
     // matched first; with none chosen the settings land on the first link,
     // because that is the one the server would have built the card from.
@@ -1396,7 +1398,7 @@ QJsonArray NativeBridge::entitiesToJson(
             // something to render; the server never trusts it.
             type = u"custom_emoji"_q;
             emojiId = Data::ParseCustomEmojiData(entity.data());
-            data = Reactions::AssetUrlFor(emojiId);
+            data = Reactions::AssetUrlFor(_session, emojiId);
             break;
         case EntityType::CustomUrl:
             type = u"text_url"_q;
@@ -1732,7 +1734,7 @@ void NativeBridge::refreshSelf() {
 				ephemeral = true;
 			}
 		}
-		SetEphemeralMediaSupported(ephemeral);
+		weak->_ephemeralMediaSupported = ephemeral;
 	});
 }
 
@@ -1773,6 +1775,7 @@ void NativeBridge::refreshReactionsCatalog() {
         // Set before the catalog: ApplyDefault, which the refresh below
         // schedules, reads both in one pass.
         Reactions::SetUsageLists(
+            weak->_session,
             ReactionUsageIds(object.value("top_reactions")),
             ReactionUsageIds(object.value("recent_reactions")));
         const auto array = object.value("available_reactions").toArray();
@@ -1795,10 +1798,12 @@ void NativeBridge::refreshReactionsCatalog() {
             });
         }
         if (!values.empty()) {
-            Reactions::SetAvailableCatalog(values);
+            Reactions::SetAvailableCatalog(weak->_session, values);
             const auto maxSelected = object.value("max_selected").toInt();
             if (maxSelected > 0) {
-                Reactions::SetMaxSelectedReactions(maxSelected);
+                Reactions::SetMaxSelectedReactions(
+                    weak->_session,
+                    maxSelected);
             }
             weak->scheduleReactionsRefresh();
         }
@@ -1828,6 +1833,7 @@ void NativeBridge::refreshReactionUsage() {
         }
         const auto object = doc.object();
         Reactions::SetUsageLists(
+            weak->_session,
             ReactionUsageIds(object.value("top_reactions")),
             ReactionUsageIds(object.value("recent_reactions")));
         weak->scheduleReactionsRefresh();
@@ -1921,7 +1927,7 @@ void NativeBridge::applyChatConfig(PeerData *peer, const QJsonObject &chat) {
     const auto chatId = chat.value("id").toVariant().toLongLong();
     const auto permissions = chat.value("permissions").toObject();
     const auto canSend = permissions.value("can_send").toBool(true);
-    const auto allowed = ParseAllowedReactions(chat);
+    const auto allowed = ParseAllowedReactions(_session, chat);
     applyNotificationSettings(
         peer,
         chatId,
@@ -3850,7 +3856,10 @@ void NativeBridge::sendText(
             ; i != weak->_pendingSends.end()) {
             i->second.committing = true;
         }
-        const auto outgoing = entitiesToJson(trimmedEntities, trimmed, webPage);
+        const auto outgoing = weak->entitiesToJson(
+            trimmedEntities,
+            trimmed,
+            webPage);
         weak->client().sendMessageWithDraftRevision(chatId, trimmed, replyTo.messageId, {}, clientNonce, clearDraft, clearDraftRevision, [weak, history, chatId, localId, clearDraft](QJsonDocument doc, QString error, int status) {
             if (!weak || !history) return;
             if (!error.isEmpty() || !doc.isObject()) {
@@ -4165,7 +4174,7 @@ void NativeBridge::sendFiles(
                         .meta = meta->value(attachmentId),
                     });
                 }
-                const auto outgoing = entitiesToJson(
+                const auto outgoing = weak->entitiesToJson(
                     trimmedCaption.entities,
                     trimmedCaption.text);
                 if (options.scheduled()) {

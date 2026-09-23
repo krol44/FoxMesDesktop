@@ -1,6 +1,7 @@
 #include "custom_backend/native_runtime.h"
 
 #include "custom_backend/native_gifs_adapter.h"
+#include "custom_backend/native_reactions_adapter.h"
 #include "custom_backend/native_wallpaper_adapter.h"
 #include "custom_backend/native_stickers_adapter.h"
 #include "custom_backend/native_streaming_loader.h"
@@ -33,22 +34,6 @@
 #include <vector>
 
 namespace CustomBackend {
-namespace {
-
-// Written once per snapshot from the main thread and read by UI guards on the
-// same thread; no locking needed and none pretended.
-bool gEphemeralMediaSupported = false;
-
-} // namespace
-
-bool EphemeralMediaSupported() {
-    return gEphemeralMediaSupported;
-}
-
-void SetEphemeralMediaSupported(bool value) {
-    gEphemeralMediaSupported = value;
-}
-
 namespace {
 
 // The same store the tokens live in: it already carries the dev profile
@@ -462,11 +447,21 @@ void DetachSession(Main::Session *session) {
     }
     gBridges.erase(session);
 	gBridgeChanges.fire_copy(session);
+    if (session) {
+        // After the bridge: it is what fills this state, so once it is gone
+        // nothing can put the account's entries back.
+        Reactions::ClearSession(session);
+    }
 }
 
 NativeBridge *BridgeFor(Main::Session *session) {
     const auto i = gBridges.find(session);
     return (i == gBridges.end()) ? nullptr : i->second.get();
+}
+
+bool EphemeralMediaSupported(Main::Session *session) {
+    const auto bridge = BridgeFor(session);
+    return bridge && bridge->ephemeralMediaSupported();
 }
 
 void SaveNotifySettingsUpdates(

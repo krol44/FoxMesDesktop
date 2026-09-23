@@ -26,7 +26,9 @@ namespace {
 
 // Chats with a booking in flight. One entry per chat rather than a single flag:
 // two chats may legitimately be booking at the same time from two windows.
-base::flat_set<qint64> gPending;
+// Keyed by account too: the chat id is the server's, so two accounts on this
+// install that share a chat see the same id, and each books on its own.
+base::flat_set<std::pair<const Main::Session*, qint64>> gPending;
 
 // The server answers with contract codes ("resource not found"), which are
 // neither localized nor meaningful to whoever pressed the button, so the toast
@@ -81,14 +83,17 @@ void Start(not_null<History*> history) {
 			ShowError(u"chat could not be resolved"_q);
 			return;
 		}
-		if (!gPending.emplace(chatId).second) {
+		const auto key = std::pair<const Main::Session*, qint64>(
+			strong,
+			chatId);
+		if (!gPending.emplace(key).second) {
 			return;
 		}
 		ClientFor(strong).createMeet(
 			chatId,
 			QUuid::createUuid().toString(QUuid::WithoutBraces),
 			[=](QJsonDocument doc, QString error, int) {
-				gPending.remove(chatId);
+				gPending.remove(key);
 				const auto strong = weak.get();
 				if (!strong) {
 					return;

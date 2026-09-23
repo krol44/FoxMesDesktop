@@ -1704,7 +1704,8 @@ void SendFilesBox::pushBlock(int from, int till) {
 			// UI guard: the picker is offered only when this server takes the
 			// send, so a choice that would be refused is never shown.
 			&& (!CustomBackend::Enabled()
-				|| CustomBackend::EphemeralMediaSupported());
+				|| CustomBackend::EphemeralMediaSupported(
+					&_toPeer->session()));
 		if (canSetTtl) {
 			auto submenu = std::make_unique<Ui::PopupMenu>(
 				state->menu.get(),

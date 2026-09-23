@@ -35,6 +35,18 @@ constexpr auto kSetIdBase = uint64(0xF0C0000000000000ULL);
 
 struct State {
 	base::flat_map<DocumentId, DocumentId> stickers;
+	// The media views that own each sticker's bytes. A sticker document
+	// exists only in memory: nothing uploads or downloads it, so the only
+	// copy of its content is the one held here, and a view that died would
+	// take the picture with it. Per account: sticker ids are derived from the
+	// catalog and repeat in every session, so a shared map let the second
+	// login replace the views the first one was painting.
+	base::flat_map<DocumentId, std::shared_ptr<Data::DocumentMedia>> media;
+	// The footer icon of each set, kept alive for the same reason: the set
+	// thumbnail is in-memory, and StickersSet only holds a weak view.
+	base::flat_map<
+		not_null<Data::StickersSet*>,
+		std::shared_ptr<Data::StickersSetThumbnailView>> icons;
 	std::vector<uint64> setIds;
 	// Catalog rows already in the panel, with the mime they were built from.
 	// The mime is what a retry changes: a row whose emoji_webm request failed
@@ -43,30 +55,6 @@ struct State {
 	rpl::lifetime lifetime;
 	bool subscribed = false;
 };
-
-// The media views that own each sticker's bytes. A sticker document exists
-// only in memory: nothing uploads or downloads it, so the only copy of its
-// content is the one held here, and a view that died would take the picture
-// with it.
-base::flat_map<DocumentId, std::shared_ptr<Data::DocumentMedia>> &MediaCache() {
-	static auto value = base::flat_map<
-		DocumentId,
-		std::shared_ptr<Data::DocumentMedia>>();
-	return value;
-}
-
-// The footer icon of each set, kept alive for the same reason as MediaCache:
-// the set thumbnail is in-memory, and StickersSet only holds a weak view.
-// Keyed by the set object, not its id: ids are derived from the category name
-// and repeat across the sessions of two accounts.
-base::flat_map<
-	not_null<Data::StickersSet*>,
-	std::shared_ptr<Data::StickersSetThumbnailView>> &IconCache() {
-	static auto value = base::flat_map<
-		not_null<Data::StickersSet*>,
-		std::shared_ptr<Data::StickersSetThumbnailView>>();
-	return value;
-}
 
 base::flat_map<not_null<Main::Session*>, State> &States() {
 	static auto value = base::flat_map<not_null<Main::Session*>, State>();
@@ -147,8 +135,9 @@ base::flat_map<not_null<Main::Session*>, State> &States() {
 	// placeholder forever.
 	auto media = document->createMediaView();
 	media->setBytes(asset.content);
-	MediaCache()[document->id] = std::move(media);
-	StateFor(session).stickers[document->id] = item.id;
+	auto &state = StateFor(session);
+	state.media[document->id] = std::move(media);
+	state.stickers[document->id] = item.id;
 	return document;
 }
 
@@ -175,7 +164,7 @@ void SetIcon(
 		type);
 	auto view = set->createThumbnailView();
 	view->set(session, asset.content);
-	IconCache()[set] = std::move(view);
+	StateFor(session).icons[set] = std::move(view);
 }
 
 // Adds the sticker for one row, creating its set if this is the first entry of
@@ -186,7 +175,7 @@ void SetIcon(
 void ApplyOne(
 		not_null<Main::Session*> session,
 		const Reactions::CatalogItem &item) {
-	const auto asset = Reactions::AssetFor(item.id);
+	const auto asset = Reactions::AssetFor(session, item.id);
 	if (asset.content.isEmpty()) {
 		return;
 	}
@@ -200,7 +189,7 @@ void ApplyOne(
 		// swapped, and the next frame comes from the new content.
 		const auto setId = SetIdFor(item.category);
 		const auto id = StickerDocumentId(setId, item.id);
-		if (const auto j = MediaCache().find(id); j != MediaCache().end()) {
+		if (const auto j = state.media.find(id); j != state.media.end()) {
 			j->second->setBytes(asset.content);
 			i->second = asset.mime;
 			const auto &sets = session->data().stickers().sets();
@@ -260,21 +249,19 @@ void Clear(not_null<Main::Session*> session) {
 	auto &order = stickers.setsOrderRef();
 	for (const auto setId : state.setIds) {
 		if (const auto i = sets.find(setId); i != sets.end()) {
-			IconCache().remove(i->second.get());
+			state.icons.remove(i->second.get());
 		}
 		sets.remove(setId);
 		order.removeOne(setId);
 	}
 	state.setIds.clear();
 	state.alts.clear();
-	for (const auto &[id, emojiId] : state.stickers) {
-		MediaCache().remove(id);
-	}
+	state.media.clear();
 	state.stickers.clear();
 }
 
 void Apply(not_null<Main::Session*> session) {
-	for (const auto &item : Reactions::Catalog()) {
+	for (const auto &item : Reactions::Catalog(session)) {
 		ApplyOne(session, item);
 	}
 }
@@ -287,8 +274,8 @@ void Subscribe(not_null<Main::Session*> session) {
 	state.subscribed = true;
 	const auto weak = base::make_weak(session);
 	rpl::merge(
-		Reactions::CatalogChanged(),
-		Reactions::AssetLoaded() | rpl::to_empty
+		Reactions::CatalogChanged(session),
+		Reactions::AssetLoaded(session) | rpl::to_empty
 	) | rpl::on_next([weak] {
 		if (const auto strong = weak.get()) {
 			Apply(strong);
@@ -338,7 +325,7 @@ bool Send(
 		return false;
 	}
 	const auto emojiId = i->second;
-	const auto emoji = Reactions::EmojiFor(emojiId);
+	const auto emoji = Reactions::EmojiFor(session, emojiId);
 	if (!emojiId || emoji.isEmpty()) {
 		return false;
 	}

@@ -156,7 +156,11 @@ namespace {
 		return MTP_phoneCallDiscarded(
 			MTP_flags(flags),
 			id,
-			ParseReason(data.value("reason").toString()),
+			// The slug is what turns migrate_conference_call into a move into
+			// the conference; without it the peer would just hang up.
+			ParseReason(
+				data.value("reason").toString(),
+				data.value("slug").toString()),
 			MTP_int(data.value("duration").toInt()));
 	}
 

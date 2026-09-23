@@ -31,7 +31,10 @@ constexpr auto kMediaLimit = 40;
 // no-op, which is exactly what upstream needs it to be.
 constexpr auto kBridgeGlobalMarker = mtpRequestId(-1);
 
+// Per account as well as per peer: two accounts in the same group share the
+// PeerId, and one's request in flight must not swallow the other's.
 struct RequestKey {
+	const Main::Session *session = nullptr;
 	PeerId peerId = 0;
 	Type type = Type::kCount;
 	MsgId messageId = 0;
@@ -171,6 +174,7 @@ void Request(
 		return;
 	}
 	const auto key = RequestKey{
+		.session = session,
 		.peerId = peer->id,
 		.type = type,
 		.messageId = messageId,

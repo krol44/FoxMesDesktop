@@ -64,4 +64,18 @@ set(desktop_app_skip_libs
 )
 
 add_subdirectory(cmake)
+
+# range-v3 0.12.0 forward-declares the standard containers inside namespace
+# std, but only on Apple clang (meta.hpp, guarded by __apple_build_version__),
+# and it decorates every one of them with _LIBCPP_TEMPLATE_VIS. libc++ 22, the
+# one that ships with Xcode 27, dropped that macro, so `class META_TEMPLATE_VIS
+# allocator;` parses as a variable declaration and the build dies with
+# "redefinition of 'allocator' as different kind of symbol" on the first header
+# that pulls in <memory>.
+#
+# META_NO_STD_FORWARD_DECLARATIONS is the switch range-v3 provides for exactly
+# this, and it only removes declarations Linux and Windows builds never had:
+# outside Apple clang the same block is already compiled out.
+target_compile_definitions(external_ranges INTERFACE META_NO_STD_FORWARD_DECLARATIONS)
+
 add_subdirectory(Telegram)

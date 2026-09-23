@@ -391,8 +391,16 @@ void EnsureUsers(Main::Session *session, const QJsonObject &data) {
 		input,
 		ParseParticipants(data.value("participants").toArray()),
 		MTP_int(data.value("version").toInt())));
-	const auto blocks = data.value("chain_blocks").toObject();
-	if (!blocks.isEmpty()) {
+	// Both sub-chains, as the server of upstream answers: 0 carries the block
+	// this join wrote, 1 only says where the broadcast messages start for
+	// this participant. Without the second the first broadcast block looked
+	// like a gap from zero, and the whole broadcast history of the call was
+	// fetched again, blocks addressed to earlier participants included.
+	for (const auto key : { "chain_blocks", "broadcast_blocks" }) {
+		const auto blocks = data.value(QLatin1String(key)).toObject();
+		if (blocks.isEmpty()) {
+			continue;
+		}
 		list.push_back(MTP_updateGroupCallChainBlocks(
 			input,
 			MTP_int(blocks.value("sub_chain_id").toInt()),

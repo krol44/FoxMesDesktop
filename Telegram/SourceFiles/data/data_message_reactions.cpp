@@ -426,12 +426,7 @@ Reactions::Reactions(not_null<Session*> owner)
 	});
 }
 
-Reactions::~Reactions() {
-	// Data::Session (and every DocumentData it owns) is going away right
-	// after this: the bridge's process-lifetime reaction caches must drop
-	// their now-dangling pointers here, not on the next login.
-	CustomBackend::Reactions::ClearSessionCaches();
-}
+Reactions::~Reactions() = default;
 
 Main::Session &Reactions::session() const {
 	return _owner->session();
