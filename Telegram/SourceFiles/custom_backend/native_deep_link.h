@@ -16,4 +16,11 @@ void RegisterScheme();
 [[nodiscard]] bool HandleStartUrl(const QUrl &url);
 [[nodiscard]] bool StartUrlRequiresActivate(const QString &url);
 
+// FoxMes's internal links live under fxl.ru/@ (MTP::ConfigFields), which
+// upstream's t.me patterns in TryConvertUrlToLocal do not know. Returns the
+// t.me form of such a link, so the client opens it itself - a user, a
+// public chat (with ?videochat / ?livestream a call) or, as c/<id>, a
+// private one - and any other url unchanged.
+[[nodiscard]] QString LocalizeInternalLink(const QString &url);
+
 } // namespace CustomBackend::DeepLinks

@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/peers/edit_participants_box.h"
 
+#include "custom_backend/native_runtime.h"
+
 #include "api/api_chat_participants.h"
 #include "boxes/peers/edit_participant_box.h"
 #include "boxes/peers/edit_tag_control.h"
@@ -56,6 +58,9 @@ constexpr auto kParticipantsPerPage = 200;
 constexpr auto kSortByOnlineDelay = crl::time(1000);
 
 [[nodiscard]] bool SupportsMemberTags(not_null<PeerData*> peer) {
+	if (CustomBackend::HideGroupExtras) {
+		return false;
+	}
 	const auto channel = peer->asChannel();
 	return !channel || (!channel->isBroadcast() && !channel->isCommunity());
 }
@@ -1485,7 +1490,9 @@ void ParticipantsBoxController::prepare() {
 		}
 		Unexpected("Role in ParticipantsBoxController::prepare()");
 	}();
-	if (const auto megagroup = _peer->asMegagroup()) {
+	if (const auto megagroup = CustomBackend::HideGroupExtras
+			? nullptr
+			: _peer->asMegagroup()) {
 		if (_role == Role::Members) {
 			delegate()->peerListSetAboveWidget(CreateMembersVisibleButton(
 				megagroup));
@@ -2108,7 +2115,9 @@ base::unique_qptr<Ui::PopupMenu> ParticipantsBoxController::rowContextMenu(
 		}
 		return result;
 	}
-	if (user && _additional.canAddOrEditAdmin(user)) {
+	if (user
+		&& _additional.canAddOrEditAdmin(user)
+		&& !CustomBackend::HideGroupExtras) {
 		const auto isAdmin = _additional.isCreator(user)
 			|| _additional.adminRights(user).has_value();
 		result->addAction(
@@ -2127,7 +2136,7 @@ base::unique_qptr<Ui::PopupMenu> ParticipantsBoxController::rowContextMenu(
 			}
 			return _peer->isMegagroup() && !_peer->isGigagroup();
 		}();
-		if (canRestrictWithoutKick) {
+		if (canRestrictWithoutKick && !CustomBackend::HideGroupExtras) {
 			result->addAction(
 				tr::lng_context_restrict_user(tr::now),
 				crl::guard(this, [=] { showRestricted(user); }),

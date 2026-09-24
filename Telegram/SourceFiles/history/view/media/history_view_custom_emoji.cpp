@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/media/history_view_custom_emoji.h"
 
 #include "history/view/media/history_view_sticker.h"
+#include "custom_backend/native_reactions_adapter.h"
 #include "history/view/history_view_element.h"
 #include "history/history.h"
 #include "history/history_item.h"
@@ -78,6 +79,17 @@ CustomEmoji::CustomEmoji(
 		? int(base::SafeRound(
 			i->second.scale * Sticker::EmojiSize().width()))
 		: (Data::FrameSizeFromTag(tag) / style::DevicePixelRatio());
+	if (dimension == 1) {
+		const auto id = Data::ParseCustomEmojiData(
+			emoji.lines.front().front().entityData);
+		const auto document = owner->document(id);
+		if (document->sticker()
+			&& document->sticker()->isWebm()
+			&& CustomBackend::Reactions::IsSourceWebm(
+				&parent->history()->session(), id)) {
+			_singleSize = Sticker::Size().width();
+		}
+	}
 	if (!useCustomEmoji) {
 		_cachingTag = i->second.tag;
 	}
@@ -112,6 +124,15 @@ void CustomEmoji::customEmojiResolveDone(not_null<DocumentData*> document) {
 	}
 	_resolving = false;
 	const auto id = document->id;
+	const auto singleWebm = document->sticker()->isWebm()
+		&& CustomBackend::Reactions::IsSourceWebm(
+			&_parent->history()->session(), id)
+		&& _lines.size() == 1
+		&& _lines.front().size() == 1
+		&& _lines.front().front() == id;
+	if (singleWebm) {
+		_singleSize = Sticker::Size().width();
+	}
 	for (auto &line : _lines) {
 		for (auto &entry : line) {
 			if (entry == id) {
@@ -120,6 +141,9 @@ void CustomEmoji::customEmojiResolveDone(not_null<DocumentData*> document) {
 				_resolving = true;
 			}
 		}
+	}
+	if (singleWebm) {
+		_parent->history()->owner().requestViewResize(_parent);
 	}
 }
 
@@ -130,9 +154,9 @@ std::unique_ptr<Sticker> CustomEmoji::createStickerPart(
 		_parent,
 		document,
 		skipPremiumEffect);
+	result->setCustomEmojiPart();
 	result->initSize(_singleSize);
 	result->setCustomCachingTag(_cachingTag);
-	result->setCustomEmojiPart();
 	return result;
 }
 

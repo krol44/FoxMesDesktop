@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "ui/controls/userpic_button.h"
 
+#include "custom_backend/native_runtime.h"
+
 #include "apiwrap.h"
 #include "api/api_peer_photo.h"
 #include "ui/effects/upload_progress_overlay.h"
@@ -382,7 +384,7 @@ void UserpicButton::choosePhotoLocally() {
 	};
 	const auto user = _peer ? _peer->asUser() : nullptr;
 	const auto addUserpicBuilder = [&](ChosenType type) {
-		if (!_controller) {
+		if (!_controller || (CustomBackend::HideGroupExtras && !user)) {
 			return;
 		}
 		const auto done = [=](UserpicBuilder::Result data) {

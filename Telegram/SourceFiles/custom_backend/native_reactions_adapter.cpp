@@ -97,6 +97,7 @@ struct State final {
     // catalog a second time for that would double the traffic of every login.
     base::flat_map<DocumentId, Asset> assets;
     base::flat_map<DocumentId, PendingAsset> pending;
+    QSet<DocumentId> sourceWebmIds;
     QSet<QString> requested;
 
     // Fires once per row whose asset just landed, so a panel built before the
@@ -400,6 +401,11 @@ void DownloadAsset(
         if (i == state.pending.end()) {
             return ok;
         }
+        if (video) {
+            state.sourceWebmIds.insert(id);
+        } else {
+            state.sourceWebmIds.remove(id);
+        }
         i->second.source = normalized;
         if (video) {
             i->second.animated = body;
@@ -553,7 +559,14 @@ MTPMessageReactions Build(
     const auto recent = BuildRecent(normalized.first, normalized.second, myUserId);
     using Flag = MTPDmessageReactions::Flag;
     using Flags = base::flags<Flag>;
-    auto flags = Flags(Flag::f_can_see_list);
+    // A channel post's reactions come as counts without a user_id: nobody
+    // may see who reacted, as with upstream's broadcast channels.
+    const auto anonymous = ranges::any_of(reactions, [](const QJsonValue &v) {
+        const auto object = v.toObject();
+        return (object.value("count").toInt() > 0)
+            && !object.value("user_id").toVariant().toLongLong();
+    });
+    auto flags = anonymous ? Flags() : Flags(Flag::f_can_see_list);
     if (!recent.isEmpty()) {
         flags |= Flag::f_recent_reactions;
     }
@@ -804,6 +817,11 @@ Asset AssetFor(not_null<Main::Session*> session, DocumentId id) {
     const auto &assets = StateFor(session).assets;
     const auto i = assets.find(id);
     return (i == assets.end()) ? Asset() : i->second;
+}
+
+bool IsSourceWebm(not_null<Main::Session*> session, DocumentId id) {
+    const auto state = FindState(session);
+    return state && state->sourceWebmIds.contains(id);
 }
 
 rpl::producer<DocumentId> AssetLoaded(not_null<Main::Session*> session) {

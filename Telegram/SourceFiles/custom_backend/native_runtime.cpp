@@ -184,12 +184,12 @@ QString BaseUrl() {
         return value;
     }
 #if !FOXMES_ALLOW_ENDPOINT_OVERRIDE
-    return u"https://api-fox-mes.fxl.ru"_q;
+    return u"https://foxmes.foxtail.ing"_q;
 #else
 #if defined(_DEBUG)
     return u"http://0.0.0.0:7034"_q;
 #else
-    return u"https://api-fox-mes.fxl.ru"_q;
+    return u"https://foxmes.foxtail.ing"_q;
 #endif
 #endif // !FOXMES_ALLOW_ENDPOINT_OVERRIDE
 }
@@ -207,10 +207,12 @@ DownloadAuth AuthorizeDownload(Main::Session *session, const QUrl &url) {
     // The API is on the list because GET /link-preview/image is bearer'd like
     // every other route, and that one is read by the file loaders rather than
     // by the REST client. The dev host is only accepted in a dev build, where
-    // FOXMES_URL is set.
+    // FOXMES_URL is set. cdn.fxl.ru stays next to cdn.foxtail.ing: both serve
+    // the same files, and older messages still carry the old host.
     const auto host = url.host().toLower();
     const auto api = QUrl(BaseUrl()).host().toLower();
-    const auto ours = (host == u"cdn.fxl.ru"_q)
+    const auto ours = (host == u"cdn.foxtail.ing"_q)
+        || (host == u"cdn.fxl.ru"_q)
         || (!api.isEmpty() && (host == api))
         || (DevInsecureTls() && (host == u"cdn.fxl.test"_q));
     if (!ours) {
@@ -336,11 +338,20 @@ void SaveChatsCache(Main::Session *session, const QByteArray &json) {
 	settings.sync();
 }
 
-QJsonObject LoadDefaultNotifyCache(Main::Session *session) {
+// The user scope keeps the key it had before groups existed.
+[[nodiscard]] QString DefaultNotifyCacheKey(const QString &scope) {
+	return (scope.isEmpty() || scope == u"user"_q)
+		? u"/notify_defaults"_q
+		: (u"/notify_defaults_"_q + scope);
+}
+
+QJsonObject LoadDefaultNotifyCache(
+		Main::Session *session,
+		const QString &scope) {
 	const auto id = SessionUserId(session);
 	if (id <= 0) return {};
 	const auto raw = Settings().value(
-		Prefix(id) + u"/notify_defaults"_q).toByteArray();
+		Prefix(id) + DefaultNotifyCacheKey(scope)).toByteArray();
 	const auto document = QJsonDocument::fromJson(raw);
 	return document.isObject() ? document.object() : QJsonObject();
 }
@@ -352,7 +363,7 @@ void SaveDefaultNotifyCache(
 	if (id <= 0 || settings.isEmpty()) return;
 	auto storage = Settings();
 	storage.setValue(
-		Prefix(id) + u"/notify_defaults"_q,
+		Prefix(id) + DefaultNotifyCacheKey(settings.value("scope").toString()),
 		QJsonDocument(settings).toJson(QJsonDocument::Compact));
 	storage.sync();
 }
@@ -457,6 +468,27 @@ void DetachSession(Main::Session *session) {
 NativeBridge *BridgeFor(Main::Session *session) {
     const auto i = gBridges.find(session);
     return (i == gBridges.end()) ? nullptr : i->second.get();
+}
+
+bool CanCreateGroups(Main::Session *session) {
+    const auto bridge = session ? BridgeFor(session) : nullptr;
+    return bridge && bridge->canCreateGroups();
+}
+
+bool CanCreateChannels(Main::Session *session) {
+    const auto bridge = session ? BridgeFor(session) : nullptr;
+    return bridge && bridge->canCreateChannels();
+}
+
+void UploadPeerPhoto(
+        not_null<PeerData*> peer,
+        QImage &&image,
+        std::function<void()> done) {
+    const auto channel = peer->asChannel();
+    const auto bridge = channel ? BridgeFor(&peer->session()) : nullptr;
+    if (bridge) {
+        bridge->uploadCommunityPhoto(channel, std::move(image), std::move(done));
+    }
 }
 
 bool EphemeralMediaSupported(Main::Session *session) {

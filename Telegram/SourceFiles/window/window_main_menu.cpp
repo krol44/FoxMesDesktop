@@ -692,7 +692,9 @@ void MainMenu::setupMenu() {
 			object_ptr<Ui::PlainShadow>(_menu),
 			{ 0, st::mainMenuSkip, 0, st::mainMenuSkip });
 
-		if (!CustomBackend::DisableWhile) {
+		const auto session = &controller->session();
+		if (!CustomBackend::DisableWhile
+			|| CustomBackend::CanCreateGroups(session)) {
 			AddMyChannelsBox(addAction(
 				tr::lng_create_group_title(),
 				{ &st::menuIconGroups }
@@ -701,7 +703,9 @@ void MainMenu::setupMenu() {
 					controller->showNewGroup();
 				}
 			});
-
+		}
+		if (!CustomBackend::DisableWhile
+			|| CustomBackend::CanCreateChannels(session)) {
 			AddMyChannelsBox(addAction(
 				tr::lng_create_channel_title(),
 				{ &st::menuIconChannel }
@@ -710,7 +714,8 @@ void MainMenu::setupMenu() {
 					controller->showNewChannel();
 				}
 			});
-
+		}
+		if (!CustomBackend::DisableWhile) {
 			addAction(
 				tr::lng_menu_contacts(),
 				{ &st::menuIconUserShow }

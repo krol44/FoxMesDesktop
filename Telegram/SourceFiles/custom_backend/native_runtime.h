@@ -17,6 +17,7 @@
 class QNetworkReply;
 
 class PeerData;
+class QImage;
 class HistoryItem;
 
 namespace Data {
@@ -40,6 +41,15 @@ class NativeBridge;
 
 [[nodiscard]] bool Enabled();
 inline constexpr bool DisableWhile = true;
+// Group and channel features FoxMes does not have: topics, reaction settings,
+// permissions, invite links, administrators, polls, boosts and the rest
+// listed in FOXMES_BRIDGE.md ("Правила групп и каналов"). Upstream code stays;
+// only its entry points are hidden by this.
+inline constexpr bool HideGroupExtras = true;
+// "New Group" / "New Channel" are shown only to accounts holding the
+// foxMes.createGroup / foxMes.createChannel access rule.
+[[nodiscard]] bool CanCreateGroups(Main::Session *session);
+[[nodiscard]] bool CanCreateChannels(Main::Session *session);
 
 // Mirrors ChatMessageRetention in fxl-cron (internal/jobs/chats.go): the
 // backend drops chat messages older than this and keeps the personal chat and
@@ -115,7 +125,10 @@ void SaveChatsCache(Main::Session *session, const QByteArray &json);
 // before the first response arrives: an unknown default makes every unmuted
 // peer read as muted, so the cache is what keeps the setting from flickering
 // across a restart.
-[[nodiscard]] QJsonObject LoadDefaultNotifyCache(Main::Session *session);
+// One per scope ("user", "group", "channel"); settings carry their scope.
+[[nodiscard]] QJsonObject LoadDefaultNotifyCache(
+	Main::Session *session,
+	const QString &scope);
 void SaveDefaultNotifyCache(Main::Session *session, const QJsonObject &settings);
 
 // Whether this account has already been given the first-run look the server
@@ -149,6 +162,14 @@ void MarkEphemeralViewed(
 // ephemeral message into any projection. Per account, since each one asks
 // its own server session.
 [[nodiscard]] bool EphemeralMediaSupported(Main::Session *session);
+// The photo of a group or channel. Upstream's uploader sends MTProto file
+// parts, which go nowhere under the bridge, so Api::PeerPhoto hands the image
+// here and it goes to PUT /chats/{id}/photo. done runs on success only, like
+// upstream's.
+void UploadPeerPhoto(
+	not_null<PeerData*> peer,
+	QImage &&image,
+	std::function<void()> done);
 
 // Points the media of a disappearing message at the url a view session just
 // granted. It lives beside the bridge because the photo path needs

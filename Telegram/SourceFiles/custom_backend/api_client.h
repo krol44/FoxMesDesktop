@@ -341,6 +341,15 @@ public:
         const QString &path,
         const QJsonObject &body,
         Callback done);
+    // Groups and channels: the channels adapter answers upstream's channels.*
+    // one to one and owns the paths and bodies, like the conference adapter.
+    void communityRequest(
+        const QByteArray &method,
+        const QString &path,
+        const QJsonObject &body,
+        Callback done);
+    // PUT /chats/{id}/photo - an image as multipart "file".
+    void communityPhoto(qint64 chatId, const QByteArray &jpeg, Callback done);
     void markDelivered(
         qint64 chatId,
         const QList<qint64> &messageIds,
@@ -394,8 +403,9 @@ public:
         bool showPreviews,
         bool soundNone,
         Callback done);
-    void defaultNotificationSettings(Callback done);
+    void defaultNotificationSettings(const QString &scope, Callback done);
     void setDefaultNotificationSettings(
+        const QString &scope,
         qint64 muteUntil,
         bool soundNone,
         const QString &operationId,

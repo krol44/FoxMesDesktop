@@ -962,6 +962,43 @@ void ApiClient::conferenceRequest(
         std::move(done));
 }
 
+void ApiClient::communityRequest(
+        const QByteArray &method,
+        const QString &path,
+        const QJsonObject &body,
+        Callback done) {
+    jsonRequest(
+        method,
+        path,
+        (method == "GET" || method == "DELETE")
+            ? QJsonDocument()
+            : QJsonDocument(body),
+        std::move(done));
+}
+
+void ApiClient::communityPhoto(
+        qint64 chatId,
+        const QByteArray &jpeg,
+        Callback done) {
+    auto multipart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
+    QHttpPart part;
+    part.setHeader(
+        QNetworkRequest::ContentDispositionHeader,
+        u"form-data; name=\"file\"; filename=\"photo.jpg\""_q);
+    part.setHeader(QNetworkRequest::ContentTypeHeader, u"image/jpeg"_q);
+    part.setBody(jpeg);
+    multipart->append(part);
+    const auto lane = std::make_shared<UploadLane>();
+    auto request = makeRequest(
+        QString("/chats/%1/photo").arg(chatId),
+        false,
+        true,
+        lane);
+    auto reply = _network.put(request, multipart);
+    multipart->setParent(reply);
+    finish(reply, std::move(done), lane);
+}
+
 void ApiClient::callSignaling(qint64 callId, const QByteArray &data, Callback done) {
     jsonRequest("POST", QString("/calls/%1/signaling").arg(callId), QJsonDocument(QJsonObject{
         {"data", QString::fromLatin1(data.toBase64())},
@@ -1100,17 +1137,24 @@ void ApiClient::setNotificationSettings(
     }), std::move(done));
 }
 
-void ApiClient::defaultNotificationSettings(Callback done) {
-    jsonRequest("GET", u"/notification-settings/defaults"_q, {}, std::move(done));
+void ApiClient::defaultNotificationSettings(
+        const QString &scope,
+        Callback done) {
+    jsonRequest(
+        "GET",
+        u"/notification-settings/defaults?scope="_q + scope,
+        {},
+        std::move(done));
 }
 
 void ApiClient::setDefaultNotificationSettings(
+        const QString &scope,
         qint64 muteUntil,
         bool soundNone,
         const QString &operationId,
         Callback done) {
     jsonRequest("PUT", u"/notification-settings/defaults"_q, QJsonDocument(QJsonObject{
-        {"scope", "user"},
+        {"scope", scope},
         {"mute_until", muteUntil},
         {"sound_none", soundNone},
         {"operation_id", operationId.isEmpty()

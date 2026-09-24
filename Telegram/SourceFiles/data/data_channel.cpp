@@ -36,6 +36,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_chat_invite.h"
 #include "api/api_invite_links.h"
 #include "apiwrap.h"
+#include "custom_backend/native_runtime.h"
 #include "storage/storage_account.h"
 #include "ui/unread_badge.h"
 #include "window/notifications_manager.h"
@@ -126,6 +127,11 @@ void ChannelData::setPhoto(const MTPChatPhoto &photo) {
 			data.vdc_id().v,
 			data.is_has_video());
 	}, [&](const MTPDchatPhotoEmpty &) {
+		// FoxMes: the bridge owns community photos - a url userpic TL cannot
+		// carry - and clearing it on every processChat reloaded the image.
+		if (CustomBackend::Enabled()) {
+			return;
+		}
 		clearUserpic();
 	});
 }

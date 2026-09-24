@@ -1904,7 +1904,7 @@ bool SessionController::hasTabbedSelectorOwnership() const {
 }
 
 void SessionController::showEditPeerBox(PeerData *peer) {
-	if (CustomBackend::DisableWhile) {
+	if (CustomBackend::DisableWhile && !(peer && peer->isChannel())) {
 		return;
 	}
 	_showEditPeer = peer;
@@ -3338,6 +3338,11 @@ void SessionController::showAddContact() {
 }
 
 void SessionController::showNewGroup() {
+	if (CustomBackend::Enabled()) {
+		// FoxMes groups are megagroups (custom_backend/native_community.h).
+		_window->show(Box<GroupInfoBox>(this, GroupInfoBox::Type::Megagroup));
+		return;
+	}
 	_window->show(Box<GroupInfoBox>(this, GroupInfoBox::Type::Group));
 }
 

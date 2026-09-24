@@ -1933,6 +1933,16 @@ QString TryConvertUrlToLocal(QString url) {
 	if (url.size() > 8192) {
 		url = url.mid(0, 8192);
 	}
+	if (CustomBackend::Enabled()) {
+		// FoxMes: fxl.ru/@ links are opened here as t.me ones are; one this
+		// cannot place keeps its own address instead of turning into t.me.
+		const auto internal = CustomBackend::DeepLinks::LocalizeInternalLink(
+			url);
+		if (internal != url) {
+			const auto result = TryConvertUrlToLocal(internal);
+			return result.startsWith(u"tg://"_q) ? result : url;
+		}
+	}
 
 	using namespace qthelp;
 	auto matchOptions = RegExOption::CaseInsensitive;

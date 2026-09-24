@@ -190,7 +190,7 @@ def main() -> int:
     )
     if "#if FOXMES_ALLOW_ENDPOINT_OVERRIDE" not in runtime:
         failures.append("native_runtime.cpp does not compile-time guard FOXMES_URL")
-    if 'u"https://api-fox-mes.fxl.ru"_q' not in runtime:
+    if 'u"https://foxmes.foxtail.ing"_q' not in runtime:
         failures.append("native_runtime.cpp has no baked-in production endpoint")
 
     for expected, path in EXPECTED_CONSTANTS.items():
@@ -201,9 +201,9 @@ def main() -> int:
     for line in (ROOT / "Telegram/build/version").read_text(encoding="utf-8").splitlines():
         key, value = line.split(maxsplit=1)
         version_values[key] = value
-    if version_values.get("AppVersion") != "1007004":
+    if version_values.get("AppVersion") != "1008000":
         failures.append("Telegram/build/version has an unexpected version code")
-    if version_values.get("AppVersionStr") != "1.7.4":
+    if version_values.get("AppVersionStr") != "1.8.0":
         failures.append("Telegram/build/version has an unexpected version string")
 
     startup_task = (

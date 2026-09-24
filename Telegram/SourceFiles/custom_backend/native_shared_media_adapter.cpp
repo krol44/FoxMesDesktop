@@ -96,6 +96,11 @@ struct Anchors {
 	if (!messageId) {
 		return {};
 	}
+	if (messageId.bare > INT32_MAX) {
+		return (direction == Data::LoadDirection::After)
+			? Anchors{ .after = INT32_MAX }
+			: Anchors{};
+	}
 	switch (direction) {
 	case Data::LoadDirection::Before: return { .before = messageId.bare };
 	case Data::LoadDirection::After: return { .after = messageId.bare };
@@ -195,6 +200,9 @@ void Request(
 		kMediaLimit,
 		[=](NativeBridge::MediaPage page) {
 			PendingRequests().remove(key);
+			if (page.failed) {
+				return;
+			}
 			const auto strong = weak.get();
 			if (!strong) {
 				return;
@@ -256,6 +264,10 @@ void Search(
 			auto &states = SearchStates();
 			const auto i = states.find(owner.get());
 			if ((i == end(states)) || !i->second.live.remove(requestId)) {
+				return;
+			}
+			if (page.failed) {
+				done({});
 				return;
 			}
 			const auto strong = weak.get();

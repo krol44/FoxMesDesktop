@@ -1171,23 +1171,16 @@ void BuildNotifyTypeSection(SectionBuilder &builder) {
 			controller,
 			Data::DefaultNotify::User,
 			showOther);
-		// Groups and channels are outside the current product scope: the
-		// bridge serves the private chats default only, and a toggle whose
-		// change cannot be saved is worse than no toggle at all.
-		const auto groups = CustomBackend::DisableWhile
-			? static_cast<Ui::SettingsButton*>(nullptr)
-			: AddTypeButton(
-				ctx.container,
-				controller,
-				Data::DefaultNotify::Group,
-				showOther).get();
-		const auto channels = CustomBackend::DisableWhile
-			? static_cast<Ui::SettingsButton*>(nullptr)
-			: AddTypeButton(
-				ctx.container,
-				controller,
-				Data::DefaultNotify::Broadcast,
-				showOther).get();
+		const auto groups = AddTypeButton(
+			ctx.container,
+			controller,
+			Data::DefaultNotify::Group,
+			showOther).get();
+		const auto channels = AddTypeButton(
+			ctx.container,
+			controller,
+			Data::DefaultNotify::Broadcast,
+			showOther).get();
 		const auto reactions = CustomBackend::Enabled()
 			? static_cast<Ui::SettingsButton*>(nullptr)
 			: AddReactionsButton(ctx.container, controller, showOther).get();
@@ -1224,26 +1217,22 @@ void BuildNotifyTypeSection(SectionBuilder &builder) {
 			.icon = { &st::menuIconProfile },
 		};
 	});
-	// Search must not offer a row that is not built: the group and channel
-	// buttons above are hidden while the product scope is private chats.
-	if (!CustomBackend::DisableWhile) {
-		builder.add(nullptr, [] {
-			return SearchEntry{
-				.id = u"notifications/groups"_q,
-				.title = tr::lng_notification_groups(tr::now),
-				.keywords = { u"groups"_q, u"chats"_q },
-				.icon = { &st::menuIconGroups },
-			};
-		});
-		builder.add(nullptr, [] {
-			return SearchEntry{
-				.id = u"notifications/channels"_q,
-				.title = tr::lng_notification_channels(tr::now),
-				.keywords = { u"channels"_q, u"broadcast"_q },
-				.icon = { &st::menuIconChannel },
-			};
-		});
-	}
+	builder.add(nullptr, [] {
+		return SearchEntry{
+			.id = u"notifications/groups"_q,
+			.title = tr::lng_notification_groups(tr::now),
+			.keywords = { u"groups"_q, u"chats"_q },
+			.icon = { &st::menuIconGroups },
+		};
+	});
+	builder.add(nullptr, [] {
+		return SearchEntry{
+			.id = u"notifications/channels"_q,
+			.title = tr::lng_notification_channels(tr::now),
+			.keywords = { u"channels"_q, u"broadcast"_q },
+			.icon = { &st::menuIconChannel },
+		};
+	});
 	// The reactions button above is not built under the bridge (its settings
 	// live in MTProto), so its search entry must not be offered either.
 	if (!CustomBackend::Enabled()) {

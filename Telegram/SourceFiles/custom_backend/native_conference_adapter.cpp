@@ -10,7 +10,11 @@ This file is part of FoxMes Desktop.
 #include "core/application.h"
 #include "custom_backend/api_client.h"
 #include "custom_backend/native_bridge.h"
+#include "custom_backend/native_mtp_router.h"
 #include "custom_backend/native_runtime.h"
+#include "data/data_channel.h"
+#include "data/data_group_call.h"
+#include "data/data_session.h"
 #include "main/main_account.h"
 #include "main/main_domain.h"
 #include "main/main_session.h"
@@ -27,42 +31,8 @@ namespace {
 
 using SerializedRequest = MTP::details::SerializedRequest;
 using Callback = ApiClient::Callback;
-
-constexpr auto kBody = SerializedRequest::kMessageBodyPosition;
-
-// A request is read field by field with the field types' own readers: the
-// generated request classes can read themselves but keep their fields
-// private, so there is nothing to read them into.
-class Reader final {
-public:
-	Reader(const mtpPrime *from, const mtpPrime *end)
-	: _from(from)
-	, _end(end) {
-	}
-
-	template <typename Type>
-	[[nodiscard]] Type read() {
-		auto result = Type();
-		if (_ok && !result.read(_from, _end)) {
-			_ok = false;
-		}
-		return result;
-	}
-
-	[[nodiscard]] int32 flags() {
-		return read<MTPint>().v;
-	}
-
-	[[nodiscard]] bool ok() const {
-		return _ok;
-	}
-
-private:
-	const mtpPrime *_from = nullptr;
-	const mtpPrime *_end = nullptr;
-	bool _ok = true;
-
-};
+using Mtp::Answer;
+using Mtp::Reader;
 
 [[nodiscard]] qint64 Number(const QJsonObject &data, const char *key) {
 	return data.value(QLatin1String(key)).toVariant().toLongLong();
@@ -89,15 +59,6 @@ private:
 	return QByteArray(
 		reinterpret_cast<const char*>(buffer.constData()),
 		int(buffer.size() * sizeof(mtpPrime)));
-}
-
-[[nodiscard]] Main::Session *SessionFor(not_null<MTP::Instance*> instance) {
-	for (const auto &[index, account] : Core::App().domain().accounts()) {
-		if (&account->mtp() == instance.get() && account->sessionExists()) {
-			return &account->session();
-		}
-	}
-	return nullptr;
 }
 
 // What a request names as the call. Upstream mostly knows the id, but the
@@ -140,49 +101,6 @@ struct Target {
 	});
 }
 
-// --- answers -----------------------------------------------------------
-
-// Delivers an answer the way a Telegram server's would arrive. The instance
-// can die while fxl-api thinks (logout), hence the guard.
-class Answer final {
-public:
-	Answer(not_null<MTP::Instance*> instance, mtpRequestId requestId)
-	: _instance(instance.get())
-	, _requestId(requestId) {
-	}
-
-	// Boxed only: a reply starts with its constructor id, and a bare type
-	// written here reaches upstream as an unparsable answer.
-	template <typename Bare>
-	void done(const tl::boxed<Bare> &result) const {
-		auto reply = mtpBuffer();
-		result.write(reply);
-		deliver(std::move(reply));
-	}
-
-	void fail(const QString &type, int code = 400) const {
-		auto reply = mtpBuffer();
-		MTPRpcError(
-			MTP_rpc_error(MTP_int(code), MTP_string(type))).write(reply);
-		deliver(std::move(reply));
-	}
-
-private:
-	void deliver(mtpBuffer &&reply) const {
-		if (const auto instance = _instance.data()) {
-			instance->processCallback(MTP::Response{
-				.reply = std::move(reply),
-				.outerMsgId = mtpMsgId(base::unixtime::mtproto_msg_id()),
-				.requestId = _requestId,
-			});
-		}
-	}
-
-	QPointer<MTP::Instance> _instance;
-	mtpRequestId _requestId = 0;
-
-};
-
 // fxl-api answers errors with the MTProto error type in "code", so upstream
 // gets exactly the error it knows how to react to (rejoin, refresh the chain
 // top, "already in the call").
@@ -190,17 +108,12 @@ private:
 		const QJsonDocument &doc,
 		const QString &error,
 		int status) {
-	const auto code = doc.isObject()
-		? doc.object().value("code").toString()
-		: QString();
-	if (!code.isEmpty() && code.toUpper() == code) {
-		return code;
-	} else if (status == 404) {
-		return u"GROUPCALL_INVALID"_q;
-	} else if (status == 403) {
-		return u"GROUPCALL_FORBIDDEN"_q;
-	}
-	return error.isEmpty() ? u"INTERNAL_SERVER_ERROR"_q : error;
+	return Mtp::ErrorType(
+		doc,
+		error,
+		status,
+		u"GROUPCALL_INVALID"_q,
+		u"GROUPCALL_FORBIDDEN"_q);
 }
 
 [[nodiscard]] MTPInputGroupCall InputCall(qint64 id, qint64 accessHash) {
@@ -219,7 +132,10 @@ private:
 			MTP_int(data.value("duration").toInt()));
 	}
 	using Flag = MTPDgroupCall::Flag;
-	auto flags = Flag::f_conference | Flag();
+	// The video chat of a group or channel is upstream's peer call, not a
+	// conference: fxl-api marks it by the chat it belongs to.
+	const auto chatCall = data.contains("chat_id");
+	auto flags = chatCall ? MTPDgroupCall::Flags() : (Flag::f_conference | Flag());
 	const auto set = [&](const char *key, Flag flag) {
 		if (data.value(QLatin1String(key)).toBool()) {
 			flags |= flag;
@@ -232,6 +148,15 @@ private:
 	set("creator", Flag::f_creator);
 	set("messages_enabled", Flag::f_messages_enabled);
 	set("can_change_messages_enabled", Flag::f_can_change_messages_enabled);
+	set("schedule_start_subscribed", Flag::f_schedule_start_subscribed);
+	const auto title = data.value("title").toString();
+	if (!title.isEmpty()) {
+		flags |= Flag::f_title;
+	}
+	const auto scheduleDate = data.value("schedule_date").toInt();
+	if (scheduleDate) {
+		flags |= Flag::f_schedule_date;
+	}
 	const auto link = data.value("invite_link").toString();
 	if (!link.isEmpty()) {
 		flags |= Flag::f_invite_link;
@@ -241,16 +166,28 @@ private:
 		MTP_long(Number(data, "id")),
 		MTP_long(Number(data, "access_hash")),
 		MTP_int(data.value("participants_count").toInt()),
-		MTPstring(), // title
+		MTP_string(title),
 		MTPint(), // stream_dc_id
 		MTPint(), // record_start_date
-		MTPint(), // schedule_date
+		MTP_int(scheduleDate),
 		MTPint(), // unmuted_video_count
 		MTP_int(data.value("unmuted_video_limit").toInt()),
 		MTP_int(data.value("version").toInt()),
 		MTP_string(link),
 		MTPlong(), // send_paid_messages_stars
 		MTPPeer()); // default_send_as
+}
+
+// updateGroupCall names the chat of a group or channel video chat, which is
+// what ties the call to its peer on the receiving side.
+[[nodiscard]] MTPUpdate CallUpdate(const QJsonObject &call) {
+	const auto chatId = Number(call, "chat_id");
+	return MTP_updateGroupCall(
+		MTP_flags(chatId
+			? MTPDupdateGroupCall::Flag::f_peer
+			: MTPDupdateGroupCall::Flags(0)),
+		chatId ? MTP_peerChannel(MTP_long(chatId)) : MTPPeer(),
+		ParseGroupCall(call));
 }
 
 [[nodiscard]] MTPGroupCallParticipantVideo ParseVideo(const QJsonObject &data) {
@@ -380,10 +317,7 @@ void EnsureUsers(Main::Session *session, const QJsonObject &data) {
 	const auto call = data.value("call").toObject();
 	const auto input = InputCall(call);
 	auto list = QVector<MTPUpdate>();
-	list.push_back(MTP_updateGroupCall(
-		MTP_flags(0),
-		MTPPeer(),
-		ParseGroupCall(call)));
+	list.push_back(CallUpdate(call));
 	list.push_back(MTP_updateGroupCallConnection(
 		MTP_flags(0),
 		MTP_dataJSON(MTP_bytes(data.value("params").toString().toUtf8()))));
@@ -589,10 +523,7 @@ void DiscardConference(const Context &context, Reader &reader) {
 	Resolve(context, target, [=](qint64 id, qint64 accessHash) {
 		Request(context, "POST", CallPath(id, u"/discard"_q), {}, [=](
 				QJsonObject data) {
-			answer.done(Updates({ MTP_updateGroupCall(
-				MTP_flags(0),
-				MTPPeer(),
-				ParseGroupCall(data.value("call").toObject())) }));
+			answer.done(Updates({ CallUpdate(data.value("call").toObject()) }));
 		});
 	});
 }
@@ -748,10 +679,7 @@ void ToggleSettings(const Context &context, Reader &reader) {
 	Resolve(context, target, [=](qint64 id, qint64 accessHash) {
 		Request(context, "POST", CallPath(id, u"/settings"_q), body, [=](
 				QJsonObject data) {
-			answer.done(Updates({ MTP_updateGroupCall(
-				MTP_flags(0),
-				MTPPeer(),
-				ParseGroupCall(data.value("call").toObject())) }));
+			answer.done(Updates({ CallUpdate(data.value("call").toObject()) }));
 		});
 	});
 }
@@ -923,6 +851,160 @@ void SendEncryptedMessage(const Context &context, Reader &reader) {
 	});
 }
 
+// --- the video chat of a group or channel --------------------------------
+
+[[nodiscard]] qint64 ChatIdOf(const MTPInputPeer &peer) {
+	return peer.match([](const MTPDinputPeerChannel &data) {
+		return qint64(data.vchannel_id().v);
+	}, [](const auto &) {
+		return qint64(0);
+	});
+}
+
+// Joining as the group or channel itself is not offered: every member joins
+// as themselves.
+void GetJoinAs(const Context &context, Reader &reader) {
+	[[maybe_unused]] const auto peer = reader.read<MTPInputPeer>();
+	context.answer.done(MTP_phone_joinAsPeers(
+		MTP_vector<MTPPeer>(QVector<MTPPeer>{
+			MTP_peerUser(MTP_long(context.me)),
+		}),
+		MTP_vector<MTPChat>(),
+		MTP_vector<MTPUser>()));
+}
+
+void SaveDefaultJoinAs(const Context &context, Reader &) {
+	context.answer.done(MTPBool(MTP_boolTrue()));
+}
+
+void CreateChatCall(const Context &context, Reader &reader) {
+	const auto flags = reader.flags();
+	const auto chatId = ChatIdOf(reader.read<MTPInputPeer>());
+	[[maybe_unused]] const auto randomId = reader.read<MTPint>();
+	const auto title = (flags & (1 << 0))
+		? qs(reader.read<MTPstring>())
+		: QString();
+	const auto scheduleDate = (flags & (1 << 1))
+		? reader.read<MTPint>().v
+		: 0;
+	if (!reader.ok() || chatId <= 0) {
+		context.answer.fail(u"PEER_ID_INVALID"_q);
+		return;
+	}
+	const auto answer = context.answer;
+	Request(context, "POST", u"/chats/%1/call"_q.arg(chatId), {
+		{ "title", title },
+		{ "schedule_date", scheduleDate },
+	}, [=](QJsonObject data) {
+		answer.done(Updates({ CallUpdate(data.value("call").toObject()) }));
+	});
+}
+
+// A request naming a call and answering with its new state.
+void CallMutation(
+		const Context &context,
+		const Target &target,
+		const QByteArray &method,
+		const QString &tail,
+		const QJsonObject &body) {
+	const auto answer = context.answer;
+	Resolve(context, target, [=](qint64 id, qint64) {
+		Request(context, method, CallPath(id, tail), body, [=](
+				QJsonObject data) {
+			answer.done(Updates({ CallUpdate(data.value("call").toObject()) }));
+		});
+	});
+}
+
+void StartScheduledCall(const Context &context, Reader &reader) {
+	const auto target = ReadTarget(reader.read<MTPInputGroupCall>());
+	if (!reader.ok()) {
+		context.answer.fail(u"GROUPCALL_INVALID"_q);
+		return;
+	}
+	CallMutation(context, target, "POST", u"/start"_q, {});
+}
+
+void ToggleStartSubscription(const Context &context, Reader &reader) {
+	const auto target = ReadTarget(reader.read<MTPInputGroupCall>());
+	const auto subscribed = mtpIsTrue(reader.read<MTPBool>());
+	if (!reader.ok()) {
+		context.answer.fail(u"GROUPCALL_INVALID"_q);
+		return;
+	}
+	CallMutation(
+		context,
+		target,
+		subscribed ? "POST" : "DELETE",
+		u"/subscription"_q,
+		{});
+}
+
+void EditCallTitle(const Context &context, Reader &reader) {
+	const auto target = ReadTarget(reader.read<MTPInputGroupCall>());
+	const auto title = qs(reader.read<MTPstring>());
+	if (!reader.ok()) {
+		context.answer.fail(u"GROUPCALL_INVALID"_q);
+		return;
+	}
+	CallMutation(context, target, "PATCH", QString(), {
+		{ "title", title },
+	});
+}
+
+// "Share" of a group's or channel's video chat. Upstream's links, built from
+// the chat: a public chat's opens the call through contacts.resolveUsername
+// (?videochat, ?livestream in a channel), a private one's opens the chat,
+// where members see the call. There is no speaker link - who may speak is
+// the chat's rule, not the link's - and upstream shares the one link alone
+// when that request fails.
+void ExportCallInvite(const Context &context, Reader &reader) {
+	const auto flags = reader.flags();
+	const auto target = ReadTarget(reader.read<MTPInputGroupCall>());
+	const auto session = context.session;
+	const auto call = (reader.ok() && session && target.id)
+		? session->data().groupCall(target.id)
+		: nullptr;
+	const auto channel = call ? call->peer()->asChannel() : nullptr;
+	if (!channel) {
+		context.answer.fail(u"GROUPCALL_INVALID"_q);
+		return;
+	} else if (flags & (1 << 0)) { // can_self_unmute
+		context.answer.fail(u"CHAT_ADMIN_REQUIRED"_q, 403);
+		return;
+	}
+	const auto username = channel->username();
+	const auto link = !username.isEmpty()
+		? session->createInternalLinkFull(username
+			+ (channel->isBroadcast() ? u"?livestream"_q : u"?videochat"_q))
+		: session->createInternalLinkFull(
+			u"c/%1"_q.arg(peerToChannel(channel->id).bare));
+	context.answer.done(MTP_phone_exportedGroupCallInvite(MTP_string(link)));
+}
+
+void InviteToChatCall(const Context &context, Reader &reader) {
+	const auto target = ReadTarget(reader.read<MTPInputGroupCall>());
+	const auto users = reader.read<MTPVector<MTPInputUser>>();
+	if (!reader.ok()) {
+		context.answer.fail(u"GROUPCALL_INVALID"_q);
+		return;
+	}
+	auto ids = QJsonArray();
+	for (const auto &user : users.v) {
+		if (const auto id = ReadUserId(user, context.me)) {
+			ids.push_back(id);
+		}
+	}
+	const auto answer = context.answer;
+	Resolve(context, target, [=](qint64 id, qint64) {
+		Request(context, "POST", CallPath(id, u"/chat-invite"_q), {
+			{ "user_ids", ids },
+		}, [=](QJsonObject) {
+			answer.done(Updates({}));
+		});
+	});
+}
+
 using Handler = void(*)(const Context &, Reader &);
 
 [[nodiscard]] Handler HandlerFor(mtpTypeId type) {
@@ -944,30 +1026,30 @@ using Handler = void(*)(const Context &, Reader &);
 	case mtpc_phone_declineConferenceCallInvite: return DeclineInvite;
 	case mtpc_phone_deleteConferenceCallParticipants: return DeleteParticipants;
 	case mtpc_phone_sendGroupCallEncryptedMessage: return SendEncryptedMessage;
+	case mtpc_phone_getGroupCallJoinAs: return GetJoinAs;
+	case mtpc_phone_exportGroupCallInvite: return ExportCallInvite;
+	case mtpc_phone_saveDefaultGroupCallJoinAs: return SaveDefaultJoinAs;
+	case mtpc_phone_createGroupCall: return CreateChatCall;
+	case mtpc_phone_startScheduledGroupCall: return StartScheduledCall;
+	case mtpc_phone_toggleGroupCallStartSubscription: return ToggleStartSubscription;
+	case mtpc_phone_editGroupCallTitle: return EditCallTitle;
+	case mtpc_phone_inviteToGroupCall: return InviteToChatCall;
 	}
 	return nullptr;
-}
-
-[[nodiscard]] mtpTypeId RequestType(const SerializedRequest &request) {
-	if (!request || request->size() <= kBody) {
-		return 0;
-	}
-	return mtpTypeId((*request)[kBody]);
 }
 
 } // namespace
 
 bool Intercepts(const SerializedRequest &request) {
-	return HandlerFor(RequestType(request)) != nullptr;
+	return HandlerFor(Mtp::RequestType(request)) != nullptr;
 }
 
 void Intercept(
 		not_null<MTP::Instance*> instance,
 		mtpRequestId requestId,
 		const SerializedRequest &request) {
-	const auto type = RequestType(request);
-	const auto handler = HandlerFor(type);
-	const auto session = SessionFor(instance);
+	const auto handler = HandlerFor(Mtp::RequestType(request));
+	const auto session = Mtp::SessionFor(instance);
 	auto context = Context{
 		.session = session,
 		.client = session ? &ClientFor(session) : nullptr,
@@ -978,10 +1060,7 @@ void Intercept(
 		return;
 	}
 	context.me = context.client->meId();
-	// Past the constructor: the readers take the fields in TL order.
-	const auto from = request->constData() + kBody + 1;
-	const auto end = request->constData() + request->size();
-	auto reader = Reader(from, end);
+	auto reader = Reader(request);
 	handler(context, reader);
 }
 
@@ -1003,10 +1082,7 @@ bool HandleEvent(
 			ParseParticipants(data.value("participants").toArray()),
 			MTP_int(data.value("version").toInt())));
 	} else if (type == u"conference.updated"_q) {
-		list.push_back(MTP_updateGroupCall(
-			MTP_flags(0),
-			MTPPeer(),
-			ParseGroupCall(data.value("call").toObject())));
+		list.push_back(CallUpdate(data.value("call").toObject()));
 	} else if (type == u"conference.chain_blocks"_q) {
 		list.push_back(MTP_updateGroupCallChainBlocks(
 			input,

@@ -1547,42 +1547,44 @@ void Controller::fillManageSection() {
 		&& channel->canEditSignatures()
 		&& !channel->isMegagroup();
 	const auto canEditAutoTranslate = isChannel
-		&& channel->canEditAutoTranslate();
+		&& channel->canEditAutoTranslate() && !CustomBackend::HideGroupExtras;
 	const auto canEditPreHistoryHidden = isChannel
 		? channel->canEditPreHistoryHidden()
 		: chat->canEditPreHistoryHidden();
-	const auto canEditForum = isChannel
+	const auto canEditForum = (isChannel
 		? (channel->isMegagroup() && channel->amCreator())
-		: chat->amCreator();
-	const auto canEditPermissions = isChannel
+		: chat->amCreator()) && !CustomBackend::HideGroupExtras;
+	const auto canEditPermissions = (isChannel
 		? channel->canEditPermissions()
-		: chat->canEditPermissions();
-	const auto canEditInviteLinks = isChannel
+		: chat->canEditPermissions()) && !CustomBackend::HideGroupExtras;
+	const auto canEditInviteLinks = (isChannel
 		? channel->canHaveInviteLink()
-		: chat->canHaveInviteLink();
-	const auto canViewAdmins = isChannel
+		: chat->canHaveInviteLink()) && !CustomBackend::HideGroupExtras;
+	const auto canViewAdmins = (isChannel
 		? channel->canViewAdmins()
-		: chat->amIn();
+		: chat->amIn()) && !CustomBackend::HideGroupExtras;
 	const auto canViewMembers = isChannel
 		? channel->canViewMembers()
 		: chat->amIn();
 	const auto canViewKicked = isChannel
 		&& (channel->isMegagroup()
 			? (channel->isBroadcast() || channel->isGigagroup())
-			: true);
+			: true) && !CustomBackend::HideGroupExtras;
 	const auto hasRecentActions = isChannel
-		&& (channel->hasAdminRights() || channel->amCreator());
+		&& (channel->hasAdminRights() || channel->amCreator()) && !CustomBackend::HideGroupExtras;
 	const auto hasStarRef = Info::BotStarRef::Join::Allowed(_peer)
 		&& isChannel
-		&& channel->canPostMessages();
-	const auto canEditStickers = isChannel && channel->canEditStickers();
+		&& channel->canPostMessages() && !CustomBackend::HideGroupExtras;
+	const auto canEditStickers = isChannel
+		&& channel->canEditStickers() && !CustomBackend::HideGroupExtras;
 	const auto canDeleteChannel = isChannel && channel->canDelete();
-	const auto canEditColorIndex = isChannel && channel->canEditEmoji();
+	const auto canEditColorIndex = isChannel
+		&& channel->canEditEmoji() && !CustomBackend::HideGroupExtras;
 	const auto canViewOrEditDiscussionLink = isChannel
 		&& (channel->discussionLink()
-			|| (channel->isBroadcast() && channel->canEditInformation()));
+			|| (channel->isBroadcast() && channel->canEditInformation())) && !CustomBackend::HideGroupExtras;
 	const auto canEditDirectMessages = isChannel
-		&& (channel->isBroadcast() && channel->canEditInformation());
+		&& (channel->isBroadcast() && channel->canEditInformation()) && !CustomBackend::HideGroupExtras;
 	const auto canEditWelcomeMessages = isChannel
 		? ((channel->isMegagroup()
 			|| (channel->isBroadcast() && channel->amIn()))
@@ -1591,7 +1593,7 @@ void Controller::fillManageSection() {
 	const auto communityEligible = isChannel
 		&& (channel->isMegagroup() || channel->isBroadcast())
 		&& !channel->isMonoforum()
-		&& channel->amCreator();
+		&& channel->amCreator() && !CustomBackend::HideGroupExtras;
 
 	::AddSkip(_controls.buttonsLayout, 0);
 
@@ -1629,7 +1631,7 @@ void Controller::fillManageSection() {
 		::AddSkip(_controls.buttonsLayout);
 	}
 
-	if (canEditReactions()) {
+	if (canEditReactions() && !CustomBackend::HideGroupExtras) {
 		auto allowedReactions = Info::Profile::MigratedOrMeValue(
 			_peer
 		) | rpl::map([=](not_null<PeerData*> peer) {
@@ -3238,7 +3240,7 @@ object_ptr<Ui::SettingsButton> EditPeerInfoBox::CreateButton(
 }
 
 bool EditPeerInfoBox::Available(not_null<PeerData*> peer) {
-	if (CustomBackend::DisableWhile) {
+	if (CustomBackend::DisableWhile && !peer->isChannel()) {
 		return false;
 	}
 	if (const auto bot = peer->asUser()) {

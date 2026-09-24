@@ -6,7 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "mtproto/mtp_instance.h"
-#include "custom_backend/native_conference_adapter.h"
+#include "custom_backend/native_mtp_router.h"
 #include "custom_backend/native_runtime.h"
 
 #include "mtproto/details/mtproto_dcenter.h"
@@ -992,6 +992,17 @@ void Instance::Private::checkDelayedRequests() {
 		auto requestId = _delayedRequests.front().first;
 		_delayedRequests.pop_front();
 
+		if (CustomBackend::Enabled()) {
+			// FoxMes bridge: a request an adapter answered with a 5xx is
+			// retried the way it was sent - by the adapter. It has no DC, so
+			// the lookup below dropped it and its caller waited forever.
+			if (const auto request = getRequest(requestId);
+				request && CustomBackend::Mtp::Intercepts(request)) {
+				CustomBackend::Mtp::Intercept(_instance, requestId, request);
+				continue;
+			}
+		}
+
 		auto dcWithShift = ShiftedDcId(0);
 		if (const auto shiftedDcId = queryRequestByDc(requestId)) {
 			dcWithShift = *shiftedDcId;
@@ -1028,12 +1039,12 @@ void Instance::Private::sendRequest(
 		bool needsLayer,
 		mtpRequestId afterRequestId) {
 	if (CustomBackend::Enabled()
-		&& CustomBackend::Conferences::Intercepts(request)) {
-		// FoxMes bridge: group call requests are answered by fxl-api and come
-		// back through processCallback, as if a DC had answered.
+		&& CustomBackend::Mtp::Intercepts(request)) {
+		// FoxMes bridge: requests an adapter claims are answered by fxl-api
+		// and come back through processCallback, as if a DC had answered.
 		request->requestId = requestId;
 		storeRequest(requestId, request, std::move(callbacks));
-		CustomBackend::Conferences::Intercept(_instance, requestId, request);
+		CustomBackend::Mtp::Intercept(_instance, requestId, request);
 		return;
 	}
 	const auto session = getSession(shiftedDcId);

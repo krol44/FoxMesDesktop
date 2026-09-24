@@ -397,27 +397,25 @@ void MainWindow::createGlobalMenu() {
 			sessionController()->showAddContact();
 		});
 
-	if (!CustomBackend::DisableWhile) {
-		tools->addSeparator();
+	tools->addSeparator();
 
-		psNewGroup = tools->addAction(
-			tr::lng_mac_menu_new_group(tr::now),
-			this,
-			[=] {
-				Expects(sessionController() != nullptr);
-				ensureWindowShown();
-				sessionController()->showNewGroup();
-			});
+	psNewGroup = tools->addAction(
+		tr::lng_mac_menu_new_group(tr::now),
+		this,
+		[=] {
+			Expects(sessionController() != nullptr);
+			ensureWindowShown();
+			sessionController()->showNewGroup();
+		});
 
-		psNewChannel = tools->addAction(
-			tr::lng_mac_menu_new_channel(tr::now),
-			this,
-			[=] {
-				Expects(sessionController() != nullptr);
-				ensureWindowShown();
-				sessionController()->showNewChannel();
-			});
-	}
+	psNewChannel = tools->addAction(
+		tr::lng_mac_menu_new_channel(tr::now),
+		this,
+		[=] {
+			Expects(sessionController() != nullptr);
+			ensureWindowShown();
+			sessionController()->showNewChannel();
+		});
 
 	auto help = psMainMenu->addMenu(tr::lng_linux_menu_help(tr::now));
 
@@ -493,9 +491,15 @@ void MainWindow::updateGlobalMenuHook() {
 	ForceDisabled(psAddContact, inactive);
 	if (psNewGroup) {
 		ForceDisabled(psNewGroup, inactive || support);
+		psNewGroup->setVisible(!CustomBackend::Enabled()
+			|| CustomBackend::CanCreateGroups(
+				logged ? &sessionController()->session() : nullptr));
 	}
 	if (psNewChannel) {
 		ForceDisabled(psNewChannel, inactive || support);
+		psNewChannel->setVisible(!CustomBackend::Enabled()
+			|| CustomBackend::CanCreateChannels(
+				logged ? &sessionController()->session() : nullptr));
 	}
 
 	const auto diabled = [=](const QString &tag) {

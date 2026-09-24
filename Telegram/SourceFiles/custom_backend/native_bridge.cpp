@@ -1,11 +1,15 @@
 #include "custom_backend/native_bridge.h"
 
+#include "api/api_text_entities.h"
+#include "apiwrap.h"
+
 #include "custom_backend/native_chat_themes_adapter.h"
 #include "custom_backend/native_gifs_adapter.h"
 #include "custom_backend/native_wallpaper_adapter.h"
 
 #include "custom_backend/api_client.h"
 #include "custom_backend/native_calls_adapter.h"
+#include "custom_backend/native_community.h"
 #include "custom_backend/native_conference_adapter.h"
 #include "custom_backend/native_delete_adapter.h"
 #include "custom_backend/native_reactions_adapter.h"
@@ -15,6 +19,7 @@
 #include "data/components/scheduled_messages.h"
 
 #include "api/api_common.h"
+#include "api/api_sending.h"
 #include "base/qthelp_url.h"
 #include "base/random.h"
 #include "base/unixtime.h"
@@ -1037,6 +1042,28 @@ QString UserDisplay(const QJsonObject &user) {
     return display.isEmpty() ? user.value("username").toString() : display;
 }
 
+// fxl-api's notification-default scopes, upstream's inputNotifyUsers, Chats
+// and Broadcasts.
+QString DefaultNotifyScope(Data::DefaultNotify type) {
+	switch (type) {
+	case Data::DefaultNotify::Group: return u"group"_q;
+	case Data::DefaultNotify::Broadcast: return u"channel"_q;
+	case Data::DefaultNotify::User: break;
+	}
+	return u"user"_q;
+}
+
+std::optional<Data::DefaultNotify> DefaultNotifyType(const QString &scope) {
+	if (scope.isEmpty() || scope == u"user"_q) {
+		return Data::DefaultNotify::User;
+	} else if (scope == u"group"_q) {
+		return Data::DefaultNotify::Group;
+	} else if (scope == u"channel"_q) {
+		return Data::DefaultNotify::Broadcast;
+	}
+	return std::nullopt;
+}
+
 PhotoId AvatarPhotoId(const QString &revision) {
 	const auto digest = QCryptographicHash::hash(
 		revision.toUtf8(),
@@ -1107,8 +1134,13 @@ MTPMessageReplyHeader ReplyHeaderFrom(
     const auto authorId = external.value("author_id").toVariant().toLongLong();
     const auto authorName = external.value("author_name").toString();
     const auto quote = external.value("text").toString();
+    // A channel post is quoted as the channel's, as in Telegram: the server
+    // sends no poster, only the signature when the channel signs its posts.
+    const auto channelId = external.value("channel").toObject()
+        .value("id").toVariant().toLongLong();
+    const auto signature = external.value("post_author").toString();
     auto flags = Flag::f_reply_to_msg_id | Flag::f_reply_to_peer_id | Flag();
-    if (!authorName.isEmpty() || authorId > 0) {
+    if (!authorName.isEmpty() || authorId > 0 || channelId > 0) {
         flags |= Flag::f_reply_from;
     }
     if (!quote.isEmpty()) {
@@ -1116,11 +1148,17 @@ MTPMessageReplyHeader ReplyHeaderFrom(
     }
     using FwdFlag = MTPDmessageFwdHeader::Flag;
     auto fwdFlags = MTPDmessageFwdHeader::Flags();
-    if (authorId > 0) {
+    if (authorId > 0 || channelId > 0) {
         fwdFlags |= FwdFlag::f_from_id;
     }
     if (!authorName.isEmpty()) {
         fwdFlags |= FwdFlag::f_from_name;
+    }
+    if (channelId > 0) {
+        fwdFlags |= FwdFlag::f_channel_post;
+        if (!signature.isEmpty()) {
+            fwdFlags |= FwdFlag::f_post_author;
+        }
     }
     return MTP_messageReplyHeader(
         MTP_flags(flags),
@@ -1128,13 +1166,15 @@ MTPMessageReplyHeader ReplyHeaderFrom(
         peerToMTP(externalPeer),
         MTP_messageFwdHeader(
             MTP_flags(fwdFlags),
-            (authorId > 0
+            (channelId > 0
+                ? MTP_peerChannel(MTP_long(channelId))
+                : (authorId > 0)
                 ? MTP_peerUser(MTP_long(authorId))
                 : MTPPeer()),
             MTP_string(authorName),
             MTP_int(0), // date
-            MTPint(), // channel_post
-            MTP_string(QString()), // post_author
+            (channelId > 0 ? MTP_int(int(replyId)) : MTPint()), // channel_post
+            MTP_string(signature), // post_author
             MTPPeer(), // saved_from_peer
             MTPint(), // saved_from_msg_id
             MTPPeer(), // saved_from_id
@@ -1193,11 +1233,17 @@ NativeBridge::NativeBridge(Main::Session *session)
     // bridge, and an unknown default makes every unmuted peer read as muted.
     // The cached value is applied synchronously so the setting does not blink
     // between startup and the server response.
-    {
-        const auto cached = LoadDefaultNotifyCache(_session);
-        _defaultNotifyRevision = cached.value(
+    for (const auto type : {
+            Data::DefaultNotify::User,
+            Data::DefaultNotify::Group,
+            Data::DefaultNotify::Broadcast }) {
+        const auto cached = LoadDefaultNotifyCache(
+            _session,
+            DefaultNotifyScope(type));
+        _defaultNotify[size_t(type)].revision = cached.value(
             "settings_revision").toVariant().toLongLong();
         applyDefaultNotifySettings(
+            type,
             cached.value("mute_until").toVariant().toLongLong(),
             cached.value("sound_none").toBool());
     }
@@ -1231,6 +1277,13 @@ NativeBridge::NativeBridge(Main::Session *session)
 			// idempotent per client_nonce, so a retry either creates the
 			// message or returns the one that already exists.
 			resendPendingSends();
+			// The catalog is requested once at startup. If that request was
+			// lost to the network, every reaction stays invisible until
+			// restart, so it is repeated here the way MTProto resends a
+			// request that got no answer.
+			if (Reactions::Catalog(_session).empty()) {
+				refreshReactionsCatalog();
+			}
 		},
 		[=](QString message) { onWebSocketMessage(message); });
 	for (const auto &controller : _session->windows()) {
@@ -1453,6 +1506,32 @@ QJsonArray NativeBridge::entitiesToJson(
     return result;
 }
 
+namespace {
+
+struct LocalAuthor {
+    MessageFlags flags;
+    PeerId from;
+    QString postAuthor;
+};
+
+// The author fields upstream gives a message it creates locally (see
+// ApiWrap::sendMessage). They have to be right from the first frame:
+// applySentMessage() keeps the local item's flags, so a channel post built as
+// an ordinary outgoing message stayed on the right, under the sender's name,
+// until the history was reloaded.
+LocalAuthor LocalMessageAuthor(not_null<History*> history) {
+    const auto action = Api::SendAction(history);
+    auto flags = NewMessageFlags(history->peer);
+    Api::FillMessagePostFlags(action, history->peer, flags);
+    return {
+        .flags = flags,
+        .from = NewMessageFromId(action),
+        .postAuthor = NewMessagePostAuthor(action),
+    };
+}
+
+} // namespace
+
 HistoryItem *NativeBridge::createPendingTextMessage(
         History *history,
         const QString &text,
@@ -1462,17 +1541,18 @@ HistoryItem *NativeBridge::createPendingTextMessage(
     if (!history) {
         return nullptr;
     }
-    auto flags = NewMessageFlags(history->peer);
-    flags |= MessageFlag::HasFromId;
+    const auto author = LocalMessageAuthor(history);
+    auto flags = author.flags;
     if (replyTo) {
         flags |= MessageFlag::HasReplyInfo;
     }
     return history->addNewLocalMessage({
         .id = localMessageId,
         .flags = flags,
-        .from = _session->userPeerId(),
+        .from = author.from,
         .replyTo = ReplyToFromServerId(history, replyTo),
         .date = base::unixtime::now(),
+        .postAuthor = author.postAuthor,
     }, TextWithEntities{ text, entities }, MTP_messageMediaEmpty()).get();
 }
 
@@ -1488,8 +1568,8 @@ HistoryItem *NativeBridge::createPendingFileMessage(
     if (!history) {
         return nullptr;
     }
-    auto flags = NewMessageFlags(history->peer);
-    flags |= MessageFlag::HasFromId;
+    const auto author = LocalMessageAuthor(history);
+    auto flags = author.flags;
     if (replyTo) {
         flags |= MessageFlag::HasReplyInfo;
     }
@@ -1525,9 +1605,10 @@ HistoryItem *NativeBridge::createPendingFileMessage(
     return history->addNewLocalMessage({
         .id = localId,
         .flags = flags,
-        .from = _session->userPeerId(),
+        .from = author.from,
         .replyTo = ReplyToFromServerId(history, replyTo),
         .date = base::unixtime::now(),
+        .postAuthor = author.postAuthor,
         .groupedId = groupedId,
     }, caption, MediaFromAttachment(
         _session,
@@ -1735,6 +1816,8 @@ void NativeBridge::refreshSelf() {
 			}
 		}
 		weak->_ephemeralMediaSupported = ephemeral;
+		weak->_canCreateGroups = user.value("can_create_group").toBool();
+		weak->_canCreateChannels = user.value("can_create_channel").toBool();
 	});
 }
 
@@ -1765,9 +1848,23 @@ void NativeBridge::loadContacts() {
 }
 
 void NativeBridge::refreshReactionsCatalog() {
+    if (_reactionsCatalogLoading) {
+        return;
+    }
+    _reactionsCatalogLoading = true;
     const auto weak = QPointer<NativeBridge>(this);
-    client().reactionsCatalog([weak](QJsonDocument doc, QString, int) {
-        if (!weak || !doc.isObject()) {
+    client().reactionsCatalog([weak](
+            QJsonDocument doc,
+            QString error,
+            int status) {
+        if (!weak) {
+            return;
+        }
+        weak->_reactionsCatalogLoading = false;
+        if (!error.isEmpty() || !doc.isObject()) {
+            LOG(("FoxMes: reactions catalog failed (%1, %2)"
+                ).arg(status
+                ).arg(error));
             return;
         }
         auto values = std::vector<Reactions::CatalogItem>();
@@ -1859,9 +1956,8 @@ PeerData *NativeBridge::peerForChat(const QJsonObject &chat) {
     if (type == u"encrypted"_q) {
         return nullptr;
     }
-    if (CustomBackend::DisableWhile
-        && type != u"saved"_q
-        && type != u"direct"_q) {
+    const auto community = Community::IsCommunity(chat);
+    if (!community && type != u"saved"_q && type != u"direct"_q) {
         return nullptr;
     }
 
@@ -1895,19 +1991,7 @@ PeerData *NativeBridge::peerForChat(const QJsonObject &chat) {
         if (!other.isEmpty()) ensureUser(other, true);
         peer = user;
     } else {
-        if (type == u"channel"_q) {
-            const auto channel = _session->data().channel(ChannelId(chatId));
-            channel->setName(chat.value("title").toString(), QString());
-            channel->setMembersCount(members.size());
-            channel->date = unixTime(chat.value("created_at").toString());
-            peer = channel;
-        } else {
-            const auto group = _session->data().chat(ChatId(chatId));
-            group->setName(chat.value("title").toString());
-            group->count = members.size();
-            group->date = unixTime(chat.value("created_at").toString());
-            peer = group;
-        }
+        return applyCommunityChat(chat);
     }
 
     if (peer) {
@@ -1916,6 +2000,313 @@ PeerData *NativeBridge::peerForChat(const QJsonObject &chat) {
         _peerByChat[chatId] = peer->id.value;
     }
     return peer;
+}
+
+// A group or a channel goes through upstream's own appliers: the TL channel
+// through processChat, its full info through ApplyChannelUpdate (see
+// native_community.h). What they cannot carry is applied after them, and in
+// this order, because each of them resets it: the url photo (processChat
+// clears the userpic for chatPhotoEmpty) and the per-chat wallpaper, theme and
+// notifications (ApplyChannelUpdate rewrites them from the full info).
+ChannelData *NativeBridge::applyCommunityChat(
+        const QJsonObject &chat,
+        bool member) {
+    const auto chatId = chat.value("id").toVariant().toLongLong();
+    if (chatId <= 0) {
+        return nullptr;
+    }
+    const auto me = client().meId();
+    const auto channel = _session->data().processChat(
+        Community::Channel(chat, me, member))->asChannel();
+    if (!channel) {
+        return nullptr;
+    }
+    _communityChats[chatId] = chat;
+    const auto full = Community::ChannelFull(
+        chat,
+        me,
+        communityNotifySettings(chatId, chat),
+        AutoDeletePeriod(channel));
+    Data::ApplyChannelUpdate(channel, full.c_channelFull());
+    applyCommunityPhoto(channel, chat.value("photo_url").toString());
+    if (member) {
+        applyChatConfig(channel, chat);
+        _chatByPeer[channel->id.value] = chatId;
+        _peerByChat[chatId] = channel->id.value;
+    }
+    return channel;
+}
+
+bool NativeBridge::handleCommunityEvent(
+        const QString &type,
+        const QJsonObject &data) {
+    if (type == u"chat.created"_q) {
+        const auto chat = data.value("chat").toObject();
+        if (Community::IsCommunity(chat) && peerForChat(chat)) {
+            if (const auto history = historyForChatId(
+                    chat.value("id").toVariant().toLongLong())) {
+                history->updateChatListExistence();
+            }
+        }
+        // The list row (date, preview, unread) comes with the snapshot.
+        reloadChats();
+        return true;
+    } else if (type == u"ephemeral.created"_q) {
+        _session->api().applyUpdates(MTP_updates(
+            MTP_vector<MTPUpdate>(1, MTP_updateNewEphemeralMessage(
+                welcomeMessage(data, false))),
+            MTP_vector<MTPUser>(),
+            MTP_vector<MTPChat>(),
+            MTP_int(base::unixtime::now()),
+            MTP_int(0)));
+        return true;
+    } else if (type == u"welcome.updated"_q) {
+        _session->api().applyUpdates(MTP_updates(
+            MTP_vector<MTPUpdate>(1, MTP_updateNewEphemeralMessage(
+                welcomeMessage(data.value("message").toObject(), true))),
+            MTP_vector<MTPUser>(),
+            MTP_vector<MTPChat>(),
+            MTP_int(base::unixtime::now()),
+            MTP_int(0)));
+        return true;
+    }
+    const auto chatId = data.value("chat_id").toVariant().toLongLong();
+    auto chat = communityChat(chatId);
+    if (chat.isEmpty()) {
+        return false;
+    }
+    if (type == u"chat.profile_updated"_q) {
+        applyCommunityProfile(data);
+        return true;
+    } else if (type == u"chat.member_added"_q
+        || type == u"chat.member_removed"_q) {
+        chat.insert("participants_count", data.value("participants_count"));
+        const auto channel = applyCommunityChat(chat);
+        if (channel && channel->mgInfo) {
+            // The cached member list no longer matches the count; upstream
+            // asks channels.getParticipants again when it is shown.
+            channel->mgInfo->lastParticipantsStatus
+                |= MegagroupInfo::LastParticipantsCountOutdated;
+            _session->changes().peerUpdated(
+                channel,
+                Data::PeerUpdate::Flag::Members);
+        }
+        return true;
+    } else if (type == u"chat.message_views"_q) {
+        // Upstream hears of new views as updateChannelMessageViews; the
+        // server batches them per channel, as Telegram does.
+        auto updates = QVector<MTPUpdate>();
+        for (const auto &entry : data.value("views").toArray()) {
+            const auto object = entry.toObject();
+            updates.push_back(MTP_updateChannelMessageViews(
+                MTP_long(chatId),
+                MTP_int(object.value("id").toInt()),
+                MTP_int(object.value("views").toInt())));
+        }
+        if (!updates.isEmpty()) {
+            _session->api().applyUpdates(MTP_updates(
+                MTP_vector<MTPUpdate>(std::move(updates)),
+                MTP_vector<MTPUser>(),
+                MTP_vector<MTPChat>(),
+                MTP_int(base::unixtime::now()),
+                MTP_int(0)));
+        }
+        return true;
+    } else if (type == u"chat.call_updated"_q) {
+        const auto call = data.value("call");
+        if (call.isObject()) {
+            chat.insert("call", call);
+        } else {
+            chat.remove("call");
+        }
+        applyCommunityChat(chat);
+        return true;
+    }
+    return false;
+}
+
+MTPEphemeralMessage NativeBridge::welcomeMessage(
+        const QJsonObject &welcome,
+        bool isTemplate) const {
+    using Flag = MTPDephemeralMessage::Flag;
+    const auto chatId = welcome.value("chat_id").toVariant().toLongLong();
+    auto entities = renderMessageEntities(welcome);
+    auto flags = MTPDephemeralMessage::Flags(Flag::f_peer_id);
+    if (isTemplate) {
+        flags |= Flag::f_welcome_template | Flag::f_out;
+    }
+    if (!entities.v.isEmpty()) {
+        flags |= Flag::f_entities;
+    }
+    return MTP_ephemeralMessage(
+        MTP_flags(flags),
+        MTP_int(welcome.value("id").toInt()),
+        MTP_peerUser(MTP_long(
+            welcome.value("from_id").toVariant().toLongLong())),
+        MTP_peerChannel(MTP_long(chatId)),
+        MTP_long(client().meId()),
+        MTPint(), // top_msg_id
+        MTP_int(unixTime(welcome.value("date").toString())),
+        MTP_string(welcome.value("text").toString()),
+        std::move(entities),
+        MTPMessageMedia(),
+        MTPReplyMarkup(),
+        MTPMessageReplyHeader(),
+        MTPRichMessage(),
+        MTPlong(), // chat_instance
+        MTPint()); // anchor_msg_id
+}
+
+void NativeBridge::applyCommunityProfile(const QJsonObject &profile) {
+    const auto chatId = profile.value("chat_id").toVariant().toLongLong();
+    auto chat = communityChat(chatId);
+    if (chat.isEmpty()) {
+        return;
+    }
+    for (const auto key : {
+            "title",
+            "about",
+            "username",
+            "photo_url",
+            "history_hidden",
+            "signatures",
+            "participants_count" }) {
+        if (profile.contains(QLatin1String(key))) {
+            chat.insert(QLatin1String(key), profile.value(QLatin1String(key)));
+        }
+    }
+    applyCommunityChat(chat);
+}
+
+void NativeBridge::uploadCommunityPhoto(
+        ChannelData *channel,
+        QImage &&image,
+        std::function<void()> done) {
+    const auto chatId = qint64(peerToChannel(channel->id).bare);
+    auto bytes = QByteArray();
+    {
+        auto buffer = QBuffer(&bytes);
+        image.save(&buffer, "JPEG", 87);
+    }
+    const auto weak = QPointer<NativeBridge>(this);
+    client().communityPhoto(chatId, bytes, [weak, done = std::move(done)](
+            QJsonDocument doc,
+            QString error,
+            int) {
+        if (!weak || !error.isEmpty() || !doc.isObject()) {
+            return;
+        }
+        weak->applyCommunityProfile(doc.object());
+        if (done) {
+            done();
+        }
+    });
+}
+
+void NativeBridge::reapplyCommunityChat(qint64 chatId) {
+    const auto i = _communityChats.find(chatId);
+    if (i == _communityChats.end()) {
+        return;
+    }
+    const auto peer = _session->data().peerLoaded(
+        peerFromChannel(ChannelId(chatId)));
+    if (const auto channel = peer ? peer->asChannel() : nullptr) {
+        applyCommunityPhoto(channel, i->second.value("photo_url").toString());
+        applyChatConfig(channel, i->second);
+    }
+}
+
+QJsonArray NativeBridge::entitiesJson(
+        const MTPVector<MTPMessageEntity> &entities,
+        const QString &text) const {
+    return entitiesToJson(
+        Api::EntitiesFromMTP(_session, entities.v),
+        text);
+}
+
+QJsonObject NativeBridge::communityChat(qint64 chatId) const {
+    const auto i = _communityChats.find(chatId);
+    return (i != _communityChats.end()) ? i->second : QJsonObject();
+}
+
+MTPPeerNotifySettings NativeBridge::communityNotifySettings(
+        qint64 chatId,
+        const QJsonObject &chat) const {
+    const auto settings = chat.value("notification_settings").toObject();
+    const auto known = _notificationByChat.find(chatId);
+    auto muteUntil = (known != _notificationByChat.end())
+        ? known->second.muteUntil
+        : std::clamp(
+            qint64(settings.value("mute_until").toVariant().toLongLong()),
+            qint64(0),
+            qint64(INT32_MAX));
+    const auto showPreviews = (known != _notificationByChat.end())
+        ? known->second.showPreviews
+        : settings.value("show_previews").toBool(true);
+    auto soundNone = (known != _notificationByChat.end())
+        ? known->second.soundNone
+        : settings.value("sound_none").toBool(false);
+    // Once the model holds the settings, they are what the channelFull
+    // carries: ApplyChannelUpdate applies it, and upstream saves a mute only
+    // after a delay (kNotifySettingSaveTimeout). Built from the last server
+    // state, every re-apply of the chat in that window put the mute back -
+    // the button jumped and the mute was never saved. Server news arrives as
+    // chat.updated, which applyNotificationSettings takes by revision.
+    const auto peer = _session->data().peerLoaded(
+        peerFromChannel(ChannelId(chatId)));
+    if (peer && !peer->notify().settingsUnknown()) {
+        muteUntil = std::clamp(
+            qint64(peer->notify().muteUntil().value_or(0)),
+            qint64(0),
+            qint64(INT32_MAX));
+        const auto sound = peer->notify().sound();
+        soundNone = sound && sound->none;
+    }
+    using NotifyFlag = MTPDpeerNotifySettings::Flag;
+    return MTP_peerNotifySettings(
+        MTP_flags(NotifyFlag::f_show_previews
+            | NotifyFlag::f_other_sound
+            | (muteUntil > 0 ? NotifyFlag::f_mute_until : NotifyFlag(0))),
+        MTP_bool(showPreviews),
+        MTPBool(),
+        MTP_int(int(muteUntil)),
+        MTPNotificationSound(),
+        MTPNotificationSound(),
+        soundNone ? MTP_notificationSoundNone() : MTP_notificationSoundDefault(),
+        MTPBool(),
+        MTPBool(),
+        MTPNotificationSound(),
+        MTPNotificationSound(),
+        MTPNotificationSound());
+}
+
+// The same one-image photo a user avatar is (ensureUser). processChat leaves
+// it alone under the bridge (ChannelData::setPhoto), so only a change applies.
+void NativeBridge::applyCommunityPhoto(
+        ChannelData *channel,
+        const QString &url) {
+    const auto photoId = url.isEmpty() ? PhotoId() : AvatarPhotoId(url);
+    const auto location = url.isEmpty()
+        ? ImageLocation()
+        : ImageLocation(DownloadLocation{ PlainUrlLocation{ url } }, 160, 160);
+    // Every apply of the chat comes here; a Photo update for a photo that did
+    // not change makes each userpic view reload it.
+    if (channel->userpicPhotoId() == photoId
+        && channel->userpicLocation() == location) {
+        return;
+    }
+    if (url.isEmpty()) {
+        channel->setUserpic(PhotoId(), ImageLocation(), false);
+    } else {
+        channel->setUserpic(photoId, location, false);
+        UpdateRemotePhotoImages(
+            _session->data().photo(photoId),
+            url,
+            kUnknownPhotoSide,
+            kUnknownPhotoSide,
+            false);
+    }
+    _session->changes().peerUpdated(channel, Data::PeerUpdate::Flag::Photo);
 }
 
 void NativeBridge::applyChatConfig(PeerData *peer, const QJsonObject &chat) {
@@ -1954,26 +2345,8 @@ void NativeBridge::applyChatConfig(PeerData *peer, const QJsonObject &chat) {
             : ChatAdminRights());
         group->setDefaultRestrictions(canSend ? ChatRestrictions() : Data::AllSendRestrictions());
         group->setAllowedReactions(allowed);
-    } else if (const auto channel = peer->asChannel()) {
-        auto flags = ChannelDataFlags(ChannelDataFlag::Megagroup);
-        if (chat.value("owner_id").toVariant().toLongLong() == client().meId()) {
-            flags |= ChannelDataFlag::Creator;
-        }
-        channel->setFlags(flags);
-        channel->setAdminRights(channel->amCreator()
-            ? ChatAdminRight::DeleteMessages
-                | ChatAdminRight::EditMessages
-                | ChatAdminRight::BanUsers
-                | ChatAdminRight::InviteByLinkOrAdd
-                | ChatAdminRight::PinMessages
-                | ChatAdminRight::PostMessages
-            : ChatAdminRights());
-        channel->setRestrictions(ChatRestrictionsInfo(
-            canSend ? ChatRestrictions() : Data::AllSendRestrictions(),
-            0));
-        channel->setDefaultRestrictions(ChatRestrictions());
-        channel->setAllowedReactions(allowed);
     }
+    // A channel's flags and rights come from its TL form (applyCommunityChat).
 }
 
 void NativeBridge::applyPeerNotifySettings(
@@ -2017,17 +2390,19 @@ void NativeBridge::applyNotificationSettings(
     // Revision guard. While this path went through reloadChats() the order of
     // events did not matter - the reload refetched authoritative state either
     // way. Applying the patch directly makes it matter: a replayed or
-    // reordered chat.updated would roll the settings back. Zero means the
-    // payload carries no revision at all (the chat-list snapshot is one of
-    // those), so it still applies but never lowers the watermark; an equal
-    // revision is idempotent.
+    // reordered chat.updated would roll the settings back. Snapshots carry
+    // the stored revision too (zero while the chat has no settings row).
     const auto revision = static_cast<qint64>(
         notifications.value("settings_revision").toVariant().toLongLong());
     const auto known = _notificationByChat.find(chatId);
     const auto knownRevision = (known != _notificationByChat.end())
         ? known->second.revision
         : qint64(0);
-    if (revision > 0 && revision < knownRevision) {
+    // A payload at the revision already known carries nothing new, and
+    // applying it would undo a local change upstream has not saved yet (it
+    // saves after kNotifySettingSaveTimeout): a group or channel is
+    // re-applied from its cached snapshot far more often than that.
+    if (known != _notificationByChat.end() && revision <= knownRevision) {
         return;
     }
     auto muteUntil = static_cast<qint64>(
@@ -2056,6 +2431,7 @@ void NativeBridge::applyNotificationSettings(
 // every unmuted chat would read as muted and every new message would park in
 // the notification manager's _settingWaiters forever.
 void NativeBridge::applyDefaultNotifySettings(
+        Data::DefaultNotify type,
         qint64 muteUntil,
         bool soundNone) {
     // Native TimeId is int32: never silently narrow a larger server value.
@@ -2064,8 +2440,8 @@ void NativeBridge::applyDefaultNotifySettings(
     } else if (muteUntil < 0) {
         muteUntil = 0;
     }
-    _defaultNotifyMuteUntil = muteUntil;
-    _defaultNotifySoundNone = soundNone;
+    _defaultNotify[size_t(type)].muteUntil = muteUntil;
+    _defaultNotify[size_t(type)].soundNone = soundNone;
     using NotifyFlag = MTPDpeerNotifySettings::Flag;
     const auto settings = MTP_peerNotifySettings(
         MTP_flags(NotifyFlag::f_mute_until
@@ -2082,12 +2458,7 @@ void NativeBridge::applyDefaultNotifySettings(
         MTPNotificationSound(),
         MTPNotificationSound(),
         MTPNotificationSound());
-    auto &notify = _session->data().notifySettings();
-    // All three types: groups and channels are hidden from the settings UI,
-    // but isMuted() resolves their peers through the same default fallback.
-    notify.apply(Data::DefaultNotify::User, settings);
-    notify.apply(Data::DefaultNotify::Group, settings);
-    notify.apply(Data::DefaultNotify::Broadcast, settings);
+    _session->data().notifySettings().apply(type, settings);
 }
 
 // Adopts a canonical defaults payload (GET response, PUT response or
@@ -2098,12 +2469,18 @@ void NativeBridge::applyDefaultNotifySettingsPayload(
     if (settings.isEmpty()) {
         return;
     }
-    const auto revision = settings.value("settings_revision").toVariant().toLongLong();
-    if (revision < _defaultNotifyRevision) {
+    const auto type = DefaultNotifyType(settings.value("scope").toString());
+    if (!type) {
         return;
     }
-    _defaultNotifyRevision = revision;
+    auto &state = _defaultNotify[size_t(*type)];
+    const auto revision = settings.value("settings_revision").toVariant().toLongLong();
+    if (revision < state.revision) {
+        return;
+    }
+    state.revision = revision;
     applyDefaultNotifySettings(
+        *type,
         settings.value("mute_until").toVariant().toLongLong(),
         settings.value("sound_none").toBool());
     SaveDefaultNotifyCache(_session, settings);
@@ -2111,12 +2488,19 @@ void NativeBridge::applyDefaultNotifySettingsPayload(
 
 void NativeBridge::loadDefaultNotifySettings() {
     const auto weak = QPointer<NativeBridge>(this);
-    client().defaultNotificationSettings([weak](QJsonDocument doc, QString error, int) {
-        if (!weak || !error.isEmpty() || !doc.isObject()) {
-            return;
-        }
-        weak->applyDefaultNotifySettingsPayload(doc.object());
-    });
+    for (const auto type : {
+            Data::DefaultNotify::User,
+            Data::DefaultNotify::Group,
+            Data::DefaultNotify::Broadcast }) {
+        client().defaultNotificationSettings(
+            DefaultNotifyScope(type),
+            [weak](QJsonDocument doc, QString error, int) {
+                if (!weak || !error.isEmpty() || !doc.isObject()) {
+                    return;
+                }
+                weak->applyDefaultNotifySettingsPayload(doc.object());
+            });
+    }
 }
 
 void NativeBridge::reloadChats() {
@@ -2406,6 +2790,7 @@ void NativeBridge::removeChat(qint64 chatId) {
     }
     _chatByPeer.erase(peer);
     _pinnedRanks.erase(chatId);
+    _communityChats.erase(chatId);
     _bottomLoadedChats.erase(chatId);
     if (const auto history = _session->data().historyLoaded(peerId)) {
         _session->data().deleteConversationLocally(history->peer);
@@ -2518,6 +2903,45 @@ void NativeBridge::ensureChat(History *history, std::function<void(qint64)> done
     });
 }
 
+// The channel a forward or a cross-chat reply names (forwarded_from.channel,
+// reply_to.channel). Only a channel this account has never seen gets a stub,
+// enough to draw its name and photo: a known one, subscribed or not, is owned
+// by its own snapshot.
+PeerId NativeBridge::ensureQuotedChannel(const QJsonObject &channel) {
+    const auto channelId = channel.value("id").toVariant().toLongLong();
+    if (channelId <= 0) {
+        return PeerId();
+    }
+    const auto known = _session->data().channelLoaded(ChannelId(channelId));
+    if (!known || !known->isLoaded()) {
+        const auto stub = QJsonObject{
+            { "id", channelId },
+            { "type", u"channel"_q },
+            { "title", channel.value("title").toString() },
+            { "username", channel.value("username").toString() },
+        };
+        if (const auto peer = _session->data().processChat(
+                Community::Channel(stub, client().meId(), false))
+                    ->asChannel()) {
+            applyCommunityPhoto(peer, channel.value("photo_url").toString());
+        }
+    }
+    return peerFromChannel(ChannelId(channelId));
+}
+
+// Only the owner writes to a channel, and a post carries no sender (see
+// prepareMessage), so in a channel "mine" is "I own it" - as in Telegram, where
+// the posts of a channel you run are outgoing.
+bool NativeBridge::isOwnMessage(
+        not_null<History*> history,
+        const QJsonObject &message) const {
+    if (const auto channel = history->peer->asBroadcast()) {
+        return channel->amCreator();
+    }
+    return message.value("sender_id").toVariant().toLongLong()
+        == client().meId();
+}
+
 HistoryItem *NativeBridge::applyMessage(
         History *history,
         const QJsonObject &message,
@@ -2551,7 +2975,9 @@ std::optional<NativeBridge::PreparedMessage> NativeBridge::prepareMessage(
     const auto senderObject = message.value("sender").toObject();
     if (!senderObject.isEmpty()) ensureUser(senderObject, true);
     const auto senderId = message.value("sender_id").toVariant().toLongLong();
-    if (senderId <= 0) return std::nullopt;
+    // A channel post carries no sender: the channel speaks (fxl-api keeps who
+    // wrote it to itself, as Telegram does).
+    if (senderId <= 0 && !history->peer->isBroadcast()) return std::nullopt;
 
     // A finished call is the one message here that is not a message: upstream
     // draws it from a service action, and the whole body below - text,
@@ -2564,10 +2990,18 @@ std::optional<NativeBridge::PreparedMessage> NativeBridge::prepareMessage(
             messageId,
             senderId);
     }
+    if (const auto action = message.value("action"); action.isObject()) {
+        return prepareServiceMessage(
+            history,
+            message,
+            action.toObject(),
+            messageId,
+            senderId);
+    }
 
     using Flag = MTPDmessage::Flag;
     auto mtpFlags = Flag::f_from_id | Flag();
-    if (senderId == client().meId()) {
+    if (isOwnMessage(history, message)) {
         mtpFlags |= Flag::f_out;
     }
     const auto reactionsArray = message.value("reactions").toArray();
@@ -2575,11 +3009,11 @@ std::optional<NativeBridge::PreparedMessage> NativeBridge::prepareMessage(
         mtpFlags |= Flag::f_reactions;
     }
     const auto replyId = message.value("reply_to_id").toVariant().toLongLong();
-    const auto replyPeerId = peerForChatId(message.value("reply_to")
-        .toObject()
-        .value("chat_id")
-        .toVariant()
-        .toLongLong());
+    const auto replyTo = message.value("reply_to").toObject();
+    const auto replyChannel = replyTo.value("channel").toObject();
+    const auto replyPeerId = replyChannel.isEmpty()
+        ? peerForChatId(replyTo.value("chat_id").toVariant().toLongLong())
+        : ensureQuotedChannel(replyChannel);
     const auto replyHeader = ReplyHeaderFrom(message, replyPeerId);
     if (replyId > 0) {
         mtpFlags |= Flag::f_reply_to;
@@ -2624,7 +3058,23 @@ std::optional<NativeBridge::PreparedMessage> NativeBridge::prepareMessage(
         auto fwdFlags = MTPDmessageFwdHeader::Flags();
         auto from = MTPPeer();
         auto fromName = MTPstring();
-        if (authorId > 0) {
+        auto channelPost = MTPint();
+        auto postAuthor = MTPstring();
+        const auto channel = forwarded.value("channel").toObject();
+        const auto channelId = channel.value("id").toVariant().toLongLong();
+        if (channelId > 0) {
+            // A channel post comes from the channel, as in Telegram: the
+            // server sends no poster, only the signature when there is one.
+            fwdFlags |= FwdFlag::f_from_id | FwdFlag::f_channel_post;
+            from = MTP_peerChannel(MTP_long(channelId));
+            channelPost = MTP_int(forwarded.value("message_id").toInt());
+            const auto signature = forwarded.value("post_author").toString();
+            if (!signature.isEmpty()) {
+                fwdFlags |= FwdFlag::f_post_author;
+                postAuthor = MTP_string(signature);
+            }
+            ensureQuotedChannel(channel);
+        } else if (authorId > 0) {
             fwdFlags |= FwdFlag::f_from_id;
             from = MTP_peerUser(MTP_long(authorId));
             // forwarded_from carries only id/name (see legacyForwardedFrom on
@@ -2650,8 +3100,8 @@ std::optional<NativeBridge::PreparedMessage> NativeBridge::prepareMessage(
             from,
             fromName,
             MTP_int(sourceDate),
-            MTPint(),
-            MTPstring(),
+            channelPost,
+            postAuthor,
             MTPPeer(),
             MTPint(),
             MTPPeer(),
@@ -2767,10 +3217,33 @@ std::optional<NativeBridge::PreparedMessage> NativeBridge::prepareMessage(
     const auto createdAt = reminder
         ? Scheduled::DeliveryDate(message)
         : unixTime(message.value("created_at").toString());
+    // A channel post is the channel speaking: upstream draws it without an
+    // author, and with the author's name only when the channel signs posts.
+    auto fromId = MTP_peerUser(MTP_long(senderId));
+    auto postAuthor = MTPstring();
+    auto views = MTPint();
+    if (const auto channel = history->peer->asBroadcast()) {
+        mtpFlags &= ~Flag::f_from_id;
+        mtpFlags |= Flag::f_post;
+        fromId = MTPPeer();
+        // Every post has a counter: it is what makes upstream report the
+        // post as seen (messages.getMessagesViews), and that answer brings
+        // the count a page without one lacks. It never goes down, so a zero
+        // here does not undo a count already shown.
+        mtpFlags |= Flag::f_views;
+        views = MTP_int(message.value("views").toInt());
+        const auto signature = channel->addsSignature()
+            ? message.value("post_author").toString()
+            : QString();
+        if (!signature.isEmpty()) {
+            mtpFlags |= Flag::f_post_author;
+            postAuthor = MTP_string(signature);
+        }
+    }
     auto mtp = MTP_message(
         MTP_flags(mtpFlags),
         MTP_int(int(messageId)),
-        MTP_peerUser(MTP_long(senderId)),
+        fromId,
         MTPint(),
         MTPstring(),
         peerToMTP(history->peer->id),
@@ -2785,11 +3258,11 @@ std::optional<NativeBridge::PreparedMessage> NativeBridge::prepareMessage(
         media ? *media : MTP_messageMediaEmpty(),
         MTPReplyMarkup(),
         std::move(entities),
-        MTPint(),
+        views,
         MTPint(),
         MTPMessageReplies(),
         MTP_int(editedAt.isEmpty() ? 0 : unixTime(editedAt)),
-        MTPstring(),
+        postAuthor,
         MTP_long(groupedId),
         Reactions::Build(_session, reactionsArray, client().meId()),
         MTPVector<MTPRestrictionReason>(),
@@ -2812,6 +3285,39 @@ std::optional<NativeBridge::PreparedMessage> NativeBridge::prepareMessage(
     }
     return PreparedMessage{
         .mtp = std::move(mtp),
+        .messageId = MsgId(int32(messageId)),
+        .senderId = senderId,
+    };
+}
+
+std::optional<NativeBridge::PreparedMessage> NativeBridge::prepareServiceMessage(
+        History *history,
+        const QJsonObject &message,
+        const QJsonObject &action,
+        qint64 messageId,
+        qint64 senderId) {
+    _messageRevisions[SeenKey(
+        message.value("chat_id").toVariant().toLongLong(),
+        messageId)] = 1;
+    const auto broadcast = history->peer->isBroadcast();
+    using Flag = MTPDmessageService::Flag;
+    auto flags = MTPDmessageService::Flags(
+        broadcast ? Flag::f_post : Flag::f_from_id);
+    if (isOwnMessage(history, message)) {
+        flags |= Flag::f_out;
+    }
+    return PreparedMessage{
+        .mtp = MTP_messageService(
+            MTP_flags(flags),
+            MTP_int(int32(messageId)),
+            broadcast ? MTPPeer() : MTP_peerUser(MTP_long(senderId)),
+            peerToMTP(history->peer->id),
+            MTPPeer(), // saved_peer_id
+            MTPMessageReplyHeader(),
+            MTP_int(unixTime(message.value("created_at").toString())),
+            Community::Action(_session, action, senderId, broadcast),
+            MTPMessageReactions(),
+            MTPint()), // ttl_period
         .messageId = MsgId(int32(messageId)),
         .senderId = senderId,
     };
@@ -2997,8 +3503,7 @@ HistoryItem *NativeBridge::applyMessage(
         // message was not in it. It appeared only after a restart, when no
         // replay ran. The notification is unaffected: newItemAdded pushes it
         // before it touches the counter.
-        const auto own = (message.value("sender_id").toVariant().toLongLong()
-            == client().meId());
+        const auto own = isOwnMessage(history, message);
         const auto unreadBefore = history->unreadCountKnown()
             ? std::optional<int>(history->unreadCount())
             : std::nullopt;
@@ -3016,9 +3521,7 @@ HistoryItem *NativeBridge::applyMessage(
     history->setChatListTimeId(unixTime(message.value("created_at").toString()));
     history->updateChatListExistence();
     _seenMessages.emplace(SeenKey(chatId, messageId));
-    if (item
-        && message.value("sender_id").toVariant().toLongLong()
-            != client().meId()) {
+    if (item && !isOwnMessage(history, message)) {
         queueDelivered(chatId, messageId);
     }
     return item;
@@ -5392,6 +5895,25 @@ void NativeBridge::rebuildPinnedOrder() {
     }
 }
 
+void NativeBridge::applyChatLookPatch(const QJsonObject &data) {
+    const auto history = historyForChatId(
+        data.value("chat_id").toVariant().toLongLong());
+    if (!history) {
+        reloadChats();
+        return;
+    }
+    if (data.contains(u"wallpaper"_q)) {
+        Wallpapers::ApplyForPeer(
+            history->peer,
+            data.value("wallpaper").toObject());
+    }
+    if (data.contains(u"theme"_q)) {
+        ChatThemes::ApplyForPeer(
+            history->peer,
+            data.value("theme").toObject().value("theme_emoticon").toString());
+    }
+}
+
 void NativeBridge::applyChatSettingsPatch(const QJsonObject &data) {
     const auto chatId = data.value("id").toVariant().toLongLong();
     if (chatId <= 0) return;
@@ -5533,12 +6055,6 @@ void NativeBridge::saveNotificationSettings(PeerData *peer) {
 }
 
 void NativeBridge::saveDefaultNotifySettings(Data::DefaultNotify type) {
-    // Groups and channels are outside the current product scope: their UI is
-    // hidden, and the server serves the "user" scope only. Dropping them here
-    // keeps that decision in the bridge instead of the upstream queue.
-    if (type != Data::DefaultNotify::User) {
-        return;
-    }
     const auto &settings = _session->data().notifySettings();
     const auto &value = settings.defaultSettings(type);
     auto muteUntil = static_cast<qint64>(value.muteUntil().value_or(0));
@@ -5550,15 +6066,21 @@ void NativeBridge::saveDefaultNotifySettings(Data::DefaultNotify type) {
     const auto sound = value.sound();
     const auto soundNone = sound && sound->none;
     const auto weak = QPointer<NativeBridge>(this);
-    const auto revertMute = _defaultNotifyMuteUntil;
-    const auto revertSound = _defaultNotifySoundNone;
-    client().setDefaultNotificationSettings(muteUntil, soundNone, QString(),
-        [weak, revertMute, revertSound](QJsonDocument doc, QString error, int) {
+    const auto revert = _defaultNotify[size_t(type)];
+    client().setDefaultNotificationSettings(
+        DefaultNotifyScope(type),
+        muteUntil,
+        soundNone,
+        QString(),
+        [weak, type, revert](QJsonDocument doc, QString error, int) {
             if (!weak) {
                 return;
             }
             if (!error.isEmpty() || !doc.isObject()) {
-                weak->applyDefaultNotifySettings(revertMute, revertSound);
+                weak->applyDefaultNotifySettings(
+                    type,
+                    revert.muteUntil,
+                    revert.soundNone);
                 return;
             }
             weak->applyDefaultNotifySettingsPayload(doc.object());
@@ -5848,7 +6370,8 @@ void NativeBridge::requestChatMedia(
         done = std::move(done)
     ](QJsonDocument doc, QString error, int) mutable {
         auto page = MediaPage();
-        if (!error.isEmpty() || !doc.isObject()) {
+        if (!weak || !error.isEmpty() || !doc.isObject()) {
+            page.failed = true;
             if (done) done(std::move(page));
             return;
         }
@@ -6335,6 +6858,7 @@ void NativeBridge::handleEvent(const QJsonObject &event) {
             data.value("skipped_pinned_ids").toArray());
         _bottomLoadedChats.erase(chatId);
         reloadChats();
+	} else if (handleCommunityEvent(type, data)) {
 	} else if (type == u"chat.deleted"_q) {
 		const auto chatId = data.value("chat_id").toVariant().toLongLong();
 		removeChat(chatId);
@@ -6377,6 +6901,11 @@ void NativeBridge::handleEvent(const QJsonObject &event) {
 			data.value("notification_defaults").toObject());
 	} else if (type == u"chat.updated"_q) {
 		applyChatSettingsPatch(data);
+	} else if (type == u"chat.settings.updated"_q) {
+		// The per-chat wallpaper or theme of one chat, applied to it alone:
+		// the generic branch below would refetch every chat for it, and a
+		// reload is what makes the list jump.
+		applyChatLookPatch(data);
     } else if (type.startsWith(u"chat."_q)) {
         reloadChats();
     }

@@ -1810,7 +1810,8 @@ Section DetailsFiller::makeInfo() {
 				addToLink.isEmpty() ? link.url : (link.text + addToLink),
 				link.text + addToLink));
 		}, linkLine.text->lifetime());
-		if (!topicRootId || !_peer->username().isEmpty()) {
+		if (!CustomBackend::HideGroupExtras
+			&& (!topicRootId || !_peer->username().isEmpty())) {
 			const auto qr = Ui::CreateChild<Ui::IconButton>(
 				linkLine.text->parentWidget(),
 				st::infoProfileLabeledButtonQr);

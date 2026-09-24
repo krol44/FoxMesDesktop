@@ -1,3 +1,8 @@
+1.8.0 (25.09.26)
+
+- Add channel & group
+- Fix bugs
+
 1.7.4 (24.09.26)
 
 - Fix bugs

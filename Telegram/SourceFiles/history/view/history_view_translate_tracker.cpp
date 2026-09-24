@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_transcribes.h"
 #include "core/application.h"
 #include "core/core_settings.h"
+#include "custom_backend/native_runtime.h"
 #include "data/data_changes.h"
 #include "data/data_channel.h"
 #include "data/data_flags.h"
@@ -66,12 +67,16 @@ void TranslateTracker::setup() {
 		return (data.value & ChannelDataFlag::AutoTranslation);
 	}) | rpl::distinct_until_changed();
 
-	using namespace rpl::mappers;
+	// FoxMes: the backend translates nothing (see Ui::SkipTranslate) -
+	// without tracking there is no translate bar and no offer in any chat.
+	const auto hidden = CustomBackend::Enabled();
 	_trackingLanguage = rpl::combine(
 		Core::App().settings().translateChatEnabledValue(),
 		Data::AmPremiumValue(&_history->session()),
-		std::move(autoTranslationValue),
-		_1 && (_2 || _3));
+		std::move(autoTranslationValue)
+	) | rpl::map([=](bool enabled, bool premium, bool autoTranslation) {
+		return !hidden && enabled && (premium || autoTranslation);
+	});
 	_trackingLanguage.value() | rpl::on_next([=](bool tracking) {
 		_trackingLifetime.destroy();
 		if (tracking) {

@@ -681,7 +681,9 @@ void Filler::addInfo() {
 
 void Filler::addStoryArchive() {
 	const auto channel = _peer ? _peer->asChannel() : nullptr;
-	if (!channel || !channel->canEditStories()) {
+	if (CustomBackend::HideGroupExtras
+		|| !channel
+		|| !channel->canEditStories()) {
 		return;
 	}
 	const auto controller = _controller;
@@ -1150,7 +1152,8 @@ void Filler::addTranslate() {
 void Filler::addReport() {
 	const auto chat = _peer->asChat();
 	const auto channel = _peer->asChannel();
-	if (_topic
+	if ((CustomBackend::HideGroupExtras && (chat || channel))
+		|| _topic
 		|| ((!chat || chat->amCreator())
 			&& (!channel || channel->amCreator()))) {
 		return;
@@ -1351,6 +1354,9 @@ void Filler::addManageChat() {
 }
 
 void Filler::addBoostChat() {
+	if (CustomBackend::HideGroupExtras) {
+		return;
+	}
 	if (const auto channel = _peer->asChannel()) {
 		if (channel->isMonoforum()) {
 			return;
@@ -1388,9 +1394,10 @@ void Filler::addViewStatistics() {
 				}
 			}, &st::menuIconStats);
 		}
-		if (canGetStats
-			|| channel->amCreator()
-			|| channel->canPostStories()) {
+		if (!CustomBackend::HideGroupExtras
+			&& (canGetStats
+				|| channel->amCreator()
+				|| channel->canPostStories())) {
 			_addAction(tr::lng_boosts_title(tr::now), [=] {
 				if ([[maybe_unused]] const auto strong = weak.get()) {
 					controller->showSection(Info::Boosts::Make(peer));
@@ -1456,7 +1463,9 @@ SendMenu::Details Filler::createSendMenuDetails() const {
 }
 
 void Filler::addCreatePoll() {
-	if (skipCreateActions() || (CustomBackend::DisableWhile && _peer->isSelf())) {
+	if (skipCreateActions()
+		|| (CustomBackend::DisableWhile && _peer->isSelf())
+		|| (CustomBackend::HideGroupExtras && _peer->isChannel())) {
 		return;
 	}
 	const auto can = _topic
@@ -1740,7 +1749,9 @@ void Filler::addTTLSubmenu(bool addSeparator) {
 
 void Filler::addSendGift() {
 	const auto user = _peer->asUser();
-	const auto channel = _peer->asBroadcast();
+	const auto channel = CustomBackend::HideGroupExtras
+		? nullptr
+		: _peer->asBroadcast();
 	if (!user && !channel) {
 		return;
 	} else if (user
@@ -4466,12 +4477,15 @@ bool FillVideoChatMenu(
 				: tr::lng_menu_start_group_call_scheduled)(tr::now),
 			[=] { callback({ .scheduleNeeded = true }); },
 			&st::menuIconReschedule);
-		addAction(
-			(livestream
-				? tr::lng_menu_start_group_call_with_channel
-				: tr::lng_menu_start_group_call_with)(tr::now),
-			rtmpCallback,
-			&st::menuIconStartStreamWith);
+		// FoxMes: no streams from other apps (RTMP) - the server takes none.
+		if (!CustomBackend::HideGroupExtras) {
+			addAction(
+				(livestream
+					? tr::lng_menu_start_group_call_with_channel
+					: tr::lng_menu_start_group_call_with)(tr::now),
+				rtmpCallback,
+				&st::menuIconStartStreamWith);
+		}
 	}
 	return has || manager;
 }

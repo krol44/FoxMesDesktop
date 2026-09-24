@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/peers/edit_peer_type_box.h"
 
+#include "custom_backend/native_runtime.h"
+
 #include "main/main_session.h"
 #include "boxes/add_contact_box.h"
 #include "ui/boxes/confirm_box.h"
@@ -144,7 +146,7 @@ public:
 	}
 
 	[[nodiscard]] bool noForwards() const {
-		return _controls.noForwards->toggled();
+		return _controls.noForwards && _controls.noForwards->toggled();
 	}
 	[[nodiscard]] bool joinToWrite() const {
 		return _controls.joinToWrite && _controls.joinToWrite->toggled();
@@ -381,7 +383,7 @@ void Controller::createContent() {
 
 	using namespace Settings;
 
-	if (!_linkOnly) {
+	if (!_linkOnly && !CustomBackend::HideGroupExtras) {
 		if (_peer->isChannel()) {
 			_controls.whoSendWrap = _wrap->add(
 				object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
@@ -488,7 +490,8 @@ void Controller::createContent() {
 			? _dataSavedValue->privacy
 			: Privacy::NoUsername;
 		_controls.inviteLinkWrap->toggle(
-			(forShowing != Privacy::HasUsername),
+			(forShowing != Privacy::HasUsername)
+				&& !CustomBackend::HideGroupExtras,
 			anim::type::instant);
 		_controls.usernameWrap->toggle(
 			(forShowing == Privacy::HasUsername),
@@ -644,7 +647,7 @@ object_ptr<Ui::RpWidget> Controller::createUsernameEdit() {
 		container,
 		tr::lng_create_channel_link_about());
 
-	if (channel) {
+	if (channel && !CustomBackend::HideGroupExtras) {
 		const auto focusCallback = [=] {
 			_scrollToRequests.fire(container->y());
 			_controls.usernameInput->setFocusFast();
@@ -670,7 +673,8 @@ object_ptr<Ui::RpWidget> Controller::createUsernameEdit() {
 void Controller::privacyChanged(Privacy value) {
 	const auto toggleInviteLink = [&] {
 		_controls.inviteLinkWrap->toggle(
-			(value != Privacy::HasUsername),
+			(value != Privacy::HasUsername)
+				&& !CustomBackend::HideGroupExtras,
 			anim::type::instant);
 	};
 	const auto toggleEditUsername = [&] {

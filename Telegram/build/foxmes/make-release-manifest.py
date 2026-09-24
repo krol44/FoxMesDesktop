@@ -4,8 +4,8 @@ import json
 from pathlib import Path
 import sys
 
-VERSION = "1.7.4"
-VERSION_CODE = 1007004
+VERSION = "1.8.0"
+VERSION_CODE = 1008000
 RELEASE_URL = (
     "https://github.com/krol44/FoxMesDesktop/releases/download/v" + VERSION
 )

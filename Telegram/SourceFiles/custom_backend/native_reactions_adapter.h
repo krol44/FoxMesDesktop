@@ -70,6 +70,9 @@ void SetUsageLists(
 [[nodiscard]] Asset AssetFor(
 	not_null<Main::Session*> session,
 	DocumentId id);
+[[nodiscard]] bool IsSourceWebm(
+	not_null<Main::Session*> session,
+	DocumentId id);
 [[nodiscard]] rpl::producer<DocumentId> AssetLoaded(
 	not_null<Main::Session*> session);
 

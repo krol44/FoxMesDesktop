@@ -726,9 +726,8 @@ void GroupInfoBox::createGroup(
 		base::weak_qptr<Ui::BoxContent> selectUsersBox,
 		const QString &title,
 		const std::vector<not_null<PeerData*>> &users) {
-	// FoxMes bridge does not support group creation; the entry points are
-	// hidden while CustomBackend::DisableWhile is set, so this only runs on
-	// the upstream MTProto path.
+	// Under the FoxMes bridge "New Group" opens the megagroup flow
+	// (SessionController::showNewGroup), so a basic chat is never made here.
 	if (_creationRequestId) {
 		return;
 	}
@@ -827,9 +826,8 @@ void GroupInfoBox::submit() {
 void GroupInfoBox::createChannel(
 		const QString &title,
 		const QString &description) {
-	// FoxMes bridge does not support channel creation; the entry points are
-	// hidden while CustomBackend::DisableWhile is set, so this only runs on
-	// the upstream MTProto path.
+	// Under the FoxMes bridge channels.createChannel is answered by
+	// custom_backend/native_channels_adapter.
 	Expects(!_creationRequestId);
 
 	using Flag = MTPchannels_CreateChannel::Flag;
@@ -1168,7 +1166,8 @@ void SetupChannelBox::paintEvent(QPaintEvent *e) {
 			aboutPrivate.width(),
 			width());
 	}
-	if (!_channel->isMegagroup() || !_link->isHidden()) {
+	if ((!_channel->isMegagroup() || !_link->isHidden())
+		&& !(CustomBackend::HideGroupExtras && _link->isHidden())) {
 		p.setPen(st::boxTextFg);
 		p.setFont(st::newGroupLinkFont);
 		p.drawTextLeft(
@@ -1183,7 +1182,7 @@ void SetupChannelBox::paintEvent(QPaintEvent *e) {
 	}
 
 	if (_link->isHidden()) {
-		if (!_channel->isMegagroup()) {
+		if (!_channel->isMegagroup() && !CustomBackend::HideGroupExtras) {
 			QTextOption option(style::al_left);
 			option.setWrapMode(QTextOption::WrapAnywhere);
 			p.setFont(_linkOver
@@ -1281,7 +1280,8 @@ void SetupChannelBox::leaveEventHook(QEvent *e) {
 void SetupChannelBox::updateSelected(const QPoint &cursorGlobalPosition) {
 	QPoint p(mapFromGlobal(cursorGlobalPosition));
 
-	bool linkOver = _invitationLink.contains(p);
+	bool linkOver = _invitationLink.contains(p)
+		&& !CustomBackend::HideGroupExtras;
 	if (linkOver != _linkOver) {
 		_linkOver = linkOver;
 		update();

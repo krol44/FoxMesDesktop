@@ -16,6 +16,7 @@
 #include <QTimer>
 #include <QUrl>
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -24,9 +25,11 @@
 #include <unordered_set>
 #include <vector>
 
+class ChannelData;
 class History;
 class HistoryItem;
 class PeerData;
+class QImage;
 enum class NewMessageType;
 
 namespace Main {
@@ -329,6 +332,7 @@ public:
     // edges report their own exhaustion, exactly as a history page does.
     struct MediaPage {
         std::vector<int32_t> ids;
+        bool failed = false;
         bool hasMoreBefore = false;
         bool hasMoreAfter = false;
         int total = 0;
@@ -386,7 +390,57 @@ public:
 	// lists a contact without a chat in the local half of the search results.
 	void ensureUser(const QJsonObject &user, bool contact = false);
 
+	// Groups and channels (native_community.h). Public for the MTP adapter,
+	// which answers channels.* with the same model the chat list builds.
+	PeerId ensureQuotedChannel(const QJsonObject &channel);
+	[[nodiscard]] bool isOwnMessage(
+		not_null<History*> history,
+		const QJsonObject &message) const;
+	// member == false applies the preview of a public chat without taking
+	// it into the chat list.
+	ChannelData *applyCommunityChat(
+		const QJsonObject &chat,
+		bool member = true);
+	// Puts back what an answer applied through upstream (channelFull) resets:
+	// the url photo, wallpaper, theme and notifications.
+	void reapplyCommunityChat(qint64 chatId);
+	// A profile answered by a mutation or carried by chat.profile_updated.
+	void applyCommunityProfile(const QJsonObject &profile);
+	void uploadCommunityPhoto(
+		ChannelData *channel,
+		QImage &&image,
+		std::function<void()> done);
+	[[nodiscard]] QJsonObject communityChat(qint64 chatId) const;
+	// A welcome message: the owner's template (isTemplate) or the copy a new
+	// member receives, which upstream shows only to them.
+	[[nodiscard]] MTPEphemeralMessage welcomeMessage(
+		const QJsonObject &welcome,
+		bool isTemplate) const;
+	// TL entities in the JSON form every send takes.
+	[[nodiscard]] QJsonArray entitiesJson(
+		const MTPVector<MTPMessageEntity> &entities,
+		const QString &text) const;
+	[[nodiscard]] MTPPeerNotifySettings communityNotifySettings(
+		qint64 chatId,
+		const QJsonObject &chat) const;
+	// The foxMes.createGroup / foxMes.createChannel access rules, from /me.
+	[[nodiscard]] rpl::producer<bool> canCreateGroupsValue() const {
+		return _canCreateGroups.value();
+	}
+	[[nodiscard]] rpl::producer<bool> canCreateChannelsValue() const {
+		return _canCreateChannels.value();
+	}
+	[[nodiscard]] bool canCreateGroups() const {
+		return _canCreateGroups.current();
+	}
+	[[nodiscard]] bool canCreateChannels() const {
+		return _canCreateChannels.current();
+	}
+
 private:
+	void applyCommunityPhoto(ChannelData *channel, const QString &url);
+	// Group and channel events; false for an event this does not own.
+	bool handleCommunityEvent(const QString &type, const QJsonObject &data);
     [[nodiscard]] ApiClient &client() const;
     [[nodiscard]] static MTPVector<MTPMessageEntity> renderMessageEntities(
         const QJsonObject &message);
@@ -404,6 +458,7 @@ private:
     void applyChats(const QJsonDocument &doc);
     void removeChat(qint64 chatId);
     void rebuildPinnedOrder();
+    void applyChatLookPatch(const QJsonObject &data);
     void applyChatSettingsPatch(const QJsonObject &data);
     void loadCachedChats();
     void finishInitialLoadIfReady();
@@ -471,7 +526,10 @@ private:
     // Publishes the per-user defaults into the native model for all three
     // peer types. Must run before the first chat is applied: an unknown
     // default makes every unmuted peer read as muted.
-    void applyDefaultNotifySettings(qint64 muteUntil, bool soundNone);
+    void applyDefaultNotifySettings(
+        Data::DefaultNotify type,
+        qint64 muteUntil,
+        bool soundNone);
     void loadDefaultNotifySettings();
     // Re-reads the caller's own profile from GET /me. The cached DTO is the
     // one stored at login, and self is deliberately absent from the members of
@@ -538,6 +596,12 @@ private:
         HistoryLoaded done = {});
     void deferMessageEvent(const QString &type, const QJsonObject &data);
     void drainDeferredMessageEvents();
+    [[nodiscard]] std::optional<PreparedMessage> prepareServiceMessage(
+        History *history,
+        const QJsonObject &message,
+        const QJsonObject &action,
+        qint64 messageId,
+        qint64 senderId);
     [[nodiscard]] std::optional<PreparedMessage> prepareCallMessage(
         History *history,
         const QJsonObject &message,
@@ -748,9 +812,13 @@ private:
 	// Last server-accepted per-user notification defaults, mirrored from the
 	// cache at startup so the setting survives a restart, plus the revision
 	// that guards against a replayed or reordered settings.updated event.
-	qint64 _defaultNotifyMuteUntil = 0;
-	bool _defaultNotifySoundNone = false;
-	qint64 _defaultNotifyRevision = 0;
+	// Per-user notification defaults, one per scope (Data::DefaultNotify).
+	struct DefaultNotifyState {
+		qint64 muteUntil = 0;
+		bool soundNone = false;
+		qint64 revision = 0;
+	};
+	std::array<DefaultNotifyState, 3> _defaultNotify;
 	qint64 _eventSeq = 0;
 	// Replay point of the last gap resync. A gap that asks to resume from the
 	// very same place twice is a server/client disagreement, not a real gap:
@@ -758,11 +826,17 @@ private:
 	qint64 _lastGapResumeFrom = 0;
 	bool _contactsDone = false;
 	bool _chatsDone = false;
+	bool _reactionsCatalogLoading = false;
 	bool _reactionsRefreshScheduled = false;
 	bool _reactionUsageRefreshScheduled = false;
 	// Whether this account's server takes disappearing media, from GET /me
 	// capabilities. False until it has answered.
 	bool _ephemeralMediaSupported = false;
+	rpl::variable<bool> _canCreateGroups = false;
+	rpl::variable<bool> _canCreateChannels = false;
+	// The last DTO of each group or channel, for what has to be applied
+	// again after upstream's own appliers (reapplyCommunityChat).
+	std::unordered_map<qint64, QJsonObject> _communityChats;
 	std::unique_ptr<LiveUpdatesConnection> _liveUpdates;
 
 };

@@ -157,6 +157,12 @@ PRIVATE
     custom_backend/native_calls_adapter.h
     custom_backend/native_conference_adapter.cpp
     custom_backend/native_conference_adapter.h
+    custom_backend/native_channels_adapter.cpp
+    custom_backend/native_channels_adapter.h
+    custom_backend/native_community.cpp
+    custom_backend/native_community.h
+    custom_backend/native_mtp_router.cpp
+    custom_backend/native_mtp_router.h
     custom_backend/native_meet_adapter.cpp
     custom_backend/native_meet_adapter.h
     custom_backend/native_send_files_adapter.cpp

@@ -950,8 +950,12 @@ void ApiWrap::requestContacts() {
 
 void ApiWrap::requestDialogs(Data::Folder *folder) {
 	if (CustomBackend::Enabled()) {
+		// Like requestMoreDialogs(): a list that is loaded has nothing more to
+		// load. The chat list asks on every repaint while its bottom is
+		// visible, and a full reload per ask fed itself.
 		if (!folder) {
-			if (const auto bridge = CustomBackend::BridgeFor(_session)) {
+			const auto bridge = CustomBackend::BridgeFor(_session);
+			if (bridge && !_session->data().chatsList()->loaded()) {
 				bridge->reloadChats();
 			}
 		} else {
