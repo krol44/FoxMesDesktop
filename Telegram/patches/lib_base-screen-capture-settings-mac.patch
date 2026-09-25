@@ -1,0 +1,20 @@
+diff --git a/base/platform/mac/base_info_mac.mm b/base/platform/mac/base_info_mac.mm
+index 9146cb3..a0d79b5 100644
+--- a/base/platform/mac/base_info_mac.mm
++++ b/base/platform/mac/base_info_mac.mm
+@@ -294,7 +294,14 @@ void OpenDesktopCapturePrivacySettings() {
+ 	if (@available(macOS 11.0, *)) {
+ 		CGRequestScreenCaptureAccess();
+ 	}
+-	[[NSWorkspace sharedWorkspace] openURL:PrivacySettingsUrl("Privacy_ScreenCapture")];
++	if (@available(macOS 13.0, *)) {
++		[[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:
++			@"x-apple.systempreferences:com.apple.settings.PrivacySecurity."
++			@"extension?Privacy_ScreenCapture"]];
++	} else {
++		[[NSWorkspace sharedWorkspace] openURL:PrivacySettingsUrl(
++			"Privacy_ScreenCapture")];
++	}
+ }
+ 
+ void OpenAccessibilityPrivacySettings() {

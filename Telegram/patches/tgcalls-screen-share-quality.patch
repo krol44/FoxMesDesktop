@@ -1,0 +1,273 @@
+diff --git a/tgcalls/MediaManager.cpp b/tgcalls/MediaManager.cpp
+index 9ee2939..66c587a 100644
+--- a/tgcalls/MediaManager.cpp
++++ b/tgcalls/MediaManager.cpp
+@@ -781,7 +781,9 @@ void MediaManager::configureSendingVideoIfNeeded() {
+ 
+     codec.SetParam(cricket::kCodecParamMinBitrate, 64);
+     codec.SetParam(cricket::kCodecParamStartBitrate, 400);
+-    codec.SetParam(cricket::kCodecParamMaxBitrate, _enableHighBitrateVideo ? 2000 : 800);
++    // The capture can switch from camera to screen without renegotiating codecs.
++    // Keep the codec ceiling high; transport preferences still limit the camera.
++    codec.SetParam(cricket::kCodecParamMaxBitrate, 10000);
+ 
+     cricket::VideoSenderParameters videoSendParameters;
+     videoSendParameters.codecs.push_back(codec);
+@@ -854,7 +856,9 @@ void MediaManager::checkIsSendingVideoChanged(bool wasSending) {
+ }
+ 
+ int MediaManager::getMaxVideoBitrate() const {
+-    return (_enableHighBitrateVideo && _isLowCostNetwork) ? 2000000 : 800000;
++    return _isScreenCapture
++        ? 10000000
++        : (_enableHighBitrateVideo && _isLowCostNetwork) ? 2000000 : 800000;
+ }
+ 
+ int MediaManager::getMaxAudioBitrate() const {
+@@ -871,7 +875,7 @@ void MediaManager::adjustBitratePreferences(bool resetStartBitrate) {
+         if (_isScreenCapture) {
+             preferences.min_bitrate_bps = 700000;
+             if (resetStartBitrate) {
+-                preferences.start_bitrate_bps = 700000;
++                preferences.start_bitrate_bps = 6000000;
+             }
+         } else {
+             preferences.min_bitrate_bps = 64000;
+diff --git a/tgcalls/desktop_capturer/DesktopCaptureSourceHelper.cpp b/tgcalls/desktop_capturer/DesktopCaptureSourceHelper.cpp
+index 8f32965..247869d 100644
+--- a/tgcalls/desktop_capturer/DesktopCaptureSourceHelper.cpp
++++ b/tgcalls/desktop_capturer/DesktopCaptureSourceHelper.cpp
+@@ -155,13 +155,15 @@ void SourceFrameCallbackImpl::OnCaptureResult(
+     }
+ 
+     const auto frameSize = frame->size();
+-    auto fittedSize = (frameSize.width() >= size_.width * 2
+-        || frameSize.height() >= size_.height * 2)
+-        ? DesktopSize{ frameSize.width() / 2, frameSize.height() / 2 }
+-        : DesktopSize{ frameSize.width(), frameSize.height() };
+-
+-    fittedSize.width -= (fittedSize.width % 4);
+-    fittedSize.height -= (fittedSize.height % 4);
++    const auto scale = std::min({
++        1.0,
++        double(size_.width) / frameSize.width(),
++        double(size_.height) / frameSize.height()
++    });
++    const auto fittedSize = DesktopSize{
++        std::max(4, (int(frameSize.width() * scale) / 4) * 4),
++        std::max(4, (int(frameSize.height() * scale) / 4) * 4)
++    };
+ 
+     const auto outputSize = webrtc::DesktopSize{
+         fittedSize.width,
+diff --git a/tgcalls/group/GroupInstanceCustomImpl.cpp b/tgcalls/group/GroupInstanceCustomImpl.cpp
+index 762d1b9..d3af5a1 100644
+--- a/tgcalls/group/GroupInstanceCustomImpl.cpp
++++ b/tgcalls/group/GroupInstanceCustomImpl.cpp
+@@ -1721,7 +1721,7 @@ public:
+             outgoingVideoDescription->set_rtcp_reduced_size(true);
+             outgoingVideoDescription->set_direction(webrtc::RtpTransceiverDirection::kRecvOnly);
+             outgoingVideoDescription->set_codecs(codecs);
+-            outgoingVideoDescription->set_bandwidth(1300000);
++            outgoingVideoDescription->set_bandwidth(10000000);
+ 
+             cricket::StreamParams videoRecvStreamParams;
+ 
+@@ -1762,7 +1762,7 @@ public:
+             incomingVideoDescription->set_rtcp_reduced_size(true);
+             incomingVideoDescription->set_direction(webrtc::RtpTransceiverDirection::kSendOnly);
+             incomingVideoDescription->set_codecs(codecs);
+-            incomingVideoDescription->set_bandwidth(1300000);
++            incomingVideoDescription->set_bandwidth(10000000);
+ 
+             incomingVideoDescription->AddStream(videoRecvStreamParams);
+ 
+@@ -2540,7 +2540,10 @@ public:
+             outgoingVideoCodecs.push_back(_selectedPayloadType->rtxCodec.value());
+         }
+         outgoingVideoDescription->set_codecs(outgoingVideoCodecs);
+-        outgoingVideoDescription->set_bandwidth(1300000);
++        outgoingVideoDescription->set_bandwidth(
++            _videoContentType == VideoContentType::Screencast
++                ? 10000000
++                : 1300000);
+         outgoingVideoDescription->AddStream(videoSendStreamParams);
+ 
+         auto incomingVideoDescription = std::make_unique<cricket::VideoContentDescription>();
+@@ -2551,7 +2554,10 @@ public:
+         incomingVideoDescription->set_rtcp_reduced_size(true);
+         incomingVideoDescription->set_direction(webrtc::RtpTransceiverDirection::kRecvOnly);
+         incomingVideoDescription->set_codecs(outgoingVideoCodecs);
+-        incomingVideoDescription->set_bandwidth(1300000);
++        incomingVideoDescription->set_bandwidth(
++            _videoContentType == VideoContentType::Screencast
++                ? 10000000
++                : 1300000);
+ 
+         _threads->getWorkerThread()->BlockingCall([&]() {
+             std::string errorDesc;
+@@ -2592,7 +2598,7 @@ public:
+                             rtpParameters.encodings[i].active = _outgoingVideoConstraint >= 360;
+                         } else if (i == 2) {
+                             rtpParameters.encodings[i].min_bitrate_bps = 300000;
+-                            rtpParameters.encodings[i].max_bitrate_bps = 800000 + 100000;
++                            rtpParameters.encodings[i].max_bitrate_bps = 9700000;
+                             rtpParameters.encodings[i].active = _outgoingVideoConstraint >= 720;
+                         }
+                     }
+@@ -2604,11 +2610,11 @@ public:
+                             rtpParameters.encodings[i].scale_resolution_down_by = 2.0;
+                         } else if (i == 1) {
+                             rtpParameters.encodings[i].min_bitrate_bps = 200000;
+-                            rtpParameters.encodings[i].max_bitrate_bps = 900000 + 100000;
++                            rtpParameters.encodings[i].max_bitrate_bps = 9900000;
+                         }
+                     }
+                 } else {
+-                    rtpParameters.encodings[0].max_bitrate_bps = (800000 + 100000) * 2;
++                    rtpParameters.encodings[0].max_bitrate_bps = 10000000;
+                 }
+ 
+                 _outgoingVideoChannel->send_channel()->SetRtpSendParameters(_outgoingVideoSsrcs.simulcastLayers[0].ssrc, rtpParameters);
+@@ -3199,10 +3205,14 @@ public:
+         if (_getVideoSource) {
+             preferences.min_bitrate_bps = _minOutgoingVideoBitrateKbit * 1024;
+             if (resetStartBitrate) {
+-                preferences.start_bitrate_bps = std::max(preferences.min_bitrate_bps, 400 * 1000);
++                preferences.start_bitrate_bps = std::max(
++                    preferences.min_bitrate_bps,
++                    (_videoContentType == VideoContentType::Screencast)
++                        ? 6000000
++                        : 400000);
+             }
+             if (_videoContentType == VideoContentType::Screencast) {
+-                preferences.max_bitrate_bps = std::max(preferences.min_bitrate_bps, (1020 + 32) * 1000);
++                preferences.max_bitrate_bps = std::max(preferences.min_bitrate_bps, 10000000);
+             } else {
+                 preferences.max_bitrate_bps = std::max(preferences.min_bitrate_bps, (1020 + 32) * 1000);
+             }
+diff --git a/tgcalls/platform/darwin/DesktopSharingCapturer.mm b/tgcalls/platform/darwin/DesktopSharingCapturer.mm
+index 22312c6..0efb178 100644
+--- a/tgcalls/platform/darwin/DesktopSharingCapturer.mm
++++ b/tgcalls/platform/darwin/DesktopSharingCapturer.mm
+@@ -70,8 +70,8 @@ private:
+         }));
+ 
+         tgcalls::DesktopCaptureSourceData data{
+-	        /*.aspectSize = */{ 1920, 1080 },
+-	        /*.fps = */25,
++	        /*.aspectSize = */{ 2560, 1440 },
++	        /*.fps = */15,
+ 	        /*.captureMouse = */true,
+         };
+         renderer.emplace(captureSource, data);
+diff --git a/tgcalls/platform/tdesktop/VideoCapturerInterfaceImpl.cpp b/tgcalls/platform/tdesktop/VideoCapturerInterfaceImpl.cpp
+index be86854..9720b35 100644
+--- a/tgcalls/platform/tdesktop/VideoCapturerInterfaceImpl.cpp
++++ b/tgcalls/platform/tdesktop/VideoCapturerInterfaceImpl.cpp
+@@ -46,8 +46,8 @@ VideoCapturerInterfaceImpl::VideoCapturerInterfaceImpl(
+ #else
+ 	if (const auto source = DesktopCaptureSourceForKey(deviceId)) {
+ 		const auto data = DesktopCaptureSourceData{
+-			/*.aspectSize = */{ 1280, 720 },
+-			/*.fps = */24.,
++			/*.aspectSize = */{ 2560, 1440 },
++			/*.fps = */15.,
+ 			/*.captureMouse = */true,
+ 		};
+ 		_desktopCapturer = std::make_unique<DesktopCaptureSourceHelper>(
+@@ -55,7 +55,7 @@ VideoCapturerInterfaceImpl::VideoCapturerInterfaceImpl(
+ 			data);
+ 		_desktopCapturer->setOutput(_sink);
+ 		_desktopCapturer->start();
+-		outResolution = { 1280, 960 };
++		outResolution = { 2560, 1440 };
+ 	} else if (!ShouldBeDesktopCapture(deviceId))
+ #endif // TGCALLS_UWP_DESKTOP
+ 	{
+diff --git a/tgcalls/platform/uwp/UwpScreenCapturer.cpp b/tgcalls/platform/uwp/UwpScreenCapturer.cpp
+index d3122da..d07b864 100644
+--- a/tgcalls/platform/uwp/UwpScreenCapturer.cpp
++++ b/tgcalls/platform/uwp/UwpScreenCapturer.cpp
+@@ -16,9 +16,9 @@
+ namespace tgcalls {
+ namespace {
+ 
+-constexpr auto kPreferredWidth = 640;
+-constexpr auto kPreferredHeight = 480;
+-constexpr auto kPreferredFps = 30;
++constexpr auto kPreferredWidth = 2560;
++constexpr auto kPreferredHeight = 1440;
++constexpr auto kPreferredFps = 15;
+ 
+ // We must use a BGRA pixel format that has 4 bytes per pixel, as required by
+ // the DesktopFrame interface.
+@@ -355,14 +355,29 @@ void UwpScreenCapturer::OnFrame(std::vector<uint8_t> bytes, int width, int heigh
+ 		return;
+ 	}
+ 
+-	int dst_width = width & ~1;
+-	int dst_height = abs(height) & ~1;
++	const auto scale = std::min({
++		1.0,
++		double(kPreferredWidth) / width,
++		double(kPreferredHeight) / abs(height)
++	});
++	int dst_width = std::max(4, (int(width * scale) / 4) * 4);
++	int dst_height = std::max(4, (int(abs(height) * scale) / 4) * 4);
+ 	int dst_stride_y = dst_width;
+ 	int dst_stride_uv = (dst_width + 1) / 2;
+ 
+-	uint8_t* plane_y = bytes.data();
+-	size_t videoFrameLength = bytes.size();
+-	int32_t stride_y = width * 4;
++	std::vector<uint8_t> scaledBytes;
++	if (dst_width != width || dst_height != abs(height)) {
++		scaledBytes.resize(dst_width * dst_height * 4);
++		if (libyuv::ARGBScale(
++				bytes.data(), width * 4, width, height,
++				scaledBytes.data(), dst_width * 4, dst_width, dst_height,
++				libyuv::kFilterBilinear) != 0) {
++			return;
++		}
++	}
++	uint8_t* plane_y = scaledBytes.empty() ? bytes.data() : scaledBytes.data();
++	size_t videoFrameLength = scaledBytes.empty() ? bytes.size() : scaledBytes.size();
++	int32_t stride_y = dst_width * 4;
+ 	uint8_t* plane_uv = plane_y + videoFrameLength;
+ 	int32_t stride_uv = stride_y / 2;
+ 
+@@ -375,7 +390,7 @@ void UwpScreenCapturer::OnFrame(std::vector<uint8_t> bytes, int width, int heigh
+ 		buffer.get()->MutableDataU(), buffer.get()->StrideU(),
+ 		buffer.get()->MutableDataV(), buffer.get()->StrideV(),
+ 		0, 0,  // No Cropping
+-		width, height, dst_width, dst_height, libyuv::kRotate0,
++		dst_width, dst_height, dst_width, dst_height, libyuv::kRotate0,
+ 		libyuv::FOURCC_ARGB);
+ 	if (conversionResult < 0) {
+ 		RTC_LOG(LS_ERROR) << "Failed to convert capture frame from type "
+diff --git a/tgcalls/v2/InstanceV2Impl.cpp b/tgcalls/v2/InstanceV2Impl.cpp
+index 8159818..11844b8 100644
+--- a/tgcalls/v2/InstanceV2Impl.cpp
++++ b/tgcalls/v2/InstanceV2Impl.cpp
+@@ -2165,6 +2165,20 @@ public:
+         if (_outgoingVideoChannel) {
+             _outgoingVideoChannel->setMaxBitrate(1000 * 1024);
+         }
++        if (_outgoingScreencastChannel) {
++            _outgoingScreencastChannel->setMaxBitrate(10000000);
++        }
++        if (_screencastCapture) {
++            webrtc::BitrateConstraints preferences;
++            preferences.min_bitrate_bps = 100000;
++            if (resetStartBitrate) {
++                preferences.start_bitrate_bps = 6000000;
++            }
++            preferences.max_bitrate_bps = 10000000;
++            _threads->getWorkerThread()->BlockingCall([&]() {
++                _call->GetTransportControllerSend()->SetSdpBitrateParameters(preferences);
++            });
++        }
+     }
+ 
+ private:

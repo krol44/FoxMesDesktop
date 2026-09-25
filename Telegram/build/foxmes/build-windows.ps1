@@ -8,7 +8,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$version = "1.8.0"
+$version = "1.8.1"
 $telegramRoot = Join-Path $SourceRoot "Telegram"
 $buildRoot = Join-Path $SourceRoot "out"
 # prepare.py puts x64 dependencies in Libraries\win64, a sibling of the
@@ -144,6 +144,9 @@ function Remove-UnusedLibraryFiles() {
 }
 
 Apply-Patch "lib_ui-animated-icon-webm.patch" "Telegram\lib_ui"
+Apply-Patch "lib_base-screen-capture-settings-mac.patch" "Telegram\lib_base"
+Apply-Patch "lib_webrtc-screen-capture-permission-mac.patch" "Telegram\lib_webrtc"
+Apply-Patch "tgcalls-screen-share-quality.patch" "Telegram\ThirdParty\tgcalls"
 Apply-Patch "cmake-bzip2-stub.patch" "cmake"
 Apply-Patch "cmake-gcc-restrict-warning.patch" "cmake"
 Apply-Patch "cmake-qt-win-dep-paths.patch" "cmake"
@@ -270,7 +273,7 @@ if (-not (Test-Path $executable)) { throw "FoxMes.exe was not produced." }
 # 2026-09-04, after a two-hour build.
 $versionInfo = (Get-Item $executable).VersionInfo
 if ("$($versionInfo.CompanyName)".Trim() -ne "Foxtail") { throw "Unexpected executable publisher." }
-if ($versionInfo.ProductVersion -notlike "1.8.0*") { throw "Unexpected executable version." }
+if ($versionInfo.ProductVersion -notlike "1.8.1*") { throw "Unexpected executable version." }
 
 # Emptied for the same reason the Linux and macOS scripts empty theirs: a
 # package left by an earlier version would otherwise be uploaded as part of
@@ -320,7 +323,7 @@ if ($observedVersion -ne $version) {
     throw "Unexpected installer version: '$($observedVersion)'."
 }
 if ((Get-AuthenticodeSignature $setup).Status -ne "NotSigned") {
-    throw "The version 1.8.0 installer must be unsigned."
+    throw "The version 1.8.1 installer must be unsigned."
 }
 
 $temporaryRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { $env:TEMP }
