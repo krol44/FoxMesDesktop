@@ -39,7 +39,7 @@ rpl::producer<TextWithEntities> Text1() {
 	return tr::lng_about_text1(
 		lt_api_link,
 		tr::lng_about_text1_api(tr::url(
-			u"https://fxl.ru/@info/983-chto-takoe-lisiy-khvost"_q)),
+			u"https://foxtail.ing/@info/983-chto-takoe-lisiy-khvost"_q)),
 		tr::marked);
 }
 
@@ -145,7 +145,7 @@ void AboutBox(not_null<Ui::GenericBox*> box) {
 }
 
 QString telegramFaqLink() {
-	return u"https://fxl.ru/@info/983-chto-takoe-lisiy-khvost"_q;
+	return u"https://foxtail.ing/@info/983-chto-takoe-lisiy-khvost"_q;
 }
 
 namespace {

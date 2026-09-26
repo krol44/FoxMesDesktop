@@ -855,13 +855,16 @@ void RoundVideoRecorder::Private::initCircleMask() {
 
 void RoundVideoRecorder::Private::initCircularTextAdd() {
 	constexpr auto kCircularTextRadius = kSide / 2 + 17;
-	constexpr auto kCircularTextStartAngle = 125;
-	constexpr auto kCircularTextEndAngle = 145;
+	// The letters are spread evenly over the arc whatever their count, so its
+	// span follows the text: about 2.5 degrees a letter, centred where
+	// upstream's "TELEGRAM" sat.
+	constexpr auto kCircularTextStartAngle = 122;
+	constexpr auto kCircularTextEndAngle = 148;
 	const auto image = CircularTextImage(
 		// The site the product belongs to, not the app name: this text is
 		// burned into a video that leaves the app, so it has to point back at
 		// something a viewer can open.
-		u"fxl.ru"_q,
+		u"foxtail.ing"_q,
 		kSide,
 		kSide,
 		kCircularTextRadius,

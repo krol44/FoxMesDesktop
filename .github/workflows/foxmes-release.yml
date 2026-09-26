@@ -21,8 +21,8 @@ concurrency:
 env:
   # Bump to force a dependency rebuild without editing prepare.py.
   FOXMES_DEPS_REVISION: '1'
-  FOXMES_VERSION: 1.8.1
-  FOXMES_VERSION_CODE: '1008001'
+  FOXMES_VERSION: 1.8.2
+  FOXMES_VERSION_CODE: '1008002'
 
 jobs:
   validate:
@@ -246,11 +246,30 @@ jobs:
     # would die at the first generated file. Building natively also stops the
     # cross-compile the Intel runner was doing for the arm64 slice.
     runs-on: macos-15
+    # The signing key is an environment secret, not a repository one, so that
+    # the environment's branch and tag rules decide which refs can reach it.
+    environment: macos-signing
     steps:
       - name: Check out source
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           submodules: recursive
+
+      # Checked before the dependencies rather than where the key is used: a
+      # missing secret should cost a minute, not the hours of building that
+      # come before the signing step.
+      - name: Check the signing secrets
+        if: ${{ github.event.inputs.only_cache != 'true' }}
+        shell: bash
+        env:
+          SIGNING_P12: ${{ secrets.MACOS_SIGNING_P12 }}
+          SIGNING_P12_PASSWORD: ${{ secrets.MACOS_SIGNING_P12_PASSWORD }}
+        run: |
+          if [ -z "$SIGNING_P12" ] || [ -z "$SIGNING_P12_PASSWORD" ]; then
+            echo "MACOS_SIGNING_P12 and MACOS_SIGNING_P12_PASSWORD must be set in the macos-signing environment" >&2
+            exit 1
+          fi
+
       - name: Install build prerequisites
         shell: bash
         run: brew install automake libtool meson nasm ninja pkg-config
@@ -321,10 +340,43 @@ jobs:
             ${{ env.TBUILD }}/ThirdParty
           key: macOS-arm64-libs-${{ env.CACHE_KEY }}
 
-      - name: Build unsigned macOS package
+      # A keychain of its own, so that codesign finds the identity without the
+      # login keychain and nothing prompts for access. It goes on the search
+      # list, which is where codesign looks; build-macos.sh then picks the
+      # identity by the fingerprint of the committed codesign.pem, so a key
+      # that does not belong to that certificate fails the build.
+      - name: Import the signing certificate
+        if: ${{ github.event.inputs.only_cache != 'true' }}
+        shell: bash
+        env:
+          SIGNING_P12: ${{ secrets.MACOS_SIGNING_P12 }}
+          SIGNING_P12_PASSWORD: ${{ secrets.MACOS_SIGNING_P12_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/foxmes-signing.keychain-db"
+          keychain_password="$(openssl rand -hex 24)"
+          printf '%s' "$SIGNING_P12" | base64 --decode > "$RUNNER_TEMP/signing.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/signing.p12" \
+            -k "$keychain" -P "$SIGNING_P12_PASSWORD" -f pkcs12 -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/signing.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s \
+            -k "$keychain_password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" \
+            $(security list-keychains -d user | tr -d '"')
+          echo "SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+
+      - name: Build signed macOS package
         if: ${{ github.event.inputs.only_cache != 'true' }}
         shell: bash
         run: bash Telegram/build/foxmes/build-macos.sh app
+
+      - name: Remove the signing keychain
+        if: ${{ always() && env.SIGNING_KEYCHAIN != '' }}
+        shell: bash
+        run: security delete-keychain "$SIGNING_KEYCHAIN"
 
       - name: Upload macOS package
         if: ${{ github.event.inputs.only_cache != 'true' }}
@@ -412,9 +464,9 @@ jobs:
       - name: Validate Linux package metadata
         shell: bash
         run: |
-          desktop-file-validate out/FoxMes.AppDir/usr/share/applications/ru.fxl.foxMes.desktop
-          appstreamcli validate --no-net out/FoxMes.AppDir/usr/share/metainfo/ru.fxl.foxMes.metainfo.xml
-          artifacts/linux/FoxMes-1.8.1-linux-x86_64.AppImage --appimage-extract >/dev/null
+          desktop-file-validate out/FoxMes.AppDir/usr/share/applications/ing.foxtail.FoxMes.desktop
+          appstreamcli validate --no-net out/FoxMes.AppDir/usr/share/metainfo/ing.foxtail.FoxMes.metainfo.xml
+          artifacts/linux/FoxMes-1.8.2-linux-x86_64.AppImage --appimage-extract >/dev/null
           ldd out/FoxMes.AppDir/usr/bin/FoxMes | tee /tmp/foxmes-ldd.txt
           ! grep -q 'not found' /tmp/foxmes-ldd.txt
       # The Linux app build still runs on a seeding run: compiling is what fills

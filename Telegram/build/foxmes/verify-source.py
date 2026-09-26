@@ -49,7 +49,7 @@ EXPECTED_CONSTANTS = {
     'FOXMES_APP_NAME "FoxMes"': ROOT / "Telegram/cmake/foxmes.cmake",
     'FOXMES_APP_DISPLAY_NAME "FoxMes Desktop"': ROOT / "Telegram/cmake/foxmes.cmake",
     'FOXMES_PUBLISHER "Foxtail"': ROOT / "Telegram/cmake/foxmes.cmake",
-    'FOXMES_APP_ID "ru.fxl.foxMes"': ROOT / "Telegram/cmake/foxmes.cmake",
+    'FOXMES_APP_ID "ing.foxtail.FoxMes"': ROOT / "Telegram/cmake/foxmes.cmake",
     'FOXMES_REPOSITORY "https://github.com/krol44/FoxMesDesktop"': (
         ROOT / "Telegram/cmake/foxmes.cmake"
     ),
@@ -62,7 +62,7 @@ EXPECTED_CONSTANTS = {
     '{FC0D9DA5-24CF-5319-8323-38E581B6D401}': (
         ROOT / "Telegram/SourceFiles/platform/win/windows_toast_activator.h"
     ),
-    'L"ru.fxl.foxMes"': (
+    'L"ing.foxtail.FoxMes"': (
         ROOT / "Telegram/SourceFiles/platform/win/windows_app_user_model_id.cpp"
     ),
     'L"FoxMesStartupTask"': (
@@ -134,7 +134,7 @@ def main() -> int:
         for token in FORBIDDEN:
             if token in text:
                 failures.append(f"{path.relative_to(ROOT)} contains {token!r}")
-    for required in ("ru.fxl.foxMes", "Foxtail", "krol44/FoxMesDesktop"):
+    for required in ("ing.foxtail.FoxMes", "Foxtail", "krol44/FoxMesDesktop"):
         if required not in combined:
             failures.append(f"metadata does not contain {required!r}")
     publisher_files = (
@@ -201,9 +201,9 @@ def main() -> int:
     for line in (ROOT / "Telegram/build/version").read_text(encoding="utf-8").splitlines():
         key, value = line.split(maxsplit=1)
         version_values[key] = value
-    if version_values.get("AppVersion") != "1008001":
+    if version_values.get("AppVersion") != "1008002":
         failures.append("Telegram/build/version has an unexpected version code")
-    if version_values.get("AppVersionStr") != "1.8.1":
+    if version_values.get("AppVersionStr") != "1.8.2":
         failures.append("Telegram/build/version has an unexpected version string")
 
     startup_task = (
@@ -334,6 +334,21 @@ def main() -> int:
     # asserts that nothing but arm64 is present.
     if "lipo -archs" not in macos_script:
         failures.append("build-macos.sh does not assert the exact architecture")
+    # TCC keeps a grant against the designated requirement, and ours names the
+    # certificate, so every release must be signed by the same one. Its public
+    # half is committed; missing, it would fail the macOS job after the build.
+    codesign_cert = ROOT / "Telegram/build/foxmes/codesign.pem"
+    if (not codesign_cert.is_file()
+            or "BEGIN CERTIFICATE" not in codesign_cert.read_text(
+                encoding="utf-8")):
+        failures.append(f"{codesign_cert.relative_to(ROOT)} is missing")
+    if 'certificate root = H' not in macos_script:
+        failures.append(
+            "build-macos.sh no longer checks the designated requirement")
+    # Re-signing ad-hoc swaps the requirement for a code hash, and then the
+    # grants are lost on every update again.
+    if "--sign -" in (ROOT / "README.md").read_text(encoding="utf-8"):
+        failures.append("README.md tells users to re-sign the app ad-hoc")
     manifest = (ROOT / "Telegram/build/foxmes/make-release-manifest.py").read_text(
         encoding="utf-8"
     )

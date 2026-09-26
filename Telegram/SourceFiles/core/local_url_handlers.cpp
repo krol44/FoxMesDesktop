@@ -1934,8 +1934,8 @@ QString TryConvertUrlToLocal(QString url) {
 		url = url.mid(0, 8192);
 	}
 	if (CustomBackend::Enabled()) {
-		// FoxMes: fxl.ru/@ links are opened here as t.me ones are; one this
-		// cannot place keeps its own address instead of turning into t.me.
+		// FoxMes: foxtail.ing/@ links are opened here as t.me ones are; one
+		// this cannot place keeps its own address instead of turning into t.me.
 		const auto internal = CustomBackend::DeepLinks::LocalizeInternalLink(
 			url);
 		if (internal != url) {

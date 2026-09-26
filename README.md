@@ -4,17 +4,18 @@ FoxMes Desktop is built on the Telegram Desktop core.
 
 ## Running an unsigned download
 
-FoxMes Desktop 1.8.1 is distributed without a commercial code-signing certificate. Before bypassing an operating-system warning, verify the downloaded file against `SHA256SUMS` from the same GitHub release.
+FoxMes Desktop 1.8.2 is distributed without a commercial code-signing certificate. Before bypassing an operating-system warning, verify the downloaded file against `SHA256SUMS` from the same GitHub release.
 
 ### macOS
 
-Copy `FoxMes.app` from the DMG to the `Applications` folder. Then open Terminal and run:
+The app is signed with FoxMes's own certificate rather than Apple's, so macOS does not recognise the developer. Copy `FoxMes.app` from the DMG to the `Applications` folder. Then open Terminal and run:
 
 ```bash
 xattr -dr com.apple.quarantine "/Applications/FoxMes.app"
-codesign --force --deep --sign - "/Applications/FoxMes.app"
 open "/Applications/FoxMes.app"
 ```
+
+Do not re-sign the app with `codesign`. macOS keeps the Screen Recording, Camera and Microphone permissions for as long as the signature stays FoxMes's own; a re-signed copy loses them on every update.
 
 Alternatively, try to open FoxMes once, then go to **System Settings → Privacy & Security** and select **Open Anyway**.
 
@@ -25,14 +26,14 @@ Right-click the downloaded installer, select **Properties**, enable **Unblock** 
 The file can also be unblocked with PowerShell:
 
 ```powershell
-Unblock-File .\FoxMes-1.8.1-windows-x64-setup.exe
+Unblock-File .\FoxMes-1.8.2-windows-x64-setup.exe
 ```
 
 For the portable version, unblock the ZIP before extracting it:
 
 ```powershell
-Unblock-File .\FoxMes-1.8.1-windows-x64-portable.zip
-Expand-Archive .\FoxMes-1.8.1-windows-x64-portable.zip .\FoxMes-portable
+Unblock-File .\FoxMes-1.8.2-windows-x64-portable.zip
+Expand-Archive .\FoxMes-1.8.2-windows-x64-portable.zip .\FoxMes-portable
 .\FoxMes-portable\FoxMes.exe
 ```
 
@@ -41,14 +42,14 @@ Expand-Archive .\FoxMes-1.8.1-windows-x64-portable.zip .\FoxMes-portable
 For the AppImage, grant execute permission and start it:
 
 ```bash
-chmod +x FoxMes-1.8.1-linux-x86_64.AppImage
-./FoxMes-1.8.1-linux-x86_64.AppImage
+chmod +x FoxMes-1.8.2-linux-x86_64.AppImage
+./FoxMes-1.8.2-linux-x86_64.AppImage
 ```
 
 If AppImage mounting is unavailable, extract and run it directly:
 
 ```bash
-./FoxMes-1.8.1-linux-x86_64.AppImage --appimage-extract
+./FoxMes-1.8.2-linux-x86_64.AppImage --appimage-extract
 ./squashfs-root/AppRun
 ```
 
@@ -56,7 +57,7 @@ For the tar archive:
 
 ```bash
 mkdir FoxMes
-tar -xJf FoxMes-1.8.1-linux-x86_64.tar.xz -C FoxMes
+tar -xJf FoxMes-1.8.2-linux-x86_64.tar.xz -C FoxMes
 ./FoxMes/AppRun
 ```
 

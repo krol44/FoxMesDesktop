@@ -4,8 +4,8 @@
 set(FOXMES_APP_NAME "FoxMes")
 set(FOXMES_APP_DISPLAY_NAME "FoxMes Desktop")
 set(FOXMES_PUBLISHER "Foxtail")
-set(FOXMES_APP_ID "ru.fxl.foxMes")
-set(FOXMES_HOMEPAGE "https://fxl.ru")
+set(FOXMES_APP_ID "ing.foxtail.FoxMes")
+set(FOXMES_HOMEPAGE "https://foxtail.ing")
 set(FOXMES_REPOSITORY "https://github.com/krol44/FoxMesDesktop")
 set(FOXMES_RELEASES_URL "${FOXMES_REPOSITORY}/releases")
 set(FOXMES_ISSUES_URL "${FOXMES_REPOSITORY}/issues")
@@ -23,9 +23,10 @@ option(
 # On macOS that separation is what keeps the two out of each other's way. TCC
 # keys a microphone or camera grant to the bundle identifier plus the code
 # signature, and both builds are only ad-hoc signed, so two bundles sharing
-# ru.fxl.foxMes with different signatures make the system refuse the second one
-# without ever showing a prompt - which is how a locally built client and an
-# installed release stopped being able to record at the same time.
+# ing.foxtail.FoxMes with different signatures make the system refuse the
+# second one without ever showing a prompt - which is how a locally built
+# client and an installed release stopped being able to record at the same
+# time.
 #
 # The C++ half of the same split - the working directory and the QSettings
 # store - rides on FOXMES_ALLOW_ENDPOINT_OVERRIDE instead, which the same two

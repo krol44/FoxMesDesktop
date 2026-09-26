@@ -30,7 +30,7 @@ struct ConfigFields {
 	bool revokePrivateInbox = false;
 	int stickersRecentLimit = 30;
 	// FoxMes profiles are FXL users: the segment is the FXL nickname/alt.
-	QString internalLinksDomain = u"https://fxl.ru/@"_q;
+	QString internalLinksDomain = u"https://foxtail.ing/@"_q;
 	int channelsReadMediaPeriod = 86400 * 7;
 	int callReceiveTimeoutMs = 20000;
 	int callRingTimeoutMs = 90000;

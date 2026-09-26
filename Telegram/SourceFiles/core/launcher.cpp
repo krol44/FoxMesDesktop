@@ -339,7 +339,7 @@ void Launcher::init() {
 
 	QApplication::setApplicationName(u"FoxMes"_q);
 	QApplication::setApplicationDisplayName(u"FoxMes Desktop"_q);
-	QApplication::setOrganizationDomain(u"fxl.ru"_q);
+	QApplication::setOrganizationDomain(u"foxtail.ing"_q);
 	QApplication::setOrganizationName(u"Foxtail"_q);
 
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)

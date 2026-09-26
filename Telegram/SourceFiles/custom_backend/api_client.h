@@ -95,7 +95,8 @@ public:
     void clearTokens();
 
     // Device pairing replaces password-based login. startDevice returns a URL
-    // for fxl.ru/settings/foxMes; exchangeDevice consumes its one-time code.
+    // for foxtail.ing/settings/foxMes; exchangeDevice consumes its one-time
+    // code.
     // The session is indefinite, like the web session. There is no refresh
     // token or /auth/refresh endpoint.
     void startDevice(Callback done);

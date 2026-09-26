@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <component type="desktop">
-    <id>ru.fxl.foxMes</id>
+    <id>ing.foxtail.FoxMes</id>
     <metadata_license>CC0-1.0</metadata_license>
     <project_license>GPL-3.0</project_license>
     <name>FoxMes</name>
@@ -14,8 +14,8 @@
         <category>Network</category>
         <category>InstantMessaging</category>
     </categories>
-    <developer id="ru.fxl"><name>Foxtail</name></developer>
-    <url type="homepage">https://fxl.ru</url>
+    <developer id="ing.foxtail"><name>Foxtail</name></developer>
+    <url type="homepage">https://foxtail.ing</url>
     <url type="bugtracker">https://github.com/krol44/FoxMesDesktop/issues</url>
     <url type="vcs-browser">https://github.com/krol44/FoxMesDesktop</url>
     <branding>
@@ -71,10 +71,10 @@
         <content_attribute id="money-gambling">none</content_attribute>
         <content_attribute id="money-advertising">moderate</content_attribute>
     </content_rating>
-    <launchable type="desktop-id">ru.fxl.foxMes.desktop</launchable>
+    <launchable type="desktop-id">ing.foxtail.FoxMes.desktop</launchable>
     <provides>
         <binary>FoxMes</binary>
-        <dbus type="session">ru.fxl.foxMes</dbus>
+        <dbus type="session">ing.foxtail.FoxMes</dbus>
         <mediatype>x-scheme-handler/foxmes</mediatype>
     </provides>
 </component>

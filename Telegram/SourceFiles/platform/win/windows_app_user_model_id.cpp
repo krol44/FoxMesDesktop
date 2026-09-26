@@ -25,7 +25,20 @@ const PROPERTYKEY pkey_AppUserModel_ID = { { 0x9F4C2855, 0x9F79, 0x4B39, { 0xA8,
 const PROPERTYKEY pkey_AppUserModel_StartPinOption = { { 0x9F4C2855, 0x9F79, 0x4B39, { 0xA8, 0xD0, 0xE1, 0xD4, 0x2D, 0xE1, 0xD5, 0xF3 } }, 12 };
 const PROPERTYKEY pkey_AppUserModel_ToastActivator = { { 0x9F4C2855, 0x9F79, 0x4B39, { 0xA8, 0xD0, 0xE1, 0xD4, 0x2D, 0xE1, 0xD5, 0xF3 } }, 26 };
 
-const WCHAR AppUserModelIdBase[] = L"ru.fxl.foxMes";
+const WCHAR AppUserModelIdBase[] = L"ing.foxtail.FoxMes";
+
+// FoxMes: the id was ru.fxl.foxMes up to 1.8.1. A shortcut that still carries
+// it (or its portable ".<hash>" form) is ours, so it gets the current id
+// written over it instead of being treated as some other application's.
+constexpr auto kLegacyAppUserModelIdBase = std::wstring_view(L"ru.fxl.foxMes");
+
+[[nodiscard]] bool IsLegacyId(std::wstring_view id) {
+	const auto base = kLegacyAppUserModelIdBase;
+	return (id == base)
+		|| (id.size() > base.size()
+			&& id.substr(0, base.size()) == base
+			&& id[base.size()] == L'.');
+}
 
 [[nodiscard]] QString PinnedIconsPath() {
 	WCHAR wstrPath[kMaxFileLen] = {};
@@ -162,7 +175,8 @@ void CheckPinned() {
 						return;
 					}
 				}
-				if (appIdPropVar.vt != VT_EMPTY) {
+				const auto legacy = SUCCEEDED(hr) && IsLegacyId(already);
+				if (appIdPropVar.vt != VT_EMPTY && !legacy) {
 					PropVariantClear(&appIdPropVar);
 					return;
 				}
@@ -288,7 +302,8 @@ bool validateShortcutAt(const QString &path) {
 	WCHAR already[MAX_PATH];
 	hr = PropVariantToString(appIdPropVar, already, MAX_PATH);
 	const auto good1 = SUCCEEDED(hr) && (Id() == already);
-	const auto bad1 = !good1 && (appIdPropVar.vt != VT_EMPTY);
+	const auto legacy1 = SUCCEEDED(hr) && IsLegacyId(already);
+	const auto bad1 = !good1 && !legacy1 && (appIdPropVar.vt != VT_EMPTY);
 	PropVariantClear(&appIdPropVar);
 
 	auto clsid = CLSID();

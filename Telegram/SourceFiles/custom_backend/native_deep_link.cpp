@@ -56,11 +56,11 @@ bool HandleStartUrl(const QUrl &url) {
 
 QString LocalizeInternalLink(const QString &url) {
 	static const auto Internal = QRegularExpression(
-		u"^(https?://)?(www\\.)?fxl\\.ru/@(.+)$"_q,
+		u"^(https?://)?(www\\.)?(foxtail\\.ing|fxl\\.ru)/@(.+)$"_q,
 		QRegularExpression::CaseInsensitiveOption);
 	const auto match = Internal.match(url);
 	return match.hasMatch()
-		? (match.captured(1) + u"t.me/"_q + match.captured(3))
+		? (match.captured(1) + u"t.me/"_q + match.captured(4))
 		: url;
 }
 

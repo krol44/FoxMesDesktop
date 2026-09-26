@@ -658,7 +658,7 @@ void ExportChatInvite(const Context &context, Reader &reader) {
 	using Flag = MTPDchatInviteExported::Flag;
 	context.answer.done(MTP_chatInviteExported(
 		MTP_flags(Flag::f_permanent),
-		MTP_string(u"https://fxl.ru/+%1"_q.arg(chatId)),
+		MTP_string(u"https://foxtail.ing/+%1"_q.arg(chatId)),
 		MTP_long(context.me),
 		MTP_int(base::unixtime::now()),
 		MTPint(),

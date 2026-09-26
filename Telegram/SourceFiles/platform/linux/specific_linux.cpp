@@ -220,6 +220,19 @@ void PortalAutostart(bool enabled, Fn<void(bool)> done) {
 		});
 }
 
+// FoxMes: the application id was ru.fxl.foxMes up to 1.8.1. A client updated
+// from such a version still has its launcher, D-Bus service, autostart entry
+// and icons under that name, next to the ones written for the new id - so the
+// menu would list the app twice, and turning autostart off would leave the
+// old entry behind.
+constexpr auto kLegacyAppId = "ru.fxl.foxMes";
+
+[[nodiscard]] QString LegacyDesktopFileName() {
+	return u"%1._%2"_q.arg(
+		QString::fromLatin1(kLegacyAppId),
+		QString::fromLatin1(Core::Launcher::Instance().instanceHash()));
+}
+
 bool GenerateDesktopFile(
 		const QString &targetPath,
 		const QStringList &args = {},
@@ -352,6 +365,7 @@ bool GenerateDesktopFile(
 		DEBUG_LOG(("App Info: removing old .desktop files"));
 		QFile::remove(u"%1telegram.desktop"_q.arg(targetPath));
 		QFile::remove(u"%1telegramdesktop.desktop"_q.arg(targetPath));
+		QFile::remove(targetPath + LegacyDesktopFileName() + u".desktop"_q);
 
 		const auto appimagePath = u"file://%1%2"_q.arg(
 			cExeDir(),
@@ -372,7 +386,7 @@ bool GenerateDesktopFile(
 		hashMd5Hex(d.constData(), d.size(), md5Hash);
 
 		if (!Core::Launcher::Instance().customWorkingDir()) {
-			QFile::remove(u"%1ru.fxl.foxMes._%2.desktop"_q.arg(
+			QFile::remove(u"%1ing.foxtail.FoxMes._%2.desktop"_q.arg(
 				targetPath,
 				md5Hash));
 
@@ -381,7 +395,7 @@ bool GenerateDesktopFile(
 			hashMd5Hex(exePath.constData(), exePath.size(), md5Hash);
 		}
 
-		QFile::remove(u"%1ru.fxl.foxMes.%2.desktop"_q.arg(
+		QFile::remove(u"%1ing.foxtail.FoxMes.%2.desktop"_q.arg(
 			targetPath,
 			md5Hash));
 	}
@@ -440,9 +454,13 @@ bool GenerateServiceFile(bool silent = false) {
 		const auto d = QFile::encodeName(QDir(cWorkingDir()).absolutePath());
 		hashMd5Hex(d.constData(), d.size(), md5Hash);
 
-		QFile::remove(u"%1ru.fxl.foxMes._%2.service"_q.arg(
+		QFile::remove(u"%1ing.foxtail.FoxMes._%2.service"_q.arg(
 			targetPath,
 			md5Hash));
+	}
+
+	if (!Core::UpdaterDisabled()) {
+		QFile::remove(targetPath + LegacyDesktopFileName() + u".service"_q);
 	}
 
 	XdgDBus::DBusProxy::new_for_bus(
@@ -491,6 +509,7 @@ void InstallLauncher() {
 	const auto icon = appIcons + ApplicationIconName() + u".png"_q;
 	QFile::remove(icon);
 	QFile::remove(icons + u"telegram.png"_q);
+	QFile::remove(appIcons + QString::fromLatin1(kLegacyAppId) + u".png"_q);
 	if (QFile::copy(u":/gui/art/logo_256.png"_q, icon)) {
 		DEBUG_LOG(("App Info: Icon copied to '%1'").arg(icon));
 	}
@@ -505,6 +524,10 @@ void InstallLauncher() {
 	};
 
 	for (const auto &icon : monochromeIcons) {
+		QFile::remove(symbolicIcons
+			+ QString::fromLatin1(kLegacyAppId)
+			+ (!icon.isEmpty() ? u"-"_q + icon : QString())
+			+ u"-symbolic.svg"_q);
 		QFile::copy(
 			u":/gui/icons/tray/monochrome%1.svg"_q.arg(
 				!icon.isEmpty() ? u"_"_q + icon : QString()),
@@ -725,11 +748,11 @@ void start() {
 		}
 
 		if (!Core::UpdaterDisabled()) {
-			return u"ru.fxl.foxMes._%1"_q.arg(
+			return u"ing.foxtail.FoxMes._%1"_q.arg(
 				Core::Launcher::Instance().instanceHash().constData());
 		}
 
-		return u"ru.fxl.foxMes"_q;
+		return u"ing.foxtail.FoxMes"_q;
 	}());
 
 	LOG(("App ID: %1").arg(QGuiApplication::desktopFileName()));
@@ -817,6 +840,8 @@ bool OpenSystemSettings(SystemSettingsType type) {
 }
 
 void NewVersionLaunched(int oldVersion) {
+	// FoxMes versions are all below this one, so every update rewrites the
+	// autostart entry - which is also what moves it off kLegacyAppId.
 	if (oldVersion <= 5014003 && cAutoStart()) {
 		AutostartToggle(true);
 	}

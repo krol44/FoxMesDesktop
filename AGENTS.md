@@ -55,13 +55,13 @@ the production URL baked into the binary.
 Both scripts configure with `FOXMES_LOCAL_BUILD=ON`
 (`Telegram/cmake/foxmes.cmake`), so a locally built client is a separate
 application from the release in `/Applications`: the bundle is
-`out/Release/FoxMes-local.app` and its identifier is `ru.fxl.foxMes-local`.
+`out/Release/FoxMes-local.app` and its identifier is `ing.foxtail.FoxMes-local`.
 That is not cosmetic on macOS - TCC keys a microphone or camera grant to the
 bundle identifier plus the code signature, and two ad-hoc signed bundles
-claiming `ru.fxl.foxMes` make the system refuse the second one without a
+claiming `ing.foxtail.FoxMes` make the system refuse the second one without a
 prompt, which is what stopped a downloaded release from recording after a local
 build had been run. Release builds do not set the option and stay `FoxMes.app`
-/ `ru.fxl.foxMes`.
+/ `ing.foxtail.FoxMes`.
 
 The profiles keep separate state through `CustomBackend::ProfileSuffix()` in
 `custom_backend/dev_profile.h`: `FOXMES_URL` marks a dev run and gives it

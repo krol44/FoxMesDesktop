@@ -4,7 +4,7 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 source_root="${FOXMES_SOURCE_ROOT:-$(cd "$script_dir/../../.." && pwd)}"
 artifact_root="${FOXMES_ARTIFACT_ROOT:-$source_root/artifacts/linux}"
-version="1.8.1"
+version="1.8.2"
 image_tag="foxmes:centos_env"
 appdir="$source_root/out/FoxMes.AppDir"
 tools="$source_root/out/foxmes-tools"
@@ -129,8 +129,8 @@ test -x "$appdir/usr/bin/FoxMes"
 rm -rf "$artifact_root"
 mkdir -p "$artifact_root" "$tools"
 ln -s usr/bin/FoxMes "$appdir/AppRun"
-cp "$appdir/usr/share/applications/ru.fxl.foxMes.desktop" "$appdir/ru.fxl.foxMes.desktop"
-cp "$appdir/usr/share/icons/hicolor/256x256/apps/ru.fxl.foxMes.png" "$appdir/ru.fxl.foxMes.png"
+cp "$appdir/usr/share/applications/ing.foxtail.FoxMes.desktop" "$appdir/ing.foxtail.FoxMes.desktop"
+cp "$appdir/usr/share/icons/hicolor/256x256/apps/ing.foxtail.FoxMes.png" "$appdir/ing.foxtail.FoxMes.png"
 
 tar -C "$appdir" -cJf "$artifact_root/FoxMes-$version-linux-x86_64.tar.xz" .
 

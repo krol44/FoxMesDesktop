@@ -57,12 +57,10 @@ object_ptr<Ui::GenericBox> ScreenSharingPrivacyRequestBox() {
 				box.get(),
 				rpl::combine(
 					tr::lng_group_call_mac_screencast_access(),
-					tr::lng_group_call_mac_recording(),
-					tr::lng_group_call_mac_recording_help()
-				) | rpl::map([](QString a, QString b, QString c) {
+					tr::lng_group_call_mac_recording()
+				) | rpl::map([](QString a, QString b) {
 					auto result = tr::rich(a);
 					result.append("\n\n").append(tr::rich(b));
-					result.append("\n\n").append(tr::rich(c));
 					return result;
 				}),
 				st::groupCallBoxLabel),
@@ -73,9 +71,6 @@ object_ptr<Ui::GenericBox> ScreenSharingPrivacyRequestBox() {
 				st::boxPadding.bottom()));
 		box->addButton(tr::lng_group_call_mac_settings(), [=] {
 			Platform::OpenDesktopCapturePrivacySettings();
-		});
-		box->addButton(tr::lng_settings_restart_now(), [] {
-			Core::Restart();
 		});
 		box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
 	});

@@ -5,7 +5,7 @@ script_dir="$(cd "$(dirname "$0")" && pwd)"
 source_root="${FOXMES_SOURCE_ROOT:-$(cd "$script_dir/../../.." && pwd)}"
 artifact_root="${FOXMES_ARTIFACT_ROOT:-$source_root/artifacts/macos}"
 libraries_root="${FOXMES_LIBRARIES_ROOT:-$(cd "$source_root/.." && pwd)/Libraries}"
-version="1.8.1"
+version="1.8.2"
 
 # Two phases, because CI caches the dependency tree between them and needs a
 # seam to hang the cache save on. No argument runs both, so a local build is
@@ -115,17 +115,54 @@ build_app() {
 	# microphone or camera access. Signing here restores exactly what a local
 	# ./dev-client.sh build gets from Xcode.
 	#
-	# --sign - is ad-hoc: no certificate, no key, no Apple developer account.
-	# The cost is that the identity is the code hash, so it changes with every
-	# release and macOS asks for microphone access again after each update. A
-	# Developer ID signature plus notarization is what would make the grant
-	# stick, and that does need a paid account - this does not.
+	# The identity is FoxMes's own self-signed certificate, not Apple's. The
+	# public half is codesign.pem next to this script; the key lives only in
+	# the release environment's secrets, and the workflow imports it into a
+	# temporary keychain before this runs. Gatekeeper still does not trust it,
+	# so the first launch warns exactly as it did before - what it buys is a
+	# designated requirement of "this identifier, signed by this certificate".
+	# TCC keeps its screen recording, camera and microphone grants against
+	# that requirement, so they survive updates. An ad-hoc signature's
+	# requirement is the code hash instead, which every release changes.
+	#
+	# FOXMES_ADHOC_SIGN=1 is for a local run of this script without the key.
+	# Never ship what it produces: the first certificate-signed update after
+	# it would cost every user their grants again.
+	local cert="$source_root/Telegram/build/foxmes/codesign.pem"
+	local identity=-
+	if [ "${FOXMES_ADHOC_SIGN:-0}" != 1 ]; then
+		if [ ! -f "$cert" ]; then
+			echo "no signing certificate at $cert" >&2
+			exit 1
+		fi
+		# OpenSSL prints "SHA1 Fingerprint=AA:BB:..", LibreSSL and OpenSSL 3
+		# differ in the case of the label, so only the part after = is used.
+		identity="$(openssl x509 -in "$cert" -noout -fingerprint -sha1 \
+		  | sed 's/.*=//; s/://g' | tr '[:upper:]' '[:lower:]')"
+	fi
 	codesign --force \
-	  --sign - \
+	  --sign "$identity" \
 	  --options runtime \
 	  --entitlements "$source_root/Telegram/Telegram/Telegram.entitlements" \
 	  "$app"
 	codesign --verify --strict "$app"
+	# Compared as the whole requirement rather than with --verify -R: -R only
+	# says the signature satisfies a requirement, and TCC does not look at
+	# that - it stores the designated requirement itself. A different
+	# certificate, a changed bundle identifier or an explicit requirement
+	# slipped into the flags above all fail here instead of in every user's
+	# privacy settings.
+	if [ "$identity" != - ]; then
+		local expected="designated => identifier \"ing.foxtail.FoxMes\" and certificate root = H\"$identity\""
+		local designated
+		designated="$(codesign --display --requirements - "$app" 2>/dev/null \
+		  | grep '^designated => ' || true)"
+		if [ "$designated" != "$expected" ]; then
+			echo "unexpected designated requirement: $designated" >&2
+			echo "expected: $expected" >&2
+			exit 1
+		fi
+	fi
 	# The signature can succeed and still carry nothing: an entitlements file
 	# that failed to parse, or a signing step quietly skipped by a future
 	# refactor of the flags above, both end here rather than in a release
@@ -151,7 +188,7 @@ build_app() {
 		echo "expected an arm64-only binary, got: $architectures" >&2
 		exit 1
 	fi
-	test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" = "ru.fxl.foxMes"
+	test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" = "ing.foxtail.FoxMes"
 	test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$version"
 	test "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$app/Contents/Info.plist")" = "13.0"
 	test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:0:CFBundleURLSchemes:0' "$app/Contents/Info.plist")" = "foxmes"

@@ -7,10 +7,10 @@
    xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
    xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
    IgnorableNamespaces="uap uap2 uap3 desktop rescap">
-  <Identity Name="ru.fxl.foxMes"
+  <Identity Name="ing.foxtail.FoxMes"
     ProcessorArchitecture="ARCHITECTURE"
     Publisher="CN=Foxtail"
-    Version="1.8.1.0" />
+    Version="1.8.2.0" />
   <Properties>
     <DisplayName>FoxMes</DisplayName>
     <PublisherDisplayName>Foxtail</PublisherDisplayName>
@@ -27,7 +27,7 @@
     <rescap:Capability Name="runFullTrust"/>
   </Capabilities>
   <Applications>
-    <Application Id="ru.fxl.foxMes" Executable="FoxMes.exe" EntryPoint="Windows.FullTrustApplication">
+    <Application Id="ing.foxtail.FoxMes" Executable="FoxMes.exe" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
        BackgroundColor="#1e94d0"
        DisplayName="FoxMes"

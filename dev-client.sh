@@ -46,7 +46,7 @@ JOBS="$(sysctl -n hw.logicalcpu 2>/dev/null || printf '8')"
 # disagrees with the already configured tree fails the regeneration.
 #
 # FOXMES_LOCAL_BUILD makes this a separate application from the release in
-# /Applications: FoxMes-local.app, ru.fxl.foxMes-local, its own working
+# /Applications: FoxMes-local.app, ing.foxtail.FoxMes-local, its own working
 # directory. Two ad-hoc signed bundles sharing one identifier cost the second
 # one its microphone and camera access, silently.
 env -u QT cmake -S "${PROJECT_DIR}" -B "${BUILD_DIR}" \

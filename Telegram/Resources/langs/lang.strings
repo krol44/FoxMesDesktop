@@ -392,7 +392,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_intro_submit" = "Submit";
 
 "lng_fox_mes_title" = "FoxMes";
-"lng_fox_mes_code" = "Code from fxl.ru";
+"lng_fox_mes_code" = "Code from foxtail.ing";
 "lng_fox_mes_get_code" = "Get code";
 "lng_fox_mes_connect" = "Connect";
 "lng_fox_mes_copy_auth_url" = "Copy auth url";
@@ -402,7 +402,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_fox_mes_invalid_link" = "The server returned an invalid pairing link.";
 "lng_fox_mes_browser_failed" = "Unable to open the browser. Please try again.";
 "lng_fox_mes_pairing_preparing" = "Preparing the connection. Try again in a moment.";
-"lng_fox_mes_code_required" = "Enter the code from fxl.ru.";
+"lng_fox_mes_code_required" = "Enter the code from foxtail.ing.";
 "lng_fox_mes_login_failed" = "Login failed.";
 "lng_fox_mes_invalid_user" = "The server returned an invalid user.";
 
@@ -6590,7 +6590,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_group_call_mac_accessibility" = "Please allow **Accessibility** for FoxMes in Privacy Settings.\n\nYou may need to restart the app.";
 "lng_group_call_mac_screencast_access" = "FoxMes does not have access to screen recording required for Screen Sharing.";
 "lng_group_call_mac_recording" = "Please allow **Screen Recording** for FoxMes in Privacy Settings.";
-"lng_group_call_mac_recording_help" = "Restart FoxMes after enabling access. If the switch is already on, restart now. If sharing still fails after restarting, remove the old FoxMes entry from Screen Recording, add the FoxMes app you use, enable it, and restart again.";
 "lng_group_call_mac_settings" = "Open Settings";
 
 "lng_group_call_start_as_header" = "Start Video Chat as...";
