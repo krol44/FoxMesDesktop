@@ -6,6 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "mtproto/mtp_instance.h"
+#include "custom_backend/native_mtp_router.h"
+#include "custom_backend/native_runtime.h"
 
 #include "mtproto/details/mtproto_dcenter.h"
 #include "mtproto/details/mtproto_rsa_public_key.h"
@@ -511,6 +513,9 @@ rpl::producer<DcId> Instance::Private::mainDcIdValue() const {
 }
 
 void Instance::Private::requestConfig() {
+	if (CustomBackend::Enabled()) {
+		return;
+	}
 	if (_configLoader || isKeysDestroyer()) {
 		return;
 	}
@@ -541,6 +546,9 @@ void Instance::Private::badConfigurationError() {
 }
 
 void Instance::Private::syncHttpUnixtime() {
+	if (CustomBackend::Enabled()) {
+		return;
+	}
 	if (base::unixtime::http_valid() || _httpUnixtimeLoader) {
 		return;
 	}
@@ -981,6 +989,14 @@ void Instance::Private::checkDelayedRequests() {
 		auto requestId = _delayedRequests.front().first;
 		_delayedRequests.pop_front();
 
+		if (CustomBackend::Enabled()) {
+			if (const auto request = getRequest(requestId);
+				request && CustomBackend::Mtp::Intercepts(request)) {
+				CustomBackend::Mtp::Intercept(_instance, requestId, request);
+				continue;
+			}
+		}
+
 		auto dcWithShift = ShiftedDcId(0);
 		if (const auto shiftedDcId = queryRequestByDc(requestId)) {
 			dcWithShift = *shiftedDcId;
@@ -1016,6 +1032,13 @@ void Instance::Private::sendRequest(
 		crl::time msCanWait,
 		bool needsLayer,
 		mtpRequestId afterRequestId) {
+	if (CustomBackend::Enabled()
+		&& CustomBackend::Mtp::Intercepts(request)) {
+		request->requestId = requestId;
+		storeRequest(requestId, request, std::move(callbacks));
+		CustomBackend::Mtp::Intercept(_instance, requestId, request);
+		return;
+	}
 	const auto session = getSession(shiftedDcId);
 
 	request->requestId = requestId;

@@ -21,6 +21,17 @@ class Controller;
 } // namespace Window
 
 namespace Data {
+class CloudThemes;
+struct CloudTheme;
+}
+
+namespace CustomBackend::ChatThemes {
+void Apply(
+	not_null<Data::CloudThemes*> themes,
+	std::vector<Data::CloudTheme> list);
+}
+
+namespace Data {
 
 struct UniqueGift;
 class DocumentMedia;
@@ -155,6 +166,10 @@ private:
 	mtpRequestId _chatThemesRequestId = 0;
 	std::vector<CloudTheme> _chatThemes;
 	rpl::event_stream<> _chatThemesUpdates;
+
+	friend void CustomBackend::ChatThemes::Apply(
+		not_null<Data::CloudThemes*> themes,
+		std::vector<Data::CloudTheme> list);
 
 	mtpRequestId _myGiftThemesRequestId = 0;
 	base::flat_map<uint64, CloudTheme> _giftThemes;

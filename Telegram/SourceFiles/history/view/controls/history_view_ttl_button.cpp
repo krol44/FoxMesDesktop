@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/controls/history_view_ttl_button.h"
 
+#include "custom_backend/native_runtime.h"
 #include "data/data_changes.h"
 #include "data/data_peer.h"
 #include "main/main_session.h"
@@ -37,7 +38,9 @@ TTLButton::TTLButton(
 		peer,
 		Data::PeerUpdate::Flag::MessagesTTL
 	) | rpl::on_next([=] {
-		_button.setText(Ui::FormatTTLTiny(peer->messagesTTL()));
+		_button.setText(CustomBackend::Enabled()
+			? CustomBackend::AutoDeleteBadgeText()
+			: Ui::FormatTTLTiny(peer->messagesTTL()));
 	}, _button.lifetime());
 }
 

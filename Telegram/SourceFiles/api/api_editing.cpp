@@ -6,6 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "api/api_editing.h"
+#include "custom_backend/native_runtime.h"
+#include "custom_backend/native_bridge.h"
 
 #include "apiwrap.h"
 #include "api/api_media.h"
@@ -535,6 +537,19 @@ mtpRequestId EditTextMessage(
 		Fn<void(const QString &error, mtpRequestId requestId)> fail,
 		bool spoilered,
 		VideoCoverEdit videoCover) {
+	if (CustomBackend::Enabled()) {
+		constexpr auto kFoxMesRequestId = mtpRequestId(-1);
+		if (const auto bridge = CustomBackend::BridgeFor(&item->history()->session())) {
+			bridge->editText(item, caption, webpage, [=](QString error) {
+				if (error.isEmpty()) {
+					if (done) done(kFoxMesRequestId);
+				} else if (fail) {
+					fail(error, kFoxMesRequestId);
+				}
+			});
+		}
+		return kFoxMesRequestId;
+	}
 	if (item->isWelcomeTemplate()) {
 		const auto history = item->history();
 		auto &welcome = history->session().welcomeMessages();

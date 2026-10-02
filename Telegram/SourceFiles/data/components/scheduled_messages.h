@@ -17,6 +17,18 @@ class Session;
 } // namespace Main
 
 namespace Data {
+class ScheduledMessages;
+}
+
+namespace CustomBackend::Scheduled {
+void Apply(
+	not_null<Data::ScheduledMessages*> messages,
+	not_null<History*> history,
+	const QVector<MTPMessage> &list,
+	bool full);
+}
+
+namespace Data {
 
 struct MessagesSlice;
 
@@ -94,6 +106,12 @@ private:
 	rpl::event_stream<not_null<History*>> _updates;
 
 	rpl::lifetime _lifetime;
+
+	friend void CustomBackend::Scheduled::Apply(
+		not_null<Data::ScheduledMessages*> messages,
+		not_null<::History*> history,
+		const QVector<MTPMessage> &list,
+		bool full);
 
 };
 

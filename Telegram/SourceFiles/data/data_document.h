@@ -206,6 +206,7 @@ public:
 	[[nodiscard]] bool isTheme() const;
 	[[nodiscard]] bool isSharedMediaMusic() const;
 	[[nodiscard]] crl::time duration() const;
+	void fillDurationFromContent(crl::time duration);
 	[[nodiscard]] bool hasDuration() const;
 	[[nodiscard]] bool isImage() const;
 	void recountIsImage();

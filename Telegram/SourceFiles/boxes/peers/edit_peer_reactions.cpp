@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "chat_helpers/tabbed_panel.h"
 #include "chat_helpers/tabbed_selector.h"
 #include "core/ui_integration.h"
+#include "custom_backend/native_runtime.h"
 #include "data/data_channel.h"
 #include "data/data_chat.h"
 #include "data/data_document.h"
@@ -512,7 +513,7 @@ object_ptr<Ui::RpWidget> AddReactionsSelector(
 			nullptr,
 			args.controller->uiShow(),
 			Window::GifPauseReason::Layer,
-			(args.all
+			((args.all && !CustomBackend::Enabled())
 				? TabbedSelector::Mode::FullReactions
 				: TabbedSelector::Mode::RecentReactions)));
 	auto panelList = state->unifiedFactoryOwner->unifiedIdsList();
@@ -816,12 +817,14 @@ void EditAllowedReactionsBox(
 
 	const auto reactionsLimit = container->lifetime().make_state<int>(0);
 	if (!isGroup) {
-		AddReactionsText(
-			container,
-			args.navigation,
-			args.allowedCustomReactions,
-			state->customCount.value(),
-			args.askForBoosts);
+		if (!CustomBackend::Enabled()) {
+			AddReactionsText(
+				container,
+				args.navigation,
+				args.allowedCustomReactions,
+				state->customCount.value(),
+				args.askForBoosts);
+		}
 
 		const auto session = &args.navigation->parentController()->session();
 
@@ -922,28 +925,30 @@ void EditAllowedReactionsBox(
 
 		Ui::AddDividerText(inner, tr::lng_manage_peer_reactions_max_about());
 
-		Ui::AddSkip(inner);
-		const auto paid = inner->add(object_ptr<Ui::SettingsButton>(
-			inner,
-			tr::lng_manage_peer_reactions_paid(),
-			st::manageGroupNoIconButton.button));
-		paid->toggleOn(state->paidEnabled.value());
-		paid->toggledValue(
-		) | rpl::on_next([=](bool value) {
-			state->paidEnabled = value;
-		}, paid->lifetime());
-		Ui::AddSkip(inner);
+		if (!CustomBackend::HideGroupExtras) {
+			Ui::AddSkip(inner);
+			const auto paid = inner->add(object_ptr<Ui::SettingsButton>(
+				inner,
+				tr::lng_manage_peer_reactions_paid(),
+				st::manageGroupNoIconButton.button));
+			paid->toggleOn(state->paidEnabled.value());
+			paid->toggledValue(
+			) | rpl::on_next([=](bool value) {
+				state->paidEnabled = value;
+			}, paid->lifetime());
+			Ui::AddSkip(inner);
 
-		Ui::AddDividerText(
-			inner,
-			tr::lng_manage_peer_reactions_paid_about(
-				lt_link,
-				tr::lng_manage_peer_reactions_paid_link([=](QString text) {
-					return tr::link(
-						text,
-						u"https://telegram.org/tos/stars"_q);
-				}),
-				tr::marked));
+			Ui::AddDividerText(
+				inner,
+				tr::lng_manage_peer_reactions_paid_about(
+					lt_link,
+					tr::lng_manage_peer_reactions_paid_link([=](QString text) {
+						return tr::link(
+							text,
+							u"https://telegram.org/tos/stars"_q);
+					}),
+					tr::marked));
+		}
 	}
 	const auto collect = [=] {
 		auto result = AllowedReactions();

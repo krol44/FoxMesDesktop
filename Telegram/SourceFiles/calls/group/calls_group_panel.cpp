@@ -1,3 +1,4 @@
+#include "calls/calls_screen_sharing_quality.h"
 /*
 This file is part of Telegram Desktop,
 the official desktop application for the Telegram messaging service.
@@ -561,6 +562,19 @@ void Panel::startScheduledNow() {
 }
 
 void Panel::initControls() {
+	_screenQuality = std::make_unique<Calls::ScreenSharingQuality>(widget(),
+		[=] { return _call && _call->isSharingScreen(); },
+		[=] { return _call ? _call->screenSharingQuality() : 0; },
+		[=](int quality) { if (_call) _call->setScreenSharingQuality(quality); },
+		[=](Fn<void(tgcalls::ScreenSharingStats)> done) {
+			if (_call) _call->getScreenSharingStats(std::move(done)); else done({});
+		},
+		[=](QSize size) {
+			const auto gap = st::callScreenQualityGap;
+			return QPoint(std::max(gap, widget()->width() - size.width() - gap),
+				std::max(gap, widget()->height() - st::callBottomControlsHeight - size.height() - gap));
+		}, uiShow());
+
 	_mute->clicks(
 	) | rpl::filter([=](Qt::MouseButton button) {
 		return (button == Qt::LeftButton);
@@ -1206,6 +1220,9 @@ void Panel::raiseControls() {
 	if (_messageField) {
 		_messageField->raise();
 	}
+	if (_screenQuality) {
+		_screenQuality->raise();
+	}
 	_window->raiseLayers();
 	if (_niceTooltip) {
 		_niceTooltip->raise();
@@ -1835,6 +1852,7 @@ void Panel::showControls() {
 	Expects(_call != nullptr);
 
 	widget()->showChildren();
+	if (_screenQuality) _screenQuality->refreshVisibility();
 }
 
 void Panel::closeBeforeDestroy() {
@@ -2466,6 +2484,7 @@ void Panel::updateControlsGeometry() {
 	}
 	updateButtonsGeometry();
 	updateMembersGeometry();
+	if (_screenQuality) _screenQuality->refreshPosition();
 	refreshTitle();
 
 	const auto wrap = _window->controlsWrap();

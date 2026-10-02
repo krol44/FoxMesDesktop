@@ -8,8 +8,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_peer_search.h"
 
 #include "api/api_single_message_search.h"
+#include "custom_backend/native_runtime.h"
+#include "custom_backend/native_search_adapter.h"
 #include "apiwrap.h"
 #include "data/data_session.h"
+#include "data/data_user.h"
 #include "dialogs/ui/chat_search_in.h" // IsHashOrCashtagSearchQuery
 #include "main/main_session.h"
 
@@ -53,7 +56,8 @@ void PeerSearch::request(
 	}
 	cache.requested = true;
 	cache.result.query = _query;
-	if (_query.size() < kMinSponsoredQueryLength) {
+	if (_query.size() < kMinSponsoredQueryLength
+		|| CustomBackend::Enabled()) {
 		cache.sponsoredReady = true;
 	} else if (_type == Type::WithSponsored) {
 		requestSponsored();
@@ -62,6 +66,22 @@ void PeerSearch::request(
 }
 
 void PeerSearch::requestPeers() {
+	if (CustomBackend::Enabled()) {
+		const auto query = _query;
+		CustomBackend::Search::SearchPeers(
+			_session,
+			query,
+			[=](PeerSearchResult parsed) {
+				auto &cache = _cache[query];
+				cache.peersReady = true;
+				cache.result.my = std::move(parsed.my);
+				cache.result.peers = std::move(parsed.peers);
+				if (cache.sponsoredReady && _query == query) {
+					finish(cache.result);
+				}
+			});
+		return;
+	}
 	const auto requestId = _session->api().request(MTPcontacts_Search(
 		MTP_flags(0),
 		MTP_string(_query),

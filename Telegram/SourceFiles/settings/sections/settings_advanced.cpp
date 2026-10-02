@@ -7,6 +7,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/sections/settings_advanced.h"
 
+#include "custom_backend/github_update.h"
+#include "custom_backend/github_update_ui.h"
+#include "custom_backend/native_runtime.h"
 #include "settings/settings_common_session.h"
 
 #include "api/api_global_privacy.h"
@@ -134,6 +137,7 @@ void BuildDataStorageSection(SectionBuilder &builder) {
 				ProxiesBoxController::CreateOwningBox(account));
 		},
 		.keywords = { u"connection"_q, u"proxy"_q, u"network"_q, u"vpn"_q },
+		.shown = rpl::single(!CustomBackend::Enabled()) | rpl::type_erased,
 	});
 
 	const auto showDownloadPath = container
@@ -1018,6 +1022,10 @@ void BuildSpellcheckerSection(SectionBuilder &builder) {
 }
 
 void BuildUpdateSection(SectionBuilder &builder, bool atTop) {
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Updates::BuildUpdateSettings(builder, atTop);
+		return;
+	}
 	if (!HasUpdate()) {
 		return;
 	}
@@ -1045,13 +1053,16 @@ void BuildUpdateSection(SectionBuilder &builder, bool atTop) {
 		? Ui::CreateChild<rpl::event_stream<bool>>(container)
 		: nullptr;
 
-	const auto toggle = builder.addButton({
-		.id = u"advanced/auto_update"_q,
-		.title = tr::lng_settings_update_automatically(),
-		.st = &st::settingsUpdateToggle,
-		.toggled = rpl::single(cAutoUpdate()),
-		.keywords = { u"update"_q, u"automatic"_q, u"version"_q },
-	});
+	const auto foxmes = CustomBackend::Enabled();
+	const auto toggle = foxmes
+		? (Ui::SettingsButton*)nullptr
+		: builder.addButton({
+			.id = u"advanced/auto_update"_q,
+			.title = tr::lng_settings_update_automatically(),
+			.st = &st::settingsUpdateToggle,
+			.toggled = rpl::single(cAutoUpdate()),
+			.keywords = { u"update"_q, u"automatic"_q, u"version"_q },
+		});
 
 	if (toggle) {
 		const auto label = Ui::CreateChild<Ui::FlatLabel>(
@@ -1085,7 +1096,7 @@ void BuildUpdateSection(SectionBuilder &builder, bool atTop) {
 	auto install = (Ui::SettingsButton*)nullptr;
 	auto check = (Ui::SettingsButton*)nullptr;
 	builder.scope([&] {
-		install = (cAlphaVersion() || KSandbox::isInside())
+		install = (foxmes || cAlphaVersion() || KSandbox::isInside())
 			? nullptr
 			: builder.addButton({
 				.id = u"advanced/install_beta"_q,
@@ -1165,25 +1176,36 @@ void BuildUpdateSection(SectionBuilder &builder, bool atTop) {
 				update->show();
 				break;
 			default:
-				texts->fire_copy(version);
+				if (!CustomBackend::Updates::IsAvailable()) {
+					texts->fire_copy(version);
+					break;
+				}
+				const auto available = CustomBackend::Updates::CurrentAvailable();
+				texts->fire(tr::lng_settings_update_available(
+					tr::now,
+					lt_version,
+					available.version));
+				update->show();
 				break;
 			}
 		};
 
-		toggle->toggledValue(
-		) | rpl::filter([](bool toggled) {
-			return (toggled != cAutoUpdate());
-		}) | rpl::on_next([=](bool toggled) {
-			cSetAutoUpdate(toggled);
-			Local::writeSettings();
-			Core::UpdateChecker checker;
-			if (cAutoUpdate()) {
-				checker.start();
-			} else {
-				checker.stop();
-				setDefaultStatus(checker);
-			}
-		}, toggle->lifetime());
+		if (toggle) {
+			toggle->toggledValue(
+			) | rpl::filter([](bool toggled) {
+				return (toggled != cAutoUpdate());
+			}) | rpl::on_next([=](bool toggled) {
+				cSetAutoUpdate(toggled);
+				Local::writeSettings();
+				Core::UpdateChecker checker;
+				if (cAutoUpdate()) {
+					checker.start();
+				} else {
+					checker.stop();
+					setDefaultStatus(checker);
+				}
+			}, toggle->lifetime());
+		}
 
 		if (install) {
 			install->toggledValue(
@@ -1213,6 +1235,16 @@ void BuildUpdateSection(SectionBuilder &builder, bool atTop) {
 			texts->fire(tr::lng_settings_latest_installed(tr::now));
 			downloading->fire(false);
 		}, options->lifetime());
+		CustomBackend::Updates::AvailableEvents(
+		) | rpl::on_next([=](CustomBackend::Updates::AvailableUpdate available) {
+			options->setAttribute(Qt::WA_TransparentForMouseEvents, false);
+			texts->fire(tr::lng_settings_update_available(
+				tr::now,
+				lt_version,
+				available.version));
+			update->show();
+			downloading->fire(false);
+		}, options->lifetime());
 		checker.progress(
 		) | rpl::on_next([=](Core::UpdateChecker::Progress progress) {
 			showDownloadProgress(
@@ -1235,10 +1267,17 @@ void BuildUpdateSection(SectionBuilder &builder, bool atTop) {
 		setDefaultStatus(checker);
 
 		update->setClickedCallback([] {
-			if (!Core::UpdaterDisabled()) {
-				Core::checkReadyUpdate();
+			const auto checker = Core::UpdateChecker();
+			if (checker.state() == Core::UpdateChecker::State::Ready) {
+				if (!Core::UpdaterDisabled()) {
+					Core::checkReadyUpdate();
+				}
+				Core::Restart();
+			} else if (CustomBackend::Updates::IsReadyToInstall()) {
+				CustomBackend::Updates::InstallAndRestart();
+			} else {
+				CustomBackend::Updates::OpenReleasePage();
 			}
-			Core::Restart();
 		});
 	}
 
@@ -1339,7 +1378,7 @@ const auto kMeta = BuildHelper({
 }, [](SectionBuilder &builder) {
 	const auto autoUpdate = cAutoUpdate();
 
-	if (!autoUpdate) {
+	if (!autoUpdate || CustomBackend::Enabled()) {
 		BuildUpdateSection(builder, true);
 	}
 	BuildDataStorageSection(builder);
@@ -1352,10 +1391,12 @@ const auto kMeta = BuildHelper({
 	BuildPerformanceSection(builder);
 	BuildSpellcheckerSection(builder);
 	BuildScreenReaderSection(builder);
-	if (autoUpdate) {
+	if (autoUpdate && !CustomBackend::Enabled()) {
 		BuildUpdateSection(builder, false);
 	}
-	BuildExportSection(builder);
+	if (!CustomBackend::Enabled()) {
+		BuildExportSection(builder);
+	}
 });
 
 const SectionBuildMethod kAdvancedSection = kMeta.build;
@@ -1412,11 +1453,16 @@ void SetupConnectionType(
 }
 
 bool HasUpdate() {
-	return !Core::UpdaterDisabled();
+	return !Core::UpdaterDisabled() || CustomBackend::Enabled();
 }
 
 void SetupUpdate(not_null<Ui::VerticalLayout*> container) {
 	if (!HasUpdate()) {
+		return;
+	}
+
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Updates::SetupUpdateSettings(container);
 		return;
 	}
 

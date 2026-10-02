@@ -259,8 +259,8 @@ NameType DetectNameType(const QString &filepath) {
 afdesign ai avif bmp dng gif heic icns ico jfif jpeg jpg jpg-large jxl nef \
 png png-large psd qoi raw sketch svg tga tif tiff webp"_q);
 	static const auto kVideo = SplitExtensions(u"\
-3g2 3gp 3gpp aep avi flv h264 m4s m4v mkv mov mp4 mpeg mpg ogv srt tgs tgv \
-vob webm wmv"_q);
+3g2 3gp 3gpp aep avi flv h264 m2ts m4s m4v mkv mov mp4 mpeg mpg mts ogv srt \
+tgs tgv vob webm wmv"_q);
 	static const auto kAudio = SplitExtensions(u"\
 aac ac3 aif amr caf cda cue flac m4a m4b mid midi mp3 ogg opus wav wma"_q);
 	static const auto kDocument = SplitExtensions(u"\

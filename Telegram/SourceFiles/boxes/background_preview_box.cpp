@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/background_preview_box.h"
 
+#include "custom_backend/native_runtime.h"
+#include "custom_backend/native_wallpaper_adapter.h"
 #include "base/unixtime.h"
 #include "boxes/peers/edit_peer_color_box.h"
 #include "boxes/premium_preview_box.h"
@@ -589,6 +591,18 @@ void BackgroundPreviewBox::uploadForPeer(bool both) {
 	if (_uploadId) {
 		return;
 	}
+	if (CustomBackend::Enabled()) {
+		const auto weak = base::make_weak(this);
+		CustomBackend::Wallpapers::Upload(
+			&_controller->session(),
+			_paper.localThumbnail()->original(),
+			[=](std::optional<Data::WallPaper> uploaded) {
+				if (weak && uploaded) {
+					weak->setExistingForPeer(*uploaded, both);
+				}
+			});
+		return;
+	}
 
 	const auto session = &_controller->session();
 	const auto ready = Window::Theme::PrepareWallPaper(
@@ -662,20 +676,24 @@ void BackgroundPreviewBox::setExistingForPeer(
 			return;
 		}
 	}
-	const auto api = &_controller->session().api();
-	using Flag = MTPmessages_SetChatWallPaper::Flag;
-	api->request(MTPmessages_SetChatWallPaper(
-		MTP_flags((_fromMessageId ? Flag::f_id : Flag())
-			| (_fromMessageId ? Flag() : Flag::f_wallpaper)
-			| (both ? Flag::f_for_both : Flag())
-			| Flag::f_settings),
-		_forPeer->input(),
-		paper.mtpInput(&_controller->session()),
-		paper.mtpSettings(),
-		MTP_int(_fromMessageId.msg)
-	)).done([=](const MTPUpdates &result) {
-		api->applyUpdates(result);
-	}).send();
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Wallpapers::SaveForPeer(_forPeer, paper, both);
+	} else {
+		const auto api = &_controller->session().api();
+		using Flag = MTPmessages_SetChatWallPaper::Flag;
+		api->request(MTPmessages_SetChatWallPaper(
+			MTP_flags((_fromMessageId ? Flag::f_id : Flag())
+				| (_fromMessageId ? Flag() : Flag::f_wallpaper)
+				| (both ? Flag::f_for_both : Flag())
+				| Flag::f_settings),
+			_forPeer->input(),
+			paper.mtpInput(&_controller->session()),
+			paper.mtpSettings(),
+			MTP_int(_fromMessageId.msg)
+		)).done([=](const MTPUpdates &result) {
+			api->applyUpdates(result);
+		}).send();
+	}
 
 	_forPeer->setWallPaper(paper);
 	_controller->finishChatThemeEdit(_forPeer);
@@ -720,7 +738,9 @@ void BackgroundPreviewBox::applyForPeer() {
 	if (forChannel()) {
 		checkLevelForChannel();
 		return;
-	} else if (_fromMessageId || !_forPeer->session().premiumPossible()) {
+	} else if (_fromMessageId
+		|| (!CustomBackend::Enabled()
+			&& !_forPeer->session().premiumPossible())) {
 		applyForPeer(false);
 		return;
 	} else if (_forBothOverlay) {
@@ -826,6 +846,33 @@ void BackgroundPreviewBox::applyForPeer(bool both) {
 void BackgroundPreviewBox::applyForEveryone() {
 	const auto install = (_paper.id() != Window::Theme::Background()->id())
 		&& Data::IsCloudWallPaper(_paper);
+	if (CustomBackend::Enabled()) {
+		const auto session = &_controller->session();
+		if (Data::IsCustomWallPaper(_paper)) {
+			const auto weak = base::make_weak(this);
+			CustomBackend::Wallpapers::Upload(
+				session,
+				_paper.localThumbnail()->original(),
+				[=](std::optional<Data::WallPaper> uploaded) {
+					if (!weak || !uploaded) {
+						return;
+					}
+					const auto ready = uploaded->withParamsFrom(weak->_paper);
+					weak->_controller->content()->setChatBackground(
+						ready,
+						base::take(weak->_full));
+					CustomBackend::Wallpapers::SaveDefault(session, ready);
+					weak->closeBox();
+				});
+			return;
+		}
+		_controller->content()->setChatBackground(_paper, std::move(_full));
+		if (install) {
+			CustomBackend::Wallpapers::SaveDefault(session, _paper);
+		}
+		closeBox();
+		return;
+	}
 	_controller->content()->setChatBackground(_paper, std::move(_full));
 	if (install) {
 		_controller->session().api().request(MTPaccount_InstallWallPaper(

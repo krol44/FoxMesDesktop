@@ -1,0 +1,21 @@
+diff --git a/ui/animated_icon.cpp b/ui/animated_icon.cpp
+index 82f4b3a..b94c752 100644
+--- a/ui/animated_icon.cpp
++++ b/ui/animated_icon.cpp
+@@ -396,7 +396,15 @@ int AnimatedIcon::wantedFrameIndex(
+ 		const auto duration = frame->generated.duration;
+ 		const auto next = _animationCurrentStart + duration;
+ 		const auto effectiveCount = effectiveFramesCount();
+-		const auto isLastFrame = (_animationCurrentIndex >= effectiveCount - 1);
++		// A generator that cannot report its length up front marks the end
++		// on the frame itself instead. FFmpeg::FrameGenerator does exactly
++		// that for WebM - the frame count is not in the container, so count()
++		// is 0 - and without this branch the comparison below reads
++		// 0 >= 0 - 1, which is true on the very first tick: the icon stops
++		// before it has shown a second frame and looks like a still image.
++		const auto isLastFrame = effectiveCount
++			? (_animationCurrentIndex >= effectiveCount - 1)
++			: frame->generated.last;
+ 		if (isLastFrame) {
+ 			_animation.stop();
+ 			if (_repaint) _repaint();

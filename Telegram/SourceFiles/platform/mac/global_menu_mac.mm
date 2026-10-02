@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "platform/mac/global_menu_mac.h"
 
+#include "custom_backend/native_runtime.h"
+
 #include "core/application.h"
 #include "core/sandbox.h"
 #include "window/window_controller.h"
@@ -49,6 +51,8 @@ struct ComputedState {
 	bool addContactDisabled = false;
 	bool newGroupDisabled = false;
 	bool newChannelDisabled = false;
+	bool newGroupHidden = false;
+	bool newChannelHidden = false;
 	bool showTelegramDisabled = false;
 	Ui::MarkdownEnabledState markdown;
 
@@ -308,6 +312,12 @@ void Manager::recomputeState() {
 		.addContactDisabled = inactive,
 		.newGroupDisabled = inactive || support,
 		.newChannelDisabled = inactive || support,
+		.newGroupHidden = CustomBackend::Enabled()
+			&& !CustomBackend::CanCreateGroups(
+				logged ? &controller->session() : nullptr),
+		.newChannelHidden = CustomBackend::Enabled()
+			&& !CustomBackend::CanCreateChannels(
+				logged ? &controller->session() : nullptr),
 		.showTelegramDisabled = widget->isActive(),
 		.markdown = markdownState,
 	};
@@ -330,6 +340,8 @@ void Manager::recomputeState() {
 	ForceDisabled(_addContact, next.addContactDisabled);
 	ForceDisabled(_newGroup, next.newGroupDisabled);
 	ForceDisabled(_newChannel, next.newChannelDisabled);
+	_newGroup->setVisible(!next.newGroupHidden);
+	_newChannel->setVisible(!next.newChannelHidden);
 	ForceDisabled(_showTelegram, next.showTelegramDisabled);
 
 	const auto disabled = [&](const QString &tag) {
@@ -355,7 +367,7 @@ void Manager::buildAppleMenu(QMenu *main) {
 			});
 		};
 		const auto about = main->addAction(
-			u"About Telegram"_q,
+			u"About FoxMes"_q,
 			std::move(callback));
 		about->setMenuRole(QAction::AboutQtRole);
 	}
@@ -589,7 +601,7 @@ void Manager::buildWindowMenu(QMenu *window) {
 	}
 	window->addSeparator();
 	_showTelegram = window->addAction(
-		u"Show Telegram"_q,
+		u"Show FoxMes"_q,
 		receiver,
 		[this] {
 			if (const auto w = resolveActiveWindow()) {
@@ -599,7 +611,7 @@ void Manager::buildWindowMenu(QMenu *window) {
 }
 
 void Manager::buildMenu() {
-	buildAppleMenu(_menuBar->addMenu(u"Telegram"_q));
+	buildAppleMenu(_menuBar->addMenu(u"FoxMes"_q));
 	buildFileMenu(_menuBar->addMenu(u"File"_q));
 	buildEditMenu(_menuBar->addMenu(u"Edit"_q));
 	buildWindowMenu(_menuBar->addMenu(u"Window"_q));

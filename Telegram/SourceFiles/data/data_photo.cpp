@@ -11,6 +11,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "data/data_reply_preview.h"
 #include "data/data_photo_media.h"
+#include "custom_backend/native_runtime.h"
+#include "custom_backend/native_streaming_loader.h"
 #include "main/main_session.h"
 #include "history/history.h"
 #include "history/history_item.h"
@@ -616,6 +618,10 @@ auto PhotoData::createStreamingLoader(
 		if (media && !bytes.isEmpty()) {
 			return Media::Streaming::MakeBytesLoader(bytes);
 		}
+	}
+	if (CustomBackend::Enabled()
+		&& v::is<PlainUrlLocation>(videoLocation(large).file().data)) {
+		return CustomBackend::Streaming::MakePhotoVideoLoader(this);
 	}
 	return v::is<StorageFileLocation>(videoLocation(large).file().data)
 		? std::make_unique<Media::Streaming::LoaderMtproto>(

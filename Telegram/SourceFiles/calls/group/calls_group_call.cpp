@@ -1,3 +1,4 @@
+#include "tgcalls/ScreenSharing.h"
 /*
 This file is part of Telegram Desktop,
 the official desktop application for the Telegram messaging service.
@@ -631,6 +632,7 @@ GroupCall::GroupCall(
 , _listenersHidden(join.rtmp)
 , _rtmp(join.rtmp)
 , _singleSourceVolume(Group::kDefaultVolume) {
+	_screenSharingQuality = std::clamp(startInfo.screenSharingQuality, 0, 11);
 	applyInputCall(inputCall);
 
 	_muted.value(
@@ -917,6 +919,27 @@ void GroupCall::toggleVideo(bool active) {
 		: Webrtc::VideoState::Inactive;
 }
 
+void GroupCall::setScreenSharingQuality(int quality) {
+	_screenSharingQuality = std::clamp(quality, 0, 11);
+	if (_screenCapture && isSharingScreen()) {
+		_screenCapture->switchToDevice(tgcalls::ScreenSharingDeviceId(_screenDeviceId.toStdString(), _screenSharingQuality), true);
+		if (_screenInstance) _screenInstance->setVideoCapture(_screenCapture);
+	}
+}
+
+void GroupCall::getScreenSharingStats(Fn<void(tgcalls::ScreenSharingStats)> done) {
+	if (!_screenInstance || !isSharingScreen()) { done({}); return; }
+	const auto weak = base::make_weak(this);
+	const auto capture = _screenCapture;
+	_screenInstance->getScreenSharingStats([weak, capture, done = std::move(done)](tgcalls::ScreenSharingStats stats) {
+		if (!capture) { crl::on_main(weak, [done, stats] { done(stats); }); return; }
+		capture->getScreenCaptureStats([weak, done, stats](tgcalls::ScreenCaptureStats measured) mutable {
+			stats.capture = measured;
+			crl::on_main(weak, [done, stats] { done(stats); });
+		});
+	});
+}
+
 void GroupCall::toggleScreenSharing(
 		std::optional<QString> uniqueId,
 		bool withAudio) {
@@ -929,13 +952,16 @@ void GroupCall::toggleScreenSharing(
 	const auto changed = (_screenDeviceId != *uniqueId);
 	const auto wasSharing = isSharingScreen();
 	_screenDeviceId = *uniqueId;
-	_screenWithAudio = withAudio;
+	_screenWithAudio = withAudio && Webrtc::LoopbackAudioCaptureSupported();
 	_screenState = Webrtc::VideoState::Active;
 	if (changed && wasSharing && isSharingScreen()) {
-		_screenCapture->switchToDevice(uniqueId->toStdString(), true);
+		_screenCapture->switchToDevice(tgcalls::ScreenSharingDeviceId(uniqueId->toStdString(), _screenSharingQuality), true);
+		if (_screenInstance) {
+			_screenInstance->setVideoCapture(_screenCapture);
+		}
 	}
 	if (_screenInstance) {
-		_screenInstance->setIsMuted(!withAudio);
+		_screenInstance->setIsMuted(!_screenWithAudio);
 	}
 }
 
@@ -2900,9 +2926,10 @@ void GroupCall::setupOutgoingVideo() {
 			} else if (!_screenCapture) {
 				_screenCapture = std::shared_ptr<
 					tgcalls::VideoCaptureInterface
-				>(tgcalls::VideoCaptureInterface::Create(
-					tgcalls::StaticThreads::getThreads(),
-					_screenDeviceId.toStdString()));
+			>(tgcalls::VideoCaptureInterface::Create(
+				tgcalls::StaticThreads::getThreads(),
+				tgcalls::ScreenSharingDeviceId(_screenDeviceId.toStdString(), _screenSharingQuality),
+				true));
 				if (!_screenCapture) {
 					return emitShareScreenError(Error::ScreenFailed);
 				}
@@ -2923,7 +2950,7 @@ void GroupCall::setupOutgoingVideo() {
 				});
 			} else {
 				_screenCapture->switchToDevice(
-					_screenDeviceId.toStdString(),
+					tgcalls::ScreenSharingDeviceId(_screenDeviceId.toStdString(), _screenSharingQuality),
 					true);
 			}
 			if (_screenInstance) {
@@ -2995,11 +3022,7 @@ void GroupCall::toggleRecording(
 
 auto GroupCall::lookupVideoCodecPreferences() const
 -> std::vector<tgcalls::VideoCodecName> {
-	auto result = std::vector<tgcalls::VideoCodecName>();
-	if (_peer->session().appConfig().confcallPrioritizeVP8()) {
-		result.push_back(tgcalls::VideoCodecName::VP8);
-	}
-	return result;
+	return {};
 }
 
 bool GroupCall::tryCreateController() {

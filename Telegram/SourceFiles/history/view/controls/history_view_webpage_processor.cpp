@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/controls/history_view_webpage_processor.h"
 
 #include "base/unixtime.h"
+#include "custom_backend/native_runtime.h"
+#include "custom_backend/native_web_page_adapter.h"
 #include "data/data_chat_participant_status.h"
 #include "data/data_file_origin.h"
 #include "data/data_session.h"
@@ -153,6 +155,10 @@ void WebpageResolver::request(const QString &link, bool force) {
 		_resolved.fire_copy(link);
 	};
 	_requestLink = link;
+	if (CustomBackend::Enabled()) {
+		CustomBackend::RequestWebPagePreview(_session, link, done, fail);
+		return;
+	}
 	_requestId = _api.request(
 		MTPmessages_GetWebPagePreview(
 			MTP_flags(0),
@@ -181,7 +187,11 @@ void WebpageResolver::request(const QString &link, bool force) {
 
 void WebpageResolver::cancel(const QString &link) {
 	if (_requestLink == link) {
-		_api.request(base::take(_requestId)).cancel();
+		if (CustomBackend::Enabled()) {
+			CustomBackend::CancelWebPagePreview(_session, link);
+		} else {
+			_api.request(base::take(_requestId)).cancel();
+		}
 		_requestLink = QString();
 	}
 }

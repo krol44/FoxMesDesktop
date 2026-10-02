@@ -132,6 +132,7 @@ using FormatPointer = std::unique_ptr<AVFormatContext, FormatDeleter>;
 
 struct FormatSettings {
 	bool ignoreEditList = false;
+	bool mpegTs = false;
 };
 
 [[nodiscard]] FormatPointer MakeFormatPointer(

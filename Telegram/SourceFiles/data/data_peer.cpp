@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_peer.h"
 
 #include "api/api_sensitive_content.h"
+#include "custom_backend/native_runtime.h"
 #include "data/data_user.h"
 #include "data/data_chat.h"
 #include "data/data_chat_participant_status.h"
@@ -1624,6 +1625,9 @@ bool PeerData::sharedMediaInfo() const {
 }
 
 bool PeerData::savedSublistsInfo() const {
+	if (CustomBackend::Enabled()) {
+		return false;
+	}
 	return isSelf() && owner().savedMessages().supported();
 }
 

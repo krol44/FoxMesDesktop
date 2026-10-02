@@ -7,11 +7,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "storage/file_download_web.h"
 
+#include "custom_backend/native_runtime.h"
+#include "custom_backend/native_streaming_loader.h"
 #include "storage/cache/storage_cache_types.h"
 #include "base/timer.h"
 #include "base/weak_ptr.h"
 
 #include <QtNetwork/QAuthenticator>
+#include <QtNetwork/QSslError>
 
 namespace {
 
@@ -81,14 +84,17 @@ private:
 		int id = 0;
 		QString url;
 		bool stream = false;
+		CustomBackend::DownloadAuth auth;
 	};
 	struct Sent {
 		QString url;
 		not_null<QNetworkReply*> reply;
 		bool stream = false;
+		CustomBackend::DownloadAuth auth;
 		QByteArray data;
 		int64 ready = 0;
 		int64 total = 0;
+		bool lengthKnown = false;
 		int redirectsLeft = kMaxHttpRedirects;
 	};
 
@@ -96,12 +102,19 @@ private:
 	void handleNetworkErrors();
 
 	// Worker thread.
-	void enqueue(int id, const QString &url, bool stream);
+	void enqueue(
+		int id,
+		const QString &url,
+		bool stream,
+		const CustomBackend::DownloadAuth &auth);
 	void remove(int id);
 	void resetGeneration();
 	void checkSendNext();
 	void send(const Enqueued &entry);
-	[[nodiscard]] not_null<QNetworkReply*> send(int id, const QString &url);
+	[[nodiscard]] not_null<QNetworkReply*> send(
+		int id,
+		const QString &url,
+		const CustomBackend::DownloadAuth &auth);
 	[[nodiscard]] Sent *findSent(int id, not_null<QNetworkReply*> reply);
 	void removeSent(int id);
 	void progress(
@@ -121,6 +134,7 @@ private:
 		int64 total);
 	void failed(int id, not_null<QNetworkReply*> reply);
 	void finished(int id, not_null<QNetworkReply*> reply);
+	void completed(int id, not_null<QNetworkReply*> reply);
 	void deleteDeferred(not_null<QNetworkReply*> reply);
 	void queueProgressUpdate(
 		int id,
@@ -184,7 +198,16 @@ void WebLoadManager::handleNetworkErrors() {
 	QObject::connect(
 		_network.get(),
 		&QNetworkAccessManager::sslErrors,
-		fail);
+		[=](QNetworkReply *reply, const QList<QSslError> &errors) {
+			for (const auto &[id, sent] : _sent) {
+				if (sent.reply == reply) {
+					if (!CustomBackend::AllowDownloadTls(reply, sent.auth)) {
+						failed(id, reply);
+					}
+					return;
+				}
+			}
+		});
 }
 
 WebLoadManager::~WebLoadManager() {
@@ -211,8 +234,11 @@ void WebLoadManager::enqueue(not_null<webFileLoader*> loader) {
 	}();
 	const auto url = loader->url();
 	const auto stream = loader->streamLoading();
+	const auto auth = CustomBackend::AuthorizeDownload(
+		&loader->session(),
+		QUrl(url));
 	InvokeQueued(_network.get(), [=] {
-		enqueue(id, url, stream);
+		enqueue(id, url, stream, auth);
 	});
 }
 
@@ -228,7 +254,11 @@ void WebLoadManager::remove(not_null<webFileLoader*> loader) {
 	});
 }
 
-void WebLoadManager::enqueue(int id, const QString &url, bool stream) {
+void WebLoadManager::enqueue(
+		int id,
+		const QString &url,
+		bool stream,
+		const CustomBackend::DownloadAuth &auth) {
 	const auto i = ranges::find(_queue, id, &Enqueued::id);
 	if (i != end(_queue)) {
 		return;
@@ -243,7 +273,7 @@ void WebLoadManager::enqueue(int id, const QString &url, bool stream) {
 	_previousGeneration.erase(
 		ranges::remove(_previousGeneration, id, &Enqueued::id),
 		end(_previousGeneration));
-	_queue.push_back(Enqueued{ id, url, stream });
+	_queue.push_back(Enqueued{ id, url, stream, auth });
 	if (!_resetGenerationTimer.isActive()) {
 		_resetGenerationTimer.callOnce(kResetDownloadPrioritiesTimeout);
 	}
@@ -284,7 +314,9 @@ void WebLoadManager::checkSendNext() {
 void WebLoadManager::send(const Enqueued &entry) {
 	const auto id = entry.id;
 	const auto url = entry.url;
-	_sent.emplace(id, Sent{ url, send(id, url), entry.stream });
+	_sent.emplace(
+		id,
+		Sent{ url, send(id, url, entry.auth), entry.stream, entry.auth });
 }
 
 void WebLoadManager::removeSent(int id) {
@@ -295,19 +327,29 @@ void WebLoadManager::removeSent(int id) {
 	}
 }
 
-not_null<QNetworkReply*> WebLoadManager::send(int id, const QString &url) {
-	const auto result = _network->get(QNetworkRequest(url));
+not_null<QNetworkReply*> WebLoadManager::send(
+		int id,
+		const QString &url,
+		const CustomBackend::DownloadAuth &auth) {
+	auto request = QNetworkRequest(url);
+	CustomBackend::ApplyDownloadAuth(request, auth);
+	const auto result = _network->get(request);
+	CustomBackend::AllowDownloadTls(result, auth);
 	const auto handleProgress = [=](qint64 ready, qint64 total) {
 		progress(id, result, ready, total);
 	};
 	const auto handleError = [=](QNetworkReply::NetworkError error) {
 		failed(id, result, error);
 	};
+	const auto handleFinished = [=] {
+		completed(id, result);
+	};
 	QObject::connect(
 		result,
 		&QNetworkReply::downloadProgress,
 		handleProgress);
 	QObject::connect(result, &QNetworkReply::errorOccurred, handleError);
+	QObject::connect(result, &QNetworkReply::finished, handleFinished);
 	return result;
 }
 
@@ -331,6 +373,9 @@ void WebLoadManager::progress(
 		if (originalContentLength.isValid()) {
 			total = originalContentLength.toLongLong();
 		}
+	}
+	if (const auto sent = findSent(id, reply)) {
+		sent->lengthKnown = (total > 0);
 	}
 	const auto statusCode = reply->attribute(
 		QNetworkRequest::HttpStatusCodeAttribute);
@@ -373,8 +418,13 @@ void WebLoadManager::redirect(int id, not_null<QNetworkReply*> reply) {
 		}
 		const auto target = next.toString();
 		deleteDeferred(reply);
+		if (next.host().compare(
+				QUrl(sent->url).host(),
+				Qt::CaseInsensitive) != 0) {
+			sent->auth = {};
+		}
 		sent->url = target;
-		sent->reply = send(id, target);
+		sent->reply = send(id, target, sent->auth);
 	}
 }
 
@@ -411,7 +461,7 @@ void WebLoadManager::notify(
 					sent->ready,
 					sent->total,
 					std::move(bytes));
-				if (ready >= total) {
+				if (sent->lengthKnown && ready >= total) {
 					finished(id, reply);
 				}
 			}
@@ -426,7 +476,7 @@ void WebLoadManager::notify(
 					).arg(total
 					).arg(sent->data.size()));
 				failed(id, reply);
-			} else if (ready >= total) {
+			} else if (sent->lengthKnown && ready >= total) {
 				finished(id, reply);
 			} else {
 				queueProgressUpdate(id, sent->ready, sent->total, {});
@@ -462,6 +512,27 @@ void WebLoadManager::deleteDeferred(not_null<QNetworkReply*> reply) {
 		ranges::remove(_repliesBeingDeleted, nullptr),
 		end(_repliesBeingDeleted));
 	_repliesBeingDeleted.emplace_back(reply.get());
+}
+
+void WebLoadManager::completed(int id, not_null<QNetworkReply*> reply) {
+	const auto sent = findSent(id, reply);
+	if (!sent) {
+		return;
+	}
+	if (reply->error() != QNetworkReply::NoError) {
+		failed(id, reply);
+		return;
+	}
+	auto bytes = reply->readAll();
+	if (!bytes.isEmpty()) {
+		if (sent->stream) {
+			sent->ready += bytes.size();
+			queueProgressUpdate(id, sent->ready, sent->ready, std::move(bytes));
+		} else {
+			sent->data.append(std::move(bytes));
+		}
+	}
+	finished(id, reply);
 }
 
 void WebLoadManager::finished(int id, not_null<QNetworkReply*> reply) {
@@ -520,20 +591,27 @@ void WebLoadManager::sendUpdate(int id, Update &&data) {
 	}
 }
 
+[[nodiscard]] QString WebLoaderTargetFile(const QString &to, int64 size) {
+	return (size > Storage::kMaxFileInMemory) ? to : QString();
+}
+
 webFileLoader::webFileLoader(
 	not_null<Main::Session*> session,
 	const QString &url,
 	const QString &to,
+	int64 size,
 	LoadFromCloudSetting fromCloud,
 	bool autoLoading,
 	uint8 cacheTag)
 : FileLoader(
 	session,
-	QString(),
+	WebLoaderTargetFile(to, size),
 	0,
 	0,
 	UnknownFileLocation,
-	LoadToCacheAsWell,
+	WebLoaderTargetFile(to, size).isEmpty()
+		? LoadToCacheAsWell
+		: LoadToFileOnly,
 	fromCloud,
 	autoLoading,
 	cacheTag)
@@ -635,6 +713,9 @@ Storage::Cache::Key webFileLoader::cacheKey() const {
 }
 
 std::optional<MediaKey> webFileLoader::fileLocationKey() const {
+	if (CustomBackend::Enabled()) {
+		return CustomBackend::Streaming::FileLocationKey(_url);
+	}
 	return std::nullopt;
 }
 

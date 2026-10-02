@@ -1832,3 +1832,11 @@ confcallFingerprintTooltipLabel: defaultImportantTooltipLabel;
 confcallFingerprintTooltip: defaultImportantTooltip;
 confcallFingerprintTooltipSkip: 12px;
 confcallFingerprintTooltipMaxWidth: 220px;
+
+callScreenQualityWidth: 220px;
+callScreenQualityHeight: 80px;
+callScreenQualityPadding: 12px;
+callScreenQualityRadius: 12px;
+callScreenQualityGap: 12px;
+callScreenQualityInfoSize: 20px;
+callScreenQualityInfoPadding: 6px;

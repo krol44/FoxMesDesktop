@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "apiwrap.h"
 #include "boxes/peers/create_managed_bot_box.h"
+#include "custom_backend/native_runtime.h"
 #include "data/data_peer_id.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
@@ -25,6 +26,10 @@ Result ShowNewGroup(const Context &ctx) {
 	if (!ctx.controller) {
 		return Result::NeedsAuth;
 	}
+	if (CustomBackend::Enabled()
+		&& !CustomBackend::CanCreateGroups(&ctx.controller->session())) {
+		return Result::Handled;
+	}
 	ctx.controller->showNewGroup();
 	return Result::Handled;
 }
@@ -32,6 +37,10 @@ Result ShowNewGroup(const Context &ctx) {
 Result ShowNewChannel(const Context &ctx) {
 	if (!ctx.controller) {
 		return Result::NeedsAuth;
+	}
+	if (CustomBackend::Enabled()
+		&& !CustomBackend::CanCreateChannels(&ctx.controller->session())) {
+		return Result::Handled;
 	}
 	ctx.controller->showNewChannel();
 	return Result::Handled;

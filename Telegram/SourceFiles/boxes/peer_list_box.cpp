@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/peer_list_box.h"
 
+#include "custom_backend/native_runtime.h"
 #include "boxes/peer_list_section_headers.h"
 #include "boxes/peer_list_section_index.h"
 #include "history/history.h" // chatListNameSortKey.
@@ -934,9 +935,11 @@ int PeerListRow::paintNameIconGetWidth(
 		.verified = &(selected
 			? st::dialogsVerifiedIconOver
 			: st::dialogsVerifiedIcon),
-		.premium = &(selected
-			? st::dialogsPremiumIcon.over
-			: st::dialogsPremiumIcon.icon),
+		.premium = CustomBackend::DisableWhile
+			? nullptr
+			: &(selected
+				? st::dialogsPremiumIcon.over
+				: st::dialogsPremiumIcon.icon),
 		.scam = &(selected ? st::dialogsScamFgOver : st::dialogsScamFg),
 		.direct = &(selected
 			? st::windowSubTextFgOver

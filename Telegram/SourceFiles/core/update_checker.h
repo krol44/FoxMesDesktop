@@ -16,6 +16,7 @@ class Session;
 namespace Core {
 
 bool UpdaterDisabled();
+bool UpdateCheckAvailable();
 void SetUpdaterDisabledAtStartup();
 
 class Updater;

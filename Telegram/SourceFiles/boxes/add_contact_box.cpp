@@ -6,6 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/add_contact_box.h"
+#include "custom_backend/native_runtime.h"
+#include "custom_backend/native_peer_adapter.h"
 
 #include "lang/lang_keys.h"
 #include "base/call_delayed.h"
@@ -1160,7 +1162,8 @@ void SetupChannelBox::paintEvent(QPaintEvent *e) {
 			aboutPrivate.width(),
 			width());
 	}
-	if (!_channel->isMegagroup() || !_link->isHidden()) {
+	if ((!_channel->isMegagroup() || !_link->isHidden())
+		&& !(CustomBackend::HideGroupExtras && _link->isHidden())) {
 		p.setPen(st::boxTextFg);
 		p.setFont(st::newGroupLinkFont);
 		p.drawTextLeft(
@@ -1175,7 +1178,7 @@ void SetupChannelBox::paintEvent(QPaintEvent *e) {
 	}
 
 	if (_link->isHidden()) {
-		if (!_channel->isMegagroup()) {
+		if (!_channel->isMegagroup() && !CustomBackend::HideGroupExtras) {
 			QTextOption option(style::al_left);
 			option.setWrapMode(QTextOption::WrapAnywhere);
 			p.setFont(_linkOver
@@ -1273,7 +1276,8 @@ void SetupChannelBox::leaveEventHook(QEvent *e) {
 void SetupChannelBox::updateSelected(const QPoint &cursorGlobalPosition) {
 	QPoint p(mapFromGlobal(cursorGlobalPosition));
 
-	bool linkOver = _invitationLink.contains(p);
+	bool linkOver = _invitationLink.contains(p)
+		&& !CustomBackend::HideGroupExtras;
 	if (linkOver != _linkOver) {
 		_linkOver = linkOver;
 		update();
@@ -1655,6 +1659,32 @@ void EditNameBox::save() {
 	if (first.isEmpty()) {
 		first = last;
 		last = QString();
+	}
+	if (CustomBackend::Enabled()) {
+		const auto weak = base::make_weak(this);
+		const auto accepted = CustomBackend::Peers::UpdateProfileName(
+			_user,
+			first,
+			last,
+			[weak, first, last](QString error) {
+				const auto strong = weak.get();
+				if (!strong) return;
+			strong->_requestId = 0;
+			if (!error.isEmpty()) {
+				strong->_first->setFocus();
+				strong->_first->showError();
+				return;
+			}
+			strong->_user->setName(
+				TextUtilities::SingleLine(first),
+				TextUtilities::SingleLine(last),
+				QString(),
+				TextUtilities::SingleLine(strong->_user->username()));
+			strong->closeBox();
+		});
+		if (!accepted) return;
+		_requestId = -1;
+		return;
 	}
 	_sentName = first;
 	auto flags = MTPaccount_UpdateProfile::Flag::f_first_name

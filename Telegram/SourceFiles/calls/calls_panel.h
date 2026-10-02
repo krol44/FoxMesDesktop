@@ -61,6 +61,7 @@ struct CallBodyLayout;
 } // namespace style
 
 namespace Calls {
+class ScreenSharingQuality;
 
 class Window;
 class Userpic;
@@ -212,6 +213,7 @@ private:
 	base::unique_qptr<Ui::PaddingWrap<Ui::FlatLabel>> _remoteLowBattery;
 	std::unique_ptr<Userpic> _userpic;
 	std::unique_ptr<VideoBubble> _outgoingVideoBubble;
+	std::unique_ptr<Calls::ScreenSharingQuality> _screenQuality;
 	QPixmap _bottomShadow;
 	int _bodyTop = 0;
 	int _buttonsTopShown = 0;

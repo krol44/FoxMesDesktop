@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "calls/group/calls_group_settings.h"
 
+#include "custom_backend/native_runtime.h"
+
 #include "calls/group/calls_group_call.h"
 #include "calls/group/calls_group_menu.h" // LeaveBox.
 #include "calls/group/calls_group_common.h"
@@ -644,6 +646,8 @@ void SettingsBox(
 				return group->hasUsername()
 					? group->session().createInternalLinkFull(
 						group->username())
+					: CustomBackend::HideGroupExtras
+					? QString()
 					: group->inviteLink();
 			} else if (const auto chat = peer->asChat()) {
 				return chat->inviteLink();
@@ -651,7 +655,9 @@ void SettingsBox(
 			return QString();
 		};
 		const auto canCreateLink = [&] {
-			if (const auto chat = peer->asChat()) {
+			if (CustomBackend::HideGroupExtras) {
+				return false;
+			} else if (const auto chat = peer->asChat()) {
 				return chat->canHaveInviteLink();
 			} else if (const auto group = peer->asMegagroup()) {
 				return group->canHaveInviteLink();

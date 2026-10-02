@@ -22,6 +22,7 @@ public:
 		not_null<Main::Session*> session,
 		const QString &url,
 		const QString &to,
+		int64 size,
 		LoadFromCloudSetting fromCloud,
 		bool autoLoading,
 		uint8 cacheTag);

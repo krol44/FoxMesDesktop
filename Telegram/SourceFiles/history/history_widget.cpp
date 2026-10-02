@@ -104,6 +104,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_item_helpers.h" // GetErrorForSending.
+#include "custom_backend/native_history_loader.h"
+#include "custom_backend/native_runtime.h"
 #include "history/history_drag_area.h"
 #include "history/history_inner_widget.h"
 #include "history/history_item_components.h"
@@ -4790,6 +4792,26 @@ void HistoryWidget::firstLoadMessages() {
 	if (!_history || _firstLoadRequest) {
 		return;
 	}
+	_firstLoadRequest = -1;
+	if (CustomBackend::WidgetHistoryRequest(
+			&session(),
+			_history,
+			_showAtMsgId,
+			Data::LoadDirection::Around,
+			crl::guard(this, [=] {
+				if (_firstLoadRequest != -1) {
+					return;
+				}
+				_firstLoadRequest = 0;
+				historyLoaded();
+			}),
+			crl::guard(this, [=](const MTP::Error &error) {
+				messagesFailed(error, -1);
+			}),
+			CustomBackend::HistoryLoadingView{ controller(), _scroll.data() })) {
+		return;
+	}
+	_firstLoadRequest = 0;
 
 	auto from = _history;
 	auto offsetId = MsgId();
@@ -4873,6 +4895,31 @@ void HistoryWidget::loadMessages() {
 	const auto from = loadMigrated ? _migrated : _history;
 	if (from->loadedAtTop()) {
 		return;
+	}
+
+	if (!loadMigrated) {
+		_preloadRequest = -1;
+		if (CustomBackend::WidgetHistoryRequest(
+				&session(),
+				_history,
+				from->minMsgId(),
+				Data::LoadDirection::Before,
+				crl::guard(this, [=, history = _history] {
+					if (_preloadRequest != -1 || _history != history) {
+						return;
+					}
+					_preloadRequest = 0;
+					preloadHistoryIfNeeded();
+				}),
+				crl::guard(this, [=, history = _history](
+						const MTP::Error &error) {
+					if (_preloadRequest == -1 && _history == history) {
+						messagesFailed(error, -1);
+					}
+				}))) {
+			return;
+		}
+		_preloadRequest = 0;
 	}
 
 	const auto offsetId = from->minMsgId();
@@ -4970,6 +5017,34 @@ void HistoryWidget::loadMessagesDown() {
 		return;
 	}
 
+	if (!loadMigrated) {
+		_preloadDownRequest = -1;
+		if (CustomBackend::WidgetHistoryRequest(
+				&session(),
+				_history,
+				from->maxMsgId(),
+				Data::LoadDirection::After,
+				crl::guard(this, [=, history = _history] {
+					if (_preloadDownRequest != -1 || _history != history) {
+						return;
+					}
+					_preloadDownRequest = 0;
+					preloadHistoryIfNeeded();
+					if (_history->loadedAtBottom()) {
+						checkActivation();
+					}
+				}),
+				crl::guard(this, [=, history = _history](
+						const MTP::Error &error) {
+					if (_preloadDownRequest == -1 && _history == history) {
+						messagesFailed(error, -1);
+					}
+				}))) {
+			return;
+		}
+		_preloadDownRequest = 0;
+	}
+
 	const auto loadCount = kMessagesPerPage;
 	auto addOffset = -loadCount;
 	auto offsetId = from->maxMsgId();
@@ -5034,6 +5109,28 @@ void HistoryWidget::delayedShowAt(
 		).arg(_history->inboxReadTillId().bare
 		).arg(Logs::b(_history->loadedAtBottom())
 		).arg(showAtMsgId.bare));
+
+	_delayedShowAtRequest = -1;
+	if (CustomBackend::WidgetHistoryRequest(
+			&session(),
+			_history,
+			showAtMsgId,
+			Data::LoadDirection::Around,
+			crl::guard(this, [=] {
+				if (_delayedShowAtRequest != -1) {
+					return;
+				}
+				_delayedShowAtRequest = 0;
+				setMsgId(_delayedShowAtMsgId, _delayedShowAtMsgParams);
+				historyLoaded();
+			}),
+			crl::guard(this, [=](const MTP::Error &error) {
+				messagesFailed(error, -1);
+			}),
+			CustomBackend::HistoryLoadingView{ controller(), _scroll.data() })) {
+		return;
+	}
+	_delayedShowAtRequest = 0;
 
 	auto from = _history;
 	auto offsetId = MsgId();

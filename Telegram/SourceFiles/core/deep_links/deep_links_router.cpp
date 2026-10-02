@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/deep_links/deep_links_settings.h"
 #include "core/application.h"
 #include "main/main_session.h"
+#include "settings/sections/settings_main.h"
 #include "ui/toast/toast.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
@@ -165,6 +166,10 @@ Result Router::executeAction(const Action &action, const Context &ctx) {
 		if (!ctx.controller) {
 			return Result::NeedsAuth;
 		}
+		if (!IsSupportedSettingsSection(s.sectionId)) {
+			ctx.controller->showSettings(::Settings::MainId());
+			return Result::Handled;
+		}
 		const auto highlight = ctx.params.value(u"highlight"_q);
 		if (!highlight.isEmpty()) {
 			ctx.controller->setHighlightControlId(highlight);
@@ -174,6 +179,10 @@ Result Router::executeAction(const Action &action, const Context &ctx) {
 	}, [&](const SettingsControl &s) {
 		if (!ctx.controller) {
 			return Result::NeedsAuth;
+		}
+		if (!IsSupportedSettingsSection(s.sectionId)) {
+			ctx.controller->showSettings(::Settings::MainId());
+			return Result::Handled;
 		}
 		if (!s.controlId.isEmpty()) {
 			ctx.controller->setHighlightControlId(s.controlId);

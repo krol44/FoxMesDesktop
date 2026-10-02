@@ -1,3 +1,4 @@
+#include "tgcalls/ScreenSharing.h"
 /*
 This file is part of Telegram Desktop,
 the official desktop application for the Telegram messaging service.
@@ -17,6 +18,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "calls/calls_panel.h"
 #include "core/application.h"
 #include "core/core_settings.h"
+#include "custom_backend/native_calls_adapter.h"
+#include "custom_backend/native_runtime.h"
 #include "data/data_group_call.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
@@ -37,6 +40,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <tgcalls/VideoCaptureInterface.h>
 #include <tgcalls/StaticThreads.h>
 
+#include <cstring>
+
 namespace tgcalls {
 class InstanceImpl;
 class InstanceV2Impl;
@@ -48,13 +53,12 @@ namespace {
 
 constexpr auto kMinLayer = 65;
 constexpr auto kHangupTimeoutMs = 5000;
+constexpr auto kCallHeartbeatMs = 30 * 1000;
 constexpr auto kSha256Size = 32;
 constexpr auto kAuthKeySize = 256;
 const auto kDefaultVersion = "2.4.4"_q;
 
-const auto Register = tgcalls::Register<tgcalls::InstanceImpl>();
 const auto RegisterV2 = tgcalls::Register<tgcalls::InstanceV2Impl>();
-const auto RegV2Ref = tgcalls::Register<tgcalls::InstanceV2ReferenceImpl>();
 
 [[nodiscard]] base::flat_set<int64> CollectEndpointIds(
 		const QVector<MTPPhoneConnection> &list) {
@@ -212,6 +216,11 @@ Call::Call(
 , _api(&_user->session().mtp())
 , _type(type)
 , _discardByTimeoutTimer([=] { hangup(); })
+, _heartbeatTimer([=] {
+	if (_id && CustomBackend::Enabled()) {
+		CustomBackend::Calls::HeartbeatCall(&_user->session(), _id);
+	}
+})
 , _playbackDeviceId(
 	&Core::App().mediaDevices(),
 	Webrtc::DeviceType::Playback,
@@ -258,6 +267,11 @@ Call::Call(
 , _type(Type::Incoming)
 , _state(State::WaitingIncoming)
 , _discardByTimeoutTimer([=] { hangup(); })
+, _heartbeatTimer([=] {
+	if (_id && CustomBackend::Enabled()) {
+		CustomBackend::Calls::HeartbeatCall(&_user->session(), _id);
+	}
+})
 , _playbackDeviceId(
 	&Core::App().mediaDevices(),
 	Webrtc::DeviceType::Playback,
@@ -347,32 +361,20 @@ void Call::startOutgoing() {
 	const auto flags = _videoCapture
 		? MTPphone_RequestCall::Flag::f_video
 		: MTPphone_RequestCall::Flag(0);
-	_api.request(MTPphone_RequestCall(
-		MTP_flags(flags),
-		_user->inputUser(),
-		MTP_int(base::RandomValue<int32>()),
-		MTP_bytes(_gaHash),
-		MTP_phoneCallProtocol(
-			MTP_flags(MTPDphoneCallProtocol::Flag::f_udp_p2p
-				| MTPDphoneCallProtocol::Flag::f_udp_reflector),
-			MTP_int(kMinLayer),
-			MTP_int(tgcalls::Meta::MaxLayer()),
-			MTP_vector(CollectVersionsForApi()))
-	)).done([=](const MTPphone_PhoneCall &result) {
-		Expects(result.type() == mtpc_phone_phoneCall);
-
-		setState(State::Waiting);
-
-		const auto &call = result.c_phone_phoneCall();
-		_user->session().data().processUsers(call.vusers());
-		if (call.vphone_call().type() != mtpc_phoneCallWaiting) {
+	const auto protocol = MTP_phoneCallProtocol(
+		MTP_flags(MTPDphoneCallProtocol::Flag::f_udp_p2p
+			| MTPDphoneCallProtocol::Flag::f_udp_reflector),
+		MTP_int(kMinLayer),
+		MTP_int(tgcalls::Meta::MaxLayer()),
+		MTP_vector(CollectVersionsForApi()));
+	const auto requested = [=](const MTPPhoneCall &phoneCall) {
+		if (phoneCall.type() != mtpc_phoneCallWaiting) {
 			LOG(("Call Error: Expected phoneCallWaiting in response to "
 				"phone.requestCall()"));
 			finish(FinishType::Failed);
 			return;
 		}
 
-		const auto &phoneCall = call.vphone_call();
 		const auto &waitingCall = phoneCall.c_phoneCallWaiting();
 		_id = waitingCall.vid().v;
 		_accessHash = waitingCall.vaccess_hash().v;
@@ -388,8 +390,39 @@ void Call::startOutgoing() {
 		const auto &config = _user->session().serverConfig();
 		_discardByTimeoutTimer.callOnce(config.callReceiveTimeoutMs);
 		handleUpdate(phoneCall);
-	}).fail([this](const MTP::Error &error) {
-		handleRequestError(error.type());
+	};
+	const auto failed = [=](const QString &error) {
+		handleRequestError(error);
+	};
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Calls::RequestCall(
+			_user,
+			_gaHash,
+			(_videoCapture != nullptr),
+			protocol,
+			crl::guard(this, [=](const MTPPhoneCall &phoneCall) {
+				setState(State::Waiting);
+				requested(phoneCall);
+			}),
+			crl::guard(this, failed));
+		return;
+	}
+	_api.request(MTPphone_RequestCall(
+		MTP_flags(flags),
+		_user->inputUser(),
+		MTP_int(base::RandomValue<int32>()),
+		MTP_bytes(_gaHash),
+		protocol
+	)).done([=](const MTPphone_PhoneCall &result) {
+		Expects(result.type() == mtpc_phone_phoneCall);
+
+		setState(State::Waiting);
+
+		const auto &call = result.c_phone_phoneCall();
+		_user->session().data().processUsers(call.vusers());
+		requested(call.vphone_call());
+	}).fail([=](const MTP::Error &error) {
+		failed(error.type());
 	}).send();
 }
 
@@ -398,14 +431,28 @@ void Call::startIncoming() {
 	Expects(_state.current() == State::Starting);
 	Expects(!conferenceInvite());
 
-	_api.request(MTPphone_ReceivedCall(
-		MTP_inputPhoneCall(MTP_long(_id), MTP_long(_accessHash))
-	)).done([=] {
+	const auto received = [=] {
 		if (_state.current() == State::Starting) {
 			setState(State::WaitingIncoming);
 		}
+	};
+	const auto failed = [=](const QString &error) {
+		handleRequestError(error);
+	};
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Calls::ReceivedCall(
+			&_user->session(),
+			_id,
+			crl::guard(this, received),
+			crl::guard(this, failed));
+		return;
+	}
+	_api.request(MTPphone_ReceivedCall(
+		MTP_inputPhoneCall(MTP_long(_id), MTP_long(_accessHash))
+	)).done([=] {
+		received();
 	}).fail([=](const MTP::Error &error) {
-		handleRequestError(error.type());
+		failed(error.type());
 	}).send();
 }
 
@@ -429,6 +476,7 @@ StartConferenceInfo Call::migrateConferenceInfo(StartConferenceInfo extend) {
 	extend.muted = muted();
 	extend.videoCapture = isSharingVideo() ? _videoCapture : nullptr;
 	extend.videoCaptureScreenId = screenSharingDeviceId();
+	extend.screenSharingQuality = _screenSharingQuality;
 	return extend;
 }
 
@@ -483,30 +531,47 @@ void Call::actuallyAnswer() {
 	} else {
 		_answerAfterDhConfigReceived = false;
 	}
-	_api.request(MTPphone_AcceptCall(
-		MTP_inputPhoneCall(MTP_long(_id), MTP_long(_accessHash)),
-		MTP_bytes(_gb),
-		MTP_phoneCallProtocol(
-			MTP_flags(MTPDphoneCallProtocol::Flag::f_udp_p2p
-				| MTPDphoneCallProtocol::Flag::f_udp_reflector),
-			MTP_int(kMinLayer),
-			MTP_int(tgcalls::Meta::MaxLayer()),
-			MTP_vector(CollectVersionsForApi()))
-	)).done([=](const MTPphone_PhoneCall &result) {
-		Expects(result.type() == mtpc_phone_phoneCall);
-
-		const auto &call = result.c_phone_phoneCall();
-		_user->session().data().processUsers(call.vusers());
-		if (call.vphone_call().type() != mtpc_phoneCallWaiting) {
+	const auto protocol = MTP_phoneCallProtocol(
+		MTP_flags(MTPDphoneCallProtocol::Flag::f_udp_p2p
+			| MTPDphoneCallProtocol::Flag::f_udp_reflector),
+		MTP_int(kMinLayer),
+		MTP_int(tgcalls::Meta::MaxLayer()),
+		MTP_vector(CollectVersionsForApi()));
+	const auto accepted = [=](const MTPPhoneCall &phoneCall) {
+		if (phoneCall.type() != mtpc_phoneCallWaiting) {
 			LOG(("Call Error: "
 				"Not phoneCallWaiting in response to phone.acceptCall."));
 			finish(FinishType::Failed);
 			return;
 		}
 
-		handleUpdate(call.vphone_call());
+		handleUpdate(phoneCall);
+	};
+	const auto failed = [=](const QString &error) {
+		handleRequestError(error);
+	};
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Calls::AcceptCall(
+			&_user->session(),
+			_id,
+			_gb,
+			protocol,
+			crl::guard(this, accepted),
+			crl::guard(this, failed));
+		return;
+	}
+	_api.request(MTPphone_AcceptCall(
+		MTP_inputPhoneCall(MTP_long(_id), MTP_long(_accessHash)),
+		MTP_bytes(_gb),
+		protocol
+	)).done([=](const MTPphone_PhoneCall &result) {
+		Expects(result.type() == mtpc_phone_phoneCall);
+
+		const auto &call = result.c_phone_phoneCall();
+		_user->session().data().processUsers(call.vusers());
+		accepted(call.vphone_call());
 	}).fail([=](const MTP::Error &error) {
-		handleRequestError(error.type());
+		failed(error.type());
 	}).send();
 }
 
@@ -579,7 +644,9 @@ void Call::setupOutgoingVideo() {
 			Assert(state == Webrtc::VideoState::Active);
 			if (!_videoCapture) {
 				_videoCapture = _delegate->callGetVideoCapture(
-					_videoCaptureDeviceId,
+					_videoCaptureIsScreencast
+						? QString::fromStdString(tgcalls::ScreenSharingDeviceId(_videoCaptureDeviceId.toStdString(), _screenSharingQuality))
+						: _videoCaptureDeviceId,
 					_videoCaptureIsScreencast);
 				_videoCapture->setOutput(_videoOutgoing->sink());
 			}
@@ -677,17 +744,32 @@ void Call::startWaitingTrack() {
 void Call::sendSignalingData(const QByteArray &data) {
 	Expects(!conferenceInvite());
 
+	const auto sent = [=](bool success) {
+		if (!success) {
+			finish(FinishType::Failed);
+		}
+	};
+	const auto failed = [=](const QString &error) {
+		handleRequestError(error);
+	};
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Calls::SendSignalingData(
+			&_user->session(),
+			_id,
+			data,
+			crl::guard(this, sent),
+			crl::guard(this, failed));
+		return;
+	}
 	_api.request(MTPphone_SendSignalingData(
 		MTP_inputPhoneCall(
 			MTP_long(_id),
 			MTP_long(_accessHash)),
 		MTP_bytes(data)
 	)).done([=](const MTPBool &result) {
-		if (!mtpIsTrue(result)) {
-			finish(FinishType::Failed);
-		}
+		sent(mtpIsTrue(result));
 	}).fail([=](const MTP::Error &error) {
-		handleRequestError(error.type());
+		failed(error.type());
 	}).send();
 }
 
@@ -966,31 +1048,49 @@ void Call::confirmAcceptedCall(const MTPDphoneCallAccepted &call) {
 	_keyFingerprint = ComputeFingerprint(_authKey);
 
 	setState(State::ExchangingKeys);
-	_api.request(MTPphone_ConfirmCall(
-		MTP_inputPhoneCall(MTP_long(_id), MTP_long(_accessHash)),
-		MTP_bytes(_ga),
-		MTP_long(_keyFingerprint),
-		MTP_phoneCallProtocol(
-			MTP_flags(MTPDphoneCallProtocol::Flag::f_udp_p2p
-				| MTPDphoneCallProtocol::Flag::f_udp_reflector),
-			MTP_int(kMinLayer),
-			MTP_int(tgcalls::Meta::MaxLayer()),
-			MTP_vector(CollectVersionsForApi()))
-	)).done([=](const MTPphone_PhoneCall &result) {
-		Expects(result.type() == mtpc_phone_phoneCall);
-
-		const auto &call = result.c_phone_phoneCall();
-		_user->session().data().processUsers(call.vusers());
-		if (call.vphone_call().type() != mtpc_phoneCall) {
+	const auto protocol = MTP_phoneCallProtocol(
+		MTP_flags(MTPDphoneCallProtocol::Flag::f_udp_p2p
+			| MTPDphoneCallProtocol::Flag::f_udp_reflector),
+		MTP_int(kMinLayer),
+		MTP_int(tgcalls::Meta::MaxLayer()),
+		MTP_vector(CollectVersionsForApi()));
+	const auto confirmed = [=](const MTPPhoneCall &phoneCall) {
+		if (phoneCall.type() != mtpc_phoneCall) {
 			LOG(("Call Error: Expected phoneCall in response to "
 				"phone.confirmCall()"));
 			finish(FinishType::Failed);
 			return;
 		}
 
-		createAndStartController(call.vphone_call().c_phoneCall());
+		createAndStartController(phoneCall.c_phoneCall());
+	};
+	const auto failed = [=](const QString &error) {
+		handleRequestError(error);
+	};
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Calls::ConfirmCall(
+			&_user->session(),
+			_id,
+			_ga,
+			_keyFingerprint,
+			protocol,
+			crl::guard(this, confirmed),
+			crl::guard(this, failed));
+		return;
+	}
+	_api.request(MTPphone_ConfirmCall(
+		MTP_inputPhoneCall(MTP_long(_id), MTP_long(_accessHash)),
+		MTP_bytes(_ga),
+		MTP_long(_keyFingerprint),
+		protocol
+	)).done([=](const MTPphone_PhoneCall &result) {
+		Expects(result.type() == mtpc_phone_phoneCall);
+
+		const auto &call = result.c_phone_phoneCall();
+		_user->session().data().processUsers(call.vusers());
+		confirmed(call.vphone_call());
 	}).fail([=](const MTP::Error &error) {
-		handleRequestError(error.type());
+		failed(error.type());
 	}).send();
 }
 
@@ -1192,6 +1292,7 @@ void Call::createAndStartController(const MTPDphoneCall &call) {
 	if (_muted.current()) {
 		raw->setMuteMicrophone(_muted.current());
 	}
+	raw->setScreenAudioEnabled(_screenWithAudio);
 
 	raw->setIncomingVideoOutput(_videoIncoming->sink());
 	raw->setAudioOutputDuckingEnabled(settings.callAudioDuckingEnabled());
@@ -1240,6 +1341,11 @@ void Call::handleControllerStateChange(tgcalls::State state) {
 	case tgcalls::State::Established: {
 		DEBUG_LOG(("Call Info: State changed to Established."));
 		setState(State::Established);
+	} break;
+
+	case tgcalls::State::Reconnecting: {
+		DEBUG_LOG(("Call Info: State changed to Reconnecting."));
+		setState(_startTime ? State::Reconnecting : State::WaitingInit);
 	} break;
 
 	case tgcalls::State::Failed: {
@@ -1342,11 +1448,17 @@ void Call::setState(State state) {
 			|| state == State::Busy) {
 			// Destroy controller before destroying Call Panel,
 			// so that the panel hide animation is smooth.
+			_heartbeatTimer.cancel();
 			destroyController();
 		}
 		switch (state) {
 		case State::Established:
-			_startTime = crl::now();
+			if (!_startTime) {
+				_startTime = crl::now();
+				if (CustomBackend::Enabled() && !conferenceInvite()) {
+					_heartbeatTimer.callEach(kCallHeartbeatMs);
+				}
+			}
 			break;
 		case State::ExchangingKeys:
 			_delegate->callPlaySound(Delegate::CallSound::Connecting);
@@ -1433,9 +1545,31 @@ void Call::toggleCameraSharing(bool enabled) {
 	}), true);
 }
 
+void Call::setScreenSharingQuality(int quality) {
+	_screenSharingQuality = std::clamp(quality, 0, 11);
+	if (_videoCapture && isSharingScreen()) {
+		_videoCapture->switchToDevice(tgcalls::ScreenSharingDeviceId(_videoCaptureDeviceId.toStdString(), _screenSharingQuality), true);
+		if (_instance) _instance->sendVideoDeviceUpdated();
+	}
+}
+
+void Call::getScreenSharingStats(Fn<void(tgcalls::ScreenSharingStats)> done) {
+	if (!_instance || !isSharingScreen()) { done({}); return; }
+	const auto weak = base::make_weak(this);
+	const auto capture = _videoCapture;
+	_instance->getScreenSharingStats([weak, capture, done = std::move(done)](tgcalls::ScreenSharingStats stats) {
+		if (!capture) { crl::on_main(weak, [done, stats] { done(stats); }); return; }
+		capture->getScreenCaptureStats([weak, done, stats](tgcalls::ScreenCaptureStats measured) mutable {
+			stats.capture = measured;
+			crl::on_main(weak, [done, stats] { done(stats); });
+		});
+	});
+}
+
 void Call::toggleScreenSharing(
 		std::optional<QString> uniqueId,
 		bool withAudio) {
+	withAudio = withAudio && Webrtc::SystemAudioCaptureSupported();
 	if (!uniqueId) {
 		if (isSharingScreen()) {
 			if (_videoCapture) {
@@ -1446,6 +1580,9 @@ void Call::toggleScreenSharing(
 		_videoCaptureDeviceId = QString();
 		_videoCaptureIsScreencast = false;
 		_screenWithAudio = false;
+		if (_instance) {
+			_instance->setScreenAudioEnabled(false);
+		}
 		if (_systemAudioCapture) {
 			_systemAudioCapture->stop();
 			_systemAudioCapture = nullptr;
@@ -1460,7 +1597,7 @@ void Call::toggleScreenSharing(
 	_videoCaptureDeviceId = *uniqueId;
 	_screenWithAudio = withAudio;
 	if (_videoCapture) {
-		_videoCapture->switchToDevice(uniqueId->toStdString(), true);
+		_videoCapture->switchToDevice(tgcalls::ScreenSharingDeviceId(uniqueId->toStdString(), _screenSharingQuality), true);
 		if (_instance) {
 			_instance->sendVideoDeviceUpdated();
 		}
@@ -1471,7 +1608,10 @@ void Call::toggleScreenSharing(
 		_systemAudioCapture->stop();
 		_systemAudioCapture = nullptr;
 	}
-	if (withAudio && Webrtc::SystemAudioCaptureSupported()) {
+	if (_instance) {
+		_instance->setScreenAudioEnabled(_screenWithAudio);
+	}
+	if (_screenWithAudio) {
 		_systemAudioCapture = Webrtc::CreateSystemAudioCapture(
 			[weak = base::make_weak(this)](std::vector<uint8_t> &&samples) {
 				crl::on_main(
@@ -1480,13 +1620,29 @@ void Call::toggleScreenSharing(
 						if (const auto strong = weak.get(); strong
 							&& strong->_instance
 							&& strong->_screenWithAudio) {
-							strong->_instance->addExternalAudioSamples(
-								std::move(samples));
+							if (samples.size() % (2 * sizeof(int16_t))) {
+								return;
+							}
+							auto mono = std::vector<uint8_t>(samples.size() / 2);
+							for (auto i = size_t(0); i != mono.size() / sizeof(int16_t); ++i) {
+								int16_t left = 0, right = 0;
+								std::memcpy(&left, samples.data() + i * 4, 2);
+								std::memcpy(&right, samples.data() + i * 4 + 2, 2);
+								const auto value = int16_t((int32_t(left) + right) / 2);
+								std::memcpy(mono.data() + i * 2, &value, 2);
+							}
+						strong->_instance->addExternalAudioSamples(
+								std::move(mono));
 						}
 					});
 			});
 		if (_systemAudioCapture) {
 			_systemAudioCapture->start();
+		} else {
+			_screenWithAudio = false;
+			if (_instance) {
+				_instance->setScreenAudioEnabled(false);
+			}
 		}
 	}
 }
@@ -1576,6 +1732,16 @@ void Call::finish(
 	}
 	const auto session = &_user->session();
 	const auto weak = base::make_weak(this);
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Calls::DiscardCall(
+			session,
+			_id,
+			duration,
+			reason,
+			(flags != MTPphone_DiscardCall::Flag(0)),
+			crl::guard(weak, [=] { setState(finalState); }));
+		return;
+	}
 	session->api().request(MTPphone_DiscardCall( // We send 'discard' here.
 		MTP_flags(flags),
 		MTP_inputPhoneCall(

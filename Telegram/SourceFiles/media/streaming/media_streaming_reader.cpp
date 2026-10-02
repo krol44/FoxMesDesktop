@@ -1136,6 +1136,14 @@ bool Reader::isRemoteLoader() const {
 	return _loader->baseCacheKey().valid();
 }
 
+bool Reader::mpegTsStream() const {
+	return _loader->mpegTsStream();
+}
+
+std::optional<int64> Reader::mpegTsSegmentOffset(crl::time position) const {
+	return _loader->mpegTsSegmentOffset(position);
+}
+
 std::shared_ptr<Reader::CacheHelper> Reader::InitCacheHelper(
 		Storage::Cache::Key baseKey) {
 	if (!baseKey) {

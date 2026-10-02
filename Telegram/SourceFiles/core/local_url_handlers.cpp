@@ -6,6 +6,9 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "core/local_url_handlers.h"
+#include "custom_backend/native_deep_link.h"
+#include "custom_backend/native_runtime.h"
+#include "custom_backend/topic_channel_links.h"
 
 #include "core/deep_links/deep_links_router.h"
 #include "api/api_confirm_phone.h"
@@ -1758,6 +1761,10 @@ const std::vector<LocalUrlHandler> &LocalUrlHandlers() {
 			ShareUrl
 		},
 		{
+			u"^foxmes_topic/?\\?(.+)$"_q,
+			CustomBackend::TopicChannels::OpenSiteLink
+		},
+		{
 			u"^confirmphone/?\\?(.+)(#|$)"_q,
 			ConfirmPhone
 		},
@@ -1930,6 +1937,18 @@ const std::vector<LocalUrlHandler> &InternalUrlHandlers() {
 QString TryConvertUrlToLocal(QString url) {
 	if (url.size() > 8192) {
 		url = url.mid(0, 8192);
+	}
+	if (CustomBackend::Enabled()) {
+		const auto internal = CustomBackend::DeepLinks::LocalizeInternalLink(
+			url);
+		if (internal != url) {
+			const auto result = TryConvertUrlToLocal(internal);
+			return result.startsWith(u"tg://"_q) ? result : url;
+		}
+		const auto topic = CustomBackend::TopicChannels::LocalSiteLink(url);
+		if (!topic.isEmpty()) {
+			return topic;
+		}
 	}
 
 	using namespace qthelp;
@@ -2172,6 +2191,9 @@ bool InternalPassportOrOAuthLink(const QString &url) {
 }
 
 bool StartUrlRequiresActivate(const QString &url) {
+	if (CustomBackend::Enabled()) {
+		return CustomBackend::DeepLinks::StartUrlRequiresActivate(url);
+	}
 	return Core::App().passcodeLocked() || !InternalPassportLink(url);
 }
 

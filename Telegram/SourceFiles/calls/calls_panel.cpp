@@ -1,3 +1,4 @@
+#include "calls/calls_screen_sharing_quality.h"
 /*
 This file is part of Telegram Desktop,
 the official desktop application for the Telegram messaging service.
@@ -68,6 +69,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "webrtc/webrtc_video_track.h"
 #include "styles/style_calls.h"
 #include "styles/style_chat_helpers.h"
+#include "styles/style_layers.h"
 
 #include <QtWidgets/QApplication>
 #include <QtGui/QWindow>
@@ -394,6 +396,43 @@ void Panel::initWidget() {
 }
 
 void Panel::initControls() {
+	_screenQuality = std::make_unique<Calls::ScreenSharingQuality>(widget(),
+		[=] { return _call && _call->isSharingScreen(); },
+		[=] { return _call ? _call->screenSharingQuality() : 0; },
+		[=](int quality) { if (_call) _call->setScreenSharingQuality(quality); },
+		[=](Fn<void(tgcalls::ScreenSharingStats)> done) {
+			if (_call) _call->getScreenSharingStats(std::move(done)); else done({});
+		},
+		[=](QSize size) {
+			const auto gap = st::callScreenQualityGap;
+			const auto preview = _outgoingVideoBubble ? _outgoingVideoBubble->geometry() : QRect();
+			if (preview.isEmpty()) {
+				return QPoint(
+					(widget()->width() - size.width()) / 2,
+					std::max(gap, _buttonsTop - size.height() - gap));
+			}
+			const auto visible = preview.marginsRemoved(st::boxRoundShadow.extend);
+			const auto bottomY = std::clamp(
+				visible.bottom() + 1 - size.height(),
+				gap, std::max(gap, widget()->height() - size.height() - gap));
+			const auto left = preview.left() - size.width() - gap;
+			if (left >= gap) {
+				return QPoint(left, bottomY);
+			}
+			const auto right = preview.right() + 1 + gap;
+			if (right + size.width() + gap <= widget()->width()) {
+				return QPoint(right, bottomY);
+			}
+			const auto centeredX = std::clamp(
+				preview.center().x() - size.width() / 2,
+				gap, std::max(gap, widget()->width() - size.width() - gap));
+			const auto above = preview.top() - size.height() - gap;
+			if (above >= gap) {
+				return QPoint(centeredX, above);
+			}
+			return QPoint(centeredX, preview.bottom() + 1 + gap);
+		}, uiShow());
+
 	createPinOnTop();
 
 	for (const auto &button : bottomButtons()) {
@@ -512,6 +551,7 @@ void Panel::addPeople() {
 				? call->peekVideoCapture()
 				: nullptr),
 			.videoCaptureScreenId = call->screenSharingDeviceId(),
+			.screenSharingQuality = call->screenSharingQuality(),
 		});
 	};
 	const auto invite = crl::guard(call, [=](
@@ -605,7 +645,7 @@ bool Panel::chooseSourceActiveWithAudio() {
 }
 
 bool Panel::chooseSourceWithAudioSupported() {
-	return Webrtc::LoopbackAudioCaptureSupported();
+	return Webrtc::SystemAudioCaptureSupported();
 }
 
 rpl::lifetime &Panel::chooseSourceInstanceLifetime() {
@@ -1016,6 +1056,7 @@ void Panel::showControls() {
 	Expects(_call != nullptr);
 
 	widget()->showChildren();
+	if (_screenQuality) _screenQuality->refreshVisibility();
 	_pinOnTop->setVisible(!_fullScreenOrMaximized.current());
 	_decline->setVisible(_decline->toggled());
 	_cancel->setVisible(_cancel->toggled());
@@ -1118,7 +1159,7 @@ void Panel::showDevicesMenu(
 }
 
 void Panel::refreshOutgoingPreviewInBody(State state) {
-	const auto inBody = (state != State::Established)
+	const auto inBody = (state != State::Established && state != State::Reconnecting)
 		&& (_call->videoOutgoing()->state() != Webrtc::VideoState::Inactive)
 		&& !_call->videoOutgoing()->frameSize().isEmpty();
 	if (_outgoingPreviewInBody == inBody) {
@@ -1381,6 +1422,7 @@ void Panel::updateControlsGeometry() {
 	} else if (_outgoingVideoBubble) {
 		updateOutgoingVideoBubbleGeometry();
 	}
+	if (_screenQuality) _screenQuality->refreshPosition();
 
 	updateHangupGeometry();
 	updateButtonTooltipGeometry();
@@ -1725,6 +1767,7 @@ void Panel::updateStatusText(State state) {
 		case State::WaitingInit:
 		case State::WaitingInitAck:
 		case State::MigrationHangingUp: return tr::lng_call_status_connecting(tr::now);
+		case State::Reconnecting: return tr::lng_call_status_reconnecting(tr::now);
 		case State::Established: {
 			if (_call) {
 				auto durationMs = _call->getDurationMs();

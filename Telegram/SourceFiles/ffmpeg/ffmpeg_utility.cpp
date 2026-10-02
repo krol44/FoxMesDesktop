@@ -348,6 +348,24 @@ void RestrictToCustomIO(AVFormatContext *format) {
 	av_opt_set(format, "protocol_whitelist", "", 0);
 }
 
+namespace {
+
+[[nodiscard]] const char *DemuxersWithoutMpegTs() {
+	static const auto result = [] {
+		auto list = QByteArray();
+		void *i = nullptr;
+		while (const auto format = av_demuxer_iterate(&i)) {
+			if (qstrcmp(format->name, "mpegts") != 0) {
+				list += (list.isEmpty() ? "" : ",") + QByteArray(format->name);
+			}
+		}
+		return list;
+	}();
+	return result.constData();
+}
+
+} // namespace
+
 FormatPointer MakeFormatPointer(
 		void *opaque,
 		int(*read)(void *opaque, uint8_t *buffer, int bufferSize),
@@ -372,6 +390,18 @@ FormatPointer MakeFormatPointer(
 	result->flags |= AVFMT_FLAG_CUSTOM_IO;
 	RestrictToCustomIO(result);
 
+	const AVInputFormat *input = nullptr;
+	if (settings.mpegTs) {
+		input = av_find_input_format("mpegts");
+		if (!input) {
+			LogError(u"av_find_input_format"_q);
+			avformat_free_context(result);
+			return {};
+		}
+	} else {
+		av_opt_set(result, "format_whitelist", DemuxersWithoutMpegTs(), 0);
+	}
+
 	auto options = (AVDictionary*)nullptr;
 	const auto guard = gsl::finally([&] { av_dict_free(&options); });
 	av_dict_set(&options, "usetoc", "1", 0);
@@ -382,7 +412,7 @@ FormatPointer MakeFormatPointer(
 	const auto error = AvErrorWrap(avformat_open_input(
 		&result,
 		nullptr,
-		nullptr,
+		input,
 		&options));
 	if (error) {
 		// avformat_open_input freed 'result' in case an error happened.

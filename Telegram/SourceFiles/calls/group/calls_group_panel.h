@@ -58,6 +58,7 @@ struct CallBodyLayout;
 } // namespace style
 
 namespace Calls {
+class ScreenSharingQuality;
 struct InviteRequest;
 struct ConferencePanelMigration;
 class Window;
@@ -255,6 +256,7 @@ private:
 	object_ptr<Ui::CallButton> _callShare = { nullptr };
 	object_ptr<Ui::CallButton> _video = { nullptr };
 	object_ptr<Ui::CallButton> _screenShare = { nullptr };
+	std::unique_ptr<Calls::ScreenSharingQuality> _screenQuality;
 	object_ptr<Ui::CallButton> _message = { nullptr };
 	std::unique_ptr<Ui::CallMuteButton> _mute;
 	object_ptr<Ui::CallButton> _hangup;

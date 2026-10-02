@@ -1,0 +1,279 @@
+/*
+This file is part of Telegram Desktop,
+the official desktop application for the Telegram messaging service.
+
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+*/
+#include "custom_backend/native_message_actions_adapter.h"
+
+#include "base/debug_log.h"
+#include "base/weak_ptr.h"
+#include "custom_backend/native_bridge.h"
+#include "custom_backend/native_runtime.h"
+#include "custom_backend/native_topic_channels.h"
+#include "boxes/pin_messages_box.h"
+#include "data/data_peer.h"
+#include "data/data_session.h"
+#include "data/data_thread.h"
+#include "history/history.h"
+#include "history/history_item.h"
+#include "lang/lang_keys.h"
+#include "main/main_session.h"
+#include "ui/boxes/confirm_box.h"
+#include "ui/layers/generic_box.h"
+#include "window/window_session_controller.h"
+
+#include <QtCore/QString>
+
+namespace CustomBackend::Actions {
+namespace {
+
+void ShowToast(Main::Session *session, PeerData *peer, const QString &text) {
+	if (!session || !peer) return;
+	if (const auto controller = session->tryResolveWindow(peer)) {
+		controller->showToast(text);
+	}
+}
+
+} // namespace
+
+bool Forward(
+		not_null<Main::Session*> session,
+		std::vector<not_null<HistoryItem*>> items,
+		const std::vector<not_null<History*>> &to,
+		std::function<void()> done,
+		bool dropAuthor,
+		std::optional<int> videoTimestamp) {
+	const auto bridge = BridgeFor(session);
+	if (!bridge || items.empty() || to.empty()) {
+		if (!to.empty()) {
+			ShowToast(session, to.front()->peer, u"Failed to forward"_q);
+		}
+		return false;
+	}
+	auto ids = std::vector<int32_t>();
+	ids.reserve(items.size());
+	for (const auto &item : items) {
+		const auto id = item->id.bare;
+		if (!item->isRegular() || id <= 0 || id > INT32_MAX) {
+			ShowToast(
+				session,
+				to.front()->peer,
+				u"Can't forward this message yet"_q);
+			return false;
+		}
+		ids.push_back(int32_t(id));
+	}
+	const auto source = items.front()->history();
+	auto threadRootId = MsgId();
+	if (TopicChannels::IsDiscussionPeer(source->peer)) {
+		for (const auto &item : items) {
+			const auto top = item->replyToTop();
+			const auto root = top ? top : item->id;
+			if (threadRootId && threadRootId != root) {
+				ShowToast(
+					session,
+					to.front()->peer,
+					u"Can't forward comments of different posts at once"_q);
+				return false;
+			}
+			threadRootId = root;
+		}
+	}
+	auto left = std::make_shared<int>(int(to.size()));
+	auto failed = std::make_shared<bool>(false);
+	for (const auto &target : to) {
+		bridge->forwardMessages(source, target, ids, threadRootId, dropAuthor, videoTimestamp, [session, peer = target->peer, left, failed, done](
+				QString error) {
+			if (!error.isEmpty()) {
+				*failed = true;
+				LOG(("FoxMes forward failed: %1").arg(error));
+				ShowToast(
+					session,
+					peer.get(),
+					u"Failed to forward: "_q + error);
+			}
+			if (--*left == 0 && done && !*failed) {
+				done();
+			}
+		});
+	}
+	return true;
+}
+
+void ForwardDraft(
+		not_null<Main::Session*> session,
+		Data::ResolvedForwardDraft &&draft,
+		not_null<History*> target,
+		FnMut<void()> &&done) {
+	const auto completion = std::make_shared<FnMut<void()>>(std::move(done));
+	if (!Forward(session, std::move(draft.items), { target }, [completion] {
+		if (*completion) {
+			(*completion)();
+		}
+	}, draft.options != Data::ForwardOptions::PreserveInfo)) {
+		return;
+	}
+}
+
+void ForwardToThreads(
+		not_null<Main::Session*> session,
+		std::vector<not_null<HistoryItem*>> items,
+		const std::vector<not_null<Data::Thread*>> &to,
+		Data::ForwardOptions options,
+		std::optional<int> videoTimestamp,
+		std::function<void()> done) {
+	auto targets = std::vector<not_null<History*>>();
+	targets.reserve(to.size());
+	for (const auto thread : to) {
+		targets.push_back(thread->owningHistory());
+	}
+	if (!Forward(session, std::move(items), targets, std::move(done),
+		options != Data::ForwardOptions::PreserveInfo, videoTimestamp)) {
+		return;
+	}
+}
+
+bool TogglePin(
+		not_null<Window::SessionNavigation*> navigation,
+		FullMsgId itemId,
+		bool pin) {
+	const auto item = navigation->session().data().message(itemId);
+	const auto bridge = BridgeFor(&navigation->session());
+	if (!bridge || !item || !item->isRegular()) {
+		return false;
+	}
+	const auto session = &navigation->session();
+	const auto history = item->history();
+	const auto messageId = itemId.msg;
+	const auto finish = [=](QString error) mutable {
+		if (!error.isEmpty()) {
+			ShowToast(
+				session,
+				history->peer,
+				u"Failed to update pin: "_q + error);
+		}
+	};
+	if (pin) {
+		navigation->parentController()->show(
+			Box(PinMessageBox, item),
+			Ui::LayerOption::CloseOther);
+		return true;
+	}
+	navigation->parentController()->show(
+		Ui::MakeConfirmBox({
+			.text = tr::lng_pinned_unpin_sure(),
+			.confirmed = [=](Fn<void()> &&close) {
+				close();
+				bridge->unpinMessage(history, messageId, finish);
+			},
+			.confirmText = tr::lng_pinned_unpin(),
+		}),
+		Ui::LayerOption::CloseOther);
+	return true;
+}
+
+void PinFromBox(
+		not_null<Ui::GenericBox*> box,
+		not_null<HistoryItem*> item,
+		bool forEveryone) {
+	const auto session = &item->history()->session();
+	const auto bridge = BridgeFor(session);
+	const auto history = item->history();
+	if (!bridge || !item->isRegular()) {
+		ShowToast(session, history->peer, u"Can't pin this message yet"_q);
+		box->closeBox();
+		return;
+	}
+	const auto weak = base::make_weak(box.get());
+	bridge->pinMessage(history, item->id, forEveryone, [=](QString error) {
+		if (!error.isEmpty()) {
+			ShowToast(
+				session,
+				history->peer,
+				u"Failed to pin: "_q + error);
+		}
+		if (const auto strong = weak.get()) {
+			strong->closeBox();
+		}
+	});
+}
+
+void UnpinMessages(
+		not_null<Window::SessionNavigation*> navigation,
+		std::vector<FullMsgId> items,
+		std::function<void()> onConfirmed) {
+	const auto session = &navigation->session();
+	const auto bridge = BridgeFor(session);
+	if (!bridge || items.empty()) {
+		return;
+	}
+	const auto count = int(items.size());
+	const auto confirmed = crl::guard(session, [=](Fn<void()> &&close) {
+		close();
+		for (const auto &itemId : items) {
+			const auto item = session->data().message(itemId);
+			if (!item || !item->isPinned()) {
+				continue;
+			}
+			const auto history = item->history();
+			bridge->unpinMessage(history, itemId.msg, [=](QString error) {
+				if (!error.isEmpty()) {
+					ShowToast(
+						session,
+						history->peer,
+						u"Failed to unpin: "_q + error);
+				}
+			});
+		}
+		if (onConfirmed) {
+			onConfirmed();
+		}
+	});
+	navigation->parentController()->show(
+		Ui::MakeConfirmBox({
+			.text = ((count > 1)
+				? tr::lng_pinned_unpin_many_sure(tr::now, lt_count, count)
+				: tr::lng_pinned_unpin_sure(tr::now)),
+			.confirmed = confirmed,
+			.confirmText = tr::lng_pinned_unpin(),
+		}),
+		Ui::LayerOption::CloseOther);
+}
+
+void UnpinAll(
+		not_null<Window::SessionNavigation*> navigation,
+		not_null<Data::Thread*> thread) {
+	const auto session = &navigation->session();
+	const auto bridge = BridgeFor(session);
+	if (!bridge) {
+		return;
+	}
+	const auto weak = base::make_weak(thread);
+	const auto confirmed = crl::guard(navigation, [=](Fn<void()> &&close) {
+		close();
+		const auto strong = weak.get();
+		if (!strong) {
+			return;
+		}
+		const auto history = strong->owningHistory();
+		bridge->unpinAllMessages(history, [=](QString error) {
+			if (!error.isEmpty()) {
+				ShowToast(
+					session,
+					history->peer,
+					u"Failed to unpin: "_q + error);
+			}
+		});
+	});
+	navigation->parentController()->show(
+		Ui::MakeConfirmBox({
+			.text = tr::lng_pinned_unpin_all_sure(),
+			.confirmed = confirmed,
+			.confirmText = tr::lng_pinned_unpin(),
+		}),
+		Ui::LayerOption::CloseOther);
+}
+
+}

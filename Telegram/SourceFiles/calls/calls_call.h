@@ -28,6 +28,7 @@ class Track;
 namespace tgcalls {
 class Instance;
 class VideoCaptureInterface;
+struct ScreenSharingStats;
 enum class State;
 enum class VideoState;
 enum class AudioState;
@@ -146,6 +147,7 @@ public:
 		WaitingInit,
 		WaitingInitAck,
 		Established,
+		Reconnecting,
 		FailedHangingUp,
 		Failed,
 		HangingUp,
@@ -253,6 +255,9 @@ public:
 	[[nodiscard]] QString cameraSharingDeviceId() const;
 	[[nodiscard]] QString screenSharingDeviceId() const;
 	void toggleCameraSharing(bool enabled);
+	void setScreenSharingQuality(int quality);
+	[[nodiscard]] int screenSharingQuality() const { return _screenSharingQuality; }
+	void getScreenSharingStats(Fn<void(tgcalls::ScreenSharingStats)> done);
 	void toggleScreenSharing(
 		std::optional<QString> uniqueId,
 		bool withAudio = false);
@@ -345,6 +350,7 @@ private:
 	crl::time _startTime = 0;
 	base::DelayedCallTimer _finishByTimeoutTimer;
 	base::Timer _discardByTimeoutTimer;
+	base::Timer _heartbeatTimer;
 
 	Fn<void(Webrtc::DeviceResolvedId)> _setDeviceIdCallback;
 	Webrtc::DeviceResolver _playbackDeviceId;
@@ -372,6 +378,7 @@ private:
 	std::shared_ptr<tgcalls::VideoCaptureInterface> _videoCapture;
 	QString _videoCaptureDeviceId;
 	bool _videoCaptureIsScreencast = false;
+	int _screenSharingQuality = 0;
 	bool _screenWithAudio = false;
 	std::unique_ptr<Webrtc::SystemAudioCapture> _systemAudioCapture;
 	const std::unique_ptr<Webrtc::VideoTrack> _videoIncoming;

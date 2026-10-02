@@ -69,6 +69,8 @@ public:
 	[[nodiscard]] auto resolve(DocumentId documentId)
 		-> rpl::producer<not_null<DocumentData*>, rpl::empty_error>;
 
+	void resolveLocalDocument(not_null<DocumentData*> document);
+
 	[[nodiscard]] std::unique_ptr<Ui::CustomEmoji::Loader> createLoader(
 		not_null<DocumentData*> document,
 		SizeTag tag,

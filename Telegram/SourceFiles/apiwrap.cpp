@@ -7,6 +7,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "apiwrap.h"
 
+#include "custom_backend/native_bridge.h"
+#include "custom_backend/native_delete_adapter.h"
+#include "custom_backend/native_gifs_adapter.h"
+#include "custom_backend/native_stickers_adapter.h"
+#include "custom_backend/native_message_actions_adapter.h"
+#include "custom_backend/native_message_data_adapter.h"
+#include "custom_backend/native_shared_media_adapter.h"
+#include "custom_backend/topic_channel_links.h"
+#include "custom_backend/native_send_files_adapter.h"
+#include "custom_backend/native_runtime.h"
+
 #include "api/api_authorizations.h"
 #include "api/api_attached_stickers.h"
 #include "api/api_blocked_peers.h"
@@ -405,6 +416,12 @@ void ApiWrap::checkFilterInvite(
 }
 
 void ApiWrap::savePinnedOrder(Data::Folder *folder) {
+	if (CustomBackend::Enabled()) {
+		if (const auto bridge = CustomBackend::BridgeFor(_session)) {
+			bridge->savePinnedOrder(folder);
+		}
+		return;
+	}
 	const auto &order = _session->data().pinnedChatsOrder(folder);
 	const auto input = [](Dialogs::Key key) {
 		if (const auto history = key.history()) {
@@ -481,6 +498,12 @@ void ApiWrap::toggleHistoryArchived(
 		not_null<History*> history,
 		bool archived,
 		Fn<void()> callback) {
+	if (CustomBackend::Enabled()) {
+		if (const auto bridge = CustomBackend::BridgeFor(_session)) {
+			bridge->setChatArchived(history, archived, std::move(callback));
+		}
+		return;
+	}
 	if (const auto already = _historyArchivedRequests.take(history)) {
 		request(already->first).cancel();
 	}
@@ -639,6 +662,14 @@ void ApiWrap::requestMessageData(
 		PeerData *peer,
 		MsgId msgId,
 		Fn<void()> done) {
+	if (CustomBackend::Enabled()) {
+		CustomBackend::RequestMessageData(
+			_session,
+			peer,
+			msgId,
+			std::move(done));
+		return;
+	}
 	auto &requests = (peer && peer->isChannel())
 		? _channelMessageDataRequests[peer->asChannel()][msgId]
 		: _messageDataRequests[msgId];
@@ -775,6 +806,10 @@ QString ApiWrap::exportDirectMessageLink(
 		std::optional<TimeId> videoTimestamp) {
 	Expects(item->history()->peer->isChannel());
 
+	if (const auto site = CustomBackend::TopicChannels::SiteLink(item);
+		!site.isEmpty()) {
+		return site;
+	}
 	const auto itemId = item->fullId();
 	const auto channel = item->history()->peer->asChannel();
 	const auto fallback = [&] {
@@ -883,6 +918,14 @@ QString ApiWrap::exportDirectStoryLink(not_null<Data::Story*> story) {
 }
 
 void ApiWrap::requestContacts() {
+	if (CustomBackend::Enabled()) {
+		if (const auto bridge = CustomBackend::BridgeFor(_session)) {
+			bridge->loadContacts();
+		} else {
+			_session->data().contactsLoaded() = true;
+		}
+		return;
+	}
 	if (_session->data().contactsLoaded().current() || _contactsRequestId) {
 		return;
 	}
@@ -911,6 +954,17 @@ void ApiWrap::requestContacts() {
 }
 
 void ApiWrap::requestDialogs(Data::Folder *folder) {
+	if (CustomBackend::Enabled()) {
+		if (!folder) {
+			const auto bridge = CustomBackend::BridgeFor(_session);
+			if (bridge && !_session->data().chatsList()->loaded()) {
+				bridge->reloadChats();
+			}
+		} else {
+			_session->data().chatsListDone(folder);
+		}
+		return;
+	}
 	if (folder && !_foldersLoadState.contains(folder)) {
 		_foldersLoadState.emplace(folder, DialogsLoadState());
 	}
@@ -1450,6 +1504,10 @@ void ApiWrap::markContentsRead(
 			markedIds.push_back(MTP_int(item->id));
 		}
 	}
+	if (CustomBackend::Enabled()) {
+		CustomBackend::MarkEphemeralViewed(items);
+		return;
+	}
 	if (!markedIds.isEmpty()) {
 		request(MTPmessages_ReadMessageContents(
 			MTP_vector<MTPint>(markedIds)
@@ -1467,6 +1525,9 @@ void ApiWrap::markContentsRead(
 
 void ApiWrap::markContentsRead(not_null<HistoryItem*> item) {
 	if (!item->markContentsRead(true) || !item->isRegular()) {
+		return;
+	} else if (CustomBackend::Enabled()) {
+		CustomBackend::MarkEphemeralViewed({ item });
 		return;
 	}
 	const auto ids = MTP_vector<MTPint>(1, MTP_int(item->id));
@@ -1967,6 +2028,9 @@ void ApiWrap::leaveChannel(not_null<ChannelData*> channel) {
 }
 
 void ApiWrap::requestNotifySettings(const MTPInputNotifyPeer &peer) {
+	if (CustomBackend::Enabled()) {
+		return;
+	}
 	const auto bad = peer.match([](const MTPDinputNotifyUsers &) {
 		return false;
 	}, [](const MTPDinputNotifyChats &) {
@@ -2093,6 +2157,15 @@ void ApiWrap::updateNotifySettingsDelayed(Data::DefaultNotify type) {
 }
 
 void ApiWrap::sendNotifySettingsUpdates() {
+	if (CustomBackend::Enabled()) {
+		_updateNotifyQueueLifetime.destroy();
+		CustomBackend::SaveNotifySettingsUpdates(
+			_session,
+			base::take(_updateNotifyTopics),
+			base::take(_updateNotifyPeers),
+			base::take(_updateNotifyDefaults));
+		return;
+	}
 	_updateNotifyQueueLifetime.destroy();
 	for (const auto &topic : base::take(_updateNotifyTopics)) {
 		request(MTPaccount_UpdateNotifySettings(
@@ -2122,6 +2195,12 @@ void ApiWrap::sendNotifySettingsUpdates() {
 }
 
 void ApiWrap::saveDraftToCloudDelayed(not_null<Data::Thread*> thread) {
+	if (CustomBackend::Enabled()) {
+		if (const auto bridge = CustomBackend::BridgeFor(_session)) {
+			bridge->saveDraftToCloudDelayed(thread);
+		}
+		return;
+	}
 	if (ShouldSkipPlainDraftCloudSave(_session, thread)) {
 		return;
 	}
@@ -2206,6 +2285,10 @@ void ApiWrap::deleteHistory(
 		not_null<PeerData*> peer,
 		bool justClear,
 		bool revoke) {
+	if (CustomBackend::Enabled()) {
+		CustomBackend::DeleteHistory(peer, justClear, revoke);
+		return;
+	}
 	deleteHistory(peer, justClear, revoke, 0);
 }
 
@@ -3173,6 +3256,10 @@ void ApiWrap::requestStickers(TimeId now) {
 		|| _stickersUpdateRequest) {
 		return;
 	}
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Stickers::Request(_session);
+		return;
+	}
 	const auto done = [=](const MTPmessages_AllStickers &result) {
 		_session->data().stickers().setLastUpdate(crl::now());
 		_stickersUpdateRequest = 0;
@@ -3372,6 +3459,10 @@ void ApiWrap::requestFeaturedEmoji(TimeId now) {
 void ApiWrap::requestSavedGifs(TimeId now) {
 	if (!_session->data().stickers().savedGifsUpdateNeeded(now)
 		|| _savedGifsUpdateRequest) {
+		return;
+	}
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Gifs::Request(_session);
 		return;
 	}
 	_savedGifsUpdateRequest = request(MTPmessages_GetSavedGifs(
@@ -3601,6 +3692,12 @@ void ApiWrap::requestHistory(
 		not_null<History*> history,
 		MsgId messageId,
 		SliceType slice) {
+	if (CustomBackend::Enabled()) {
+		if (const auto bridge = CustomBackend::BridgeFor(_session)) {
+			bridge->loadHistory(history, messageId.bare, slice);
+		}
+		return;
+	}
 	const auto peer = history->peer;
 	const auto key = HistoryRequest{
 		peer,
@@ -3653,6 +3750,10 @@ void ApiWrap::requestSharedMedia(
 		SharedMediaType type,
 		MsgId messageId,
 		SliceType slice) {
+	if (CustomBackend::Enabled()) {
+		CustomBackend::RequestSharedMedia(_session, peer, type, messageId, slice);
+		return;
+	}
 	const auto key = SharedMediaRequest{
 		peer,
 		topicRootId,
@@ -3745,6 +3846,14 @@ mtpRequestId ApiWrap::requestGlobalMedia(
 		Data::MessagePosition offsetPosition,
 		bool onlyForwardable,
 		Fn<void(Api::GlobalMediaResult)> done) {
+	if (CustomBackend::Enabled()) {
+		return CustomBackend::SharedMedia::RequestGlobal(
+			_session,
+			type,
+			query,
+			offsetPosition,
+			std::move(done));
+	}
 	auto prepared = Api::PrepareGlobalMediaRequest(
 		_session,
 		offsetRate,
@@ -3853,6 +3962,15 @@ void ApiWrap::forwardMessages(
 		if (successCallback) {
 			successCallback();
 		}
+		return;
+	}
+
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Actions::ForwardDraft(
+			_session,
+			std::move(draft),
+			action.history,
+			std::move(successCallback));
 		return;
 	}
 
@@ -4187,6 +4305,11 @@ void ApiWrap::sendVoiceMessage(
 		crl::time duration,
 		bool video,
 		const SendAction &action) {
+	if (CustomBackend::Enabled()) {
+		sendAction(action);
+		CustomBackend::SendVoiceMessage(result, waveform, duration, video, action);
+		return;
+	}
 	const auto caption = TextWithTags();
 	const auto to = FileLoadTaskOptions(action);
 	_fileLoader->addTask(
@@ -4263,6 +4386,12 @@ void ApiWrap::sendFiles(
 		SendMediaType type,
 		std::shared_ptr<SendingAlbum> album,
 		SendAction action) {
+	if (CustomBackend::Enabled()) {
+		Q_UNUSED(album);
+		sendAction(action);
+		CustomBackend::SendFiles(std::move(list), type, std::move(action));
+		return;
+	}
 	const auto &ephemeral = _session->ephemeralMessages();
 	if (album && !ephemeral.isEphemeralBotReply(action.replyTo.messageId)) {
 		const auto peer = action.history->peer;
@@ -4345,6 +4474,11 @@ void ApiWrap::sendFile(
 		const QByteArray &fileContent,
 		SendMediaType type,
 		const SendAction &action) {
+	if (CustomBackend::Enabled()) {
+		sendAction(action);
+		CustomBackend::SendFileContent(fileContent, type, action);
+		return;
+	}
 	const auto to = FileLoadTaskOptions(action);
 	auto caption = TextWithTags();
 	const auto spoiler = false;
@@ -4401,6 +4535,12 @@ void ApiWrap::sendUploadedDocument(
 void ApiWrap::cancelLocalItem(not_null<HistoryItem*> item) {
 	Expects(item->isSending());
 
+	if (CustomBackend::Enabled()) {
+		if (const auto bridge = CustomBackend::BridgeFor(_session)) {
+			bridge->cancelSend(item);
+		}
+		return;
+	}
 	if (const auto groupId = item->groupId()) {
 		sendAlbumWithCancelled(item, groupId);
 	}
@@ -4681,6 +4821,16 @@ void ApiWrap::sendRichMessage(
 void ApiWrap::sendMessage(
 		MessageToSend &&message,
 		std::optional<MsgId> localMessageId) {
+	if (CustomBackend::Enabled()) {
+		auto action = message.action;
+		action.generateLocal = true;
+		sendAction(action);
+		if (const auto bridge = CustomBackend::BridgeFor(_session)) {
+			bridge->sendMessage(std::move(message), localMessageId);
+		}
+		finishForwarding(action);
+		return;
+	}
 	const auto history = message.action.history;
 	const auto peer = history->peer;
 	const auto &textWithTags = message.textWithTags;

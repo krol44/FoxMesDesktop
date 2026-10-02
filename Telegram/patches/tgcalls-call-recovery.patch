@@ -1,0 +1,139 @@
+--- a/tgcalls/NetworkManager.cpp
++++ b/tgcalls/NetworkManager.cpp
+@@ -293,7 +293,7 @@
+         }
+         
+         int64_t currentTimestamp = rtc::TimeMillis();
+-        const int64_t maxTimeout = 20000;
++        const int64_t maxTimeout = 90000;
+         
+         if (strong->_lastNetworkActivityMs + maxTimeout < currentTimestamp) {
+             NetworkManager::State emitState;
+--- a/tgcalls/v2/InstanceNetworking.h
++++ b/tgcalls/v2/InstanceNetworking.h
+@@ -158,6 +158,8 @@
+     virtual void start() = 0;
+     virtual void stop() = 0;
+ 
++    // Returns false for transports without ICE (for example direct channels).
++    virtual bool restartIce() { return false; }
+     virtual PeerIceParameters getLocalIceParameters() = 0;
+     virtual std::unique_ptr<rtc::SSLFingerprint> getLocalFingerprint() = 0;
+     virtual void setRemoteParams(PeerIceParameters const &remoteIceParameters, rtc::SSLFingerprint *fingerprint, std::string const &sslSetup) = 0;
+--- a/tgcalls/v2/InstanceV2Impl.cpp
++++ b/tgcalls/v2/InstanceV2Impl.cpp
+@@ -1734,6 +1734,15 @@
+                 sslSetup = initialSetup->fingerprints[0].setup;
+             }
+ 
++            const bool remoteIceRestart = _handshakeCompleted
++                && !_remoteIceUfrag.empty() && _remoteIceUfrag != initialSetup->ufrag;
++            _remoteIceUfrag = initialSetup->ufrag;
++            if (remoteIceRestart && !_encryptionKey.isOutgoing) {
++                _networking->perform([](InstanceNetworking *networking) {
++                    networking->restartIce();
++                });
++            }
++
+             _networking->perform([threads = _threads, remoteIceParameters = std::move(remoteIceParameters), fingerprint = std::move(fingerprint), sslSetup = std::move(sslSetup)](InstanceNetworking *networking) {
+                 networking->setRemoteParams(remoteIceParameters, fingerprint.get(), sslSetup);
+             });
+@@ -1879,6 +1888,33 @@
+         }
+ 
+         _networkState = state;
++        if (state.isReadyToSendData) {
++            ++_iceRecoveryGeneration;
++            _iceRecoveryScheduled = false;
++        } else if (_hasBeenConnected && !state.isFailed && !_iceRecoveryScheduled) {
++            _iceRecoveryScheduled = true;
++            const auto generation = _iceRecoveryGeneration;
++            const auto weak = std::weak_ptr<InstanceV2ImplInternal>(shared_from_this());
++            _threads->getMediaThread()->PostDelayedTask([weak, generation]() {
++                const auto strong = weak.lock();
++                if (!strong || strong->_iceRecoveryGeneration != generation
++                    || !strong->_networkState
++                    || strong->_networkState->isReadyToSendData
++                    || strong->_networkState->isFailed) {
++                    return;
++                }
++                strong->_networking->perform([weak, threads = strong->_threads](InstanceNetworking *networking) {
++                    if (!networking->restartIce()) {
++                        return;
++                    }
++                    threads->getMediaThread()->PostTask([weak]() {
++                        if (const auto strong = weak.lock()) {
++                            strong->sendInitialSetup();
++                        }
++                    });
++                });
++            }, webrtc::TimeDelta::Millis(10000));
++        }
+         _stateUpdated(mappedState);
+     }
+ 
+@@ -2272,6 +2308,9 @@
+ 
+     int64_t _startTimestamp = 0;
+     bool _hasBeenConnected = false;
++    bool _iceRecoveryScheduled = false;
++    uint64_t _iceRecoveryGeneration = 0;
++    std::string _remoteIceUfrag;
+ 
+     absl::optional<NetworkStateLogRecord> _currentNetworkStateLogRecord;
+     std::vector<StateLogRecord<NetworkStateLogRecord>> _networkStateLogRecords;
+--- a/tgcalls/v2/InstanceV2ReferenceImpl.cpp
++++ b/tgcalls/v2/InstanceV2ReferenceImpl.cpp
+@@ -842,7 +842,7 @@
+             }
+ 
+             int64_t currentTimestamp = rtc::TimeMillis();
+-            const int64_t maxTimeout = 20000;
++            const int64_t maxTimeout = 90000;
+ 
+             if (!strong->_isConnected && !strong->_isFailed && strong->_lastDisconnectedTimestamp + maxTimeout < currentTimestamp) {
+                 RTC_LOG(LS_INFO) << "InstanceV2ReferenceImpl: connection timeout " << (currentTimestamp - strong->_lastDisconnectedTimestamp) << " ms";
+--- a/tgcalls/v2/NativeNetworkingImpl.h
++++ b/tgcalls/v2/NativeNetworkingImpl.h
+@@ -62,6 +62,7 @@
+     virtual void start() override;
+     virtual void stop() override;
+ 
++    virtual bool restartIce() override;
+     virtual PeerIceParameters getLocalIceParameters() override;
+     virtual std::unique_ptr<rtc::SSLFingerprint> getLocalFingerprint() override;
+     virtual void setRemoteParams(PeerIceParameters const &remoteIceParameters, rtc::SSLFingerprint *fingerprint, std::string const &sslSetup) override;
+--- a/tgcalls/v2/NativeNetworkingImpl.cpp
++++ b/tgcalls/v2/NativeNetworkingImpl.cpp
+@@ -767,6 +767,22 @@
+     _localCertificate = rtc::RTCCertificateGenerator::GenerateCertificate(rtc::KeyParams(rtc::KT_ECDSA), absl::nullopt);
+ }
+ 
++bool NativeNetworkingImpl::restartIce() {
++    assert(_threads->getNetworkThread()->IsCurrent());
++    if (!_transportChannel) {
++        return false;
++    }
++    _localIceParameters = PeerIceParameters(
++        rtc::CreateRandomString(cricket::ICE_UFRAG_LENGTH),
++        rtc::CreateRandomString(cricket::ICE_PWD_LENGTH), true);
++    _transportChannel->SetIceParameters(cricket::IceParameters(
++        _localIceParameters.ufrag,
++        _localIceParameters.pwd,
++        _localIceParameters.supportsRenomination));
++    _transportChannel->MaybeStartGathering();
++    return true;
++}
++
+ PeerIceParameters NativeNetworkingImpl::getLocalIceParameters() {
+     return _localIceParameters;
+ }
+@@ -845,7 +861,7 @@
+         }
+ 
+         int64_t currentTimestamp = rtc::TimeMillis();
+-        const int64_t maxTimeout = 20000;
++        const int64_t maxTimeout = 90000;
+ 
+         if (!strong->_isConnected && strong->_lastDisconnectedTimestamp + maxTimeout < currentTimestamp) {
+             RTC_LOG(LS_INFO) << "NativeNetworkingImpl timeout " << (currentTimestamp - strong->_lastDisconnectedTimestamp) << " ms";

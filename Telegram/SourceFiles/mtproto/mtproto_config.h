@@ -29,7 +29,7 @@ struct ConfigFields {
 	int revokePrivateTimeLimit = 172800;
 	bool revokePrivateInbox = false;
 	int stickersRecentLimit = 30;
-	QString internalLinksDomain = u"https://t.me/"_q;
+	QString internalLinksDomain = u"https://foxtail.ing/@"_q;
 	int channelsReadMediaPeriod = 86400 * 7;
 	int callReceiveTimeoutMs = 20000;
 	int callRingTimeoutMs = 90000;
@@ -92,4 +92,4 @@ private:
 
 };
 
-} // namespace MTP
+}

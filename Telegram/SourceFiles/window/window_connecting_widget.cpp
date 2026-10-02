@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/window_connecting_widget.h"
+#include "custom_backend/native_runtime.h"
 
 #include "ui/widgets/buttons.h"
 #include "ui/effects/radial_animation.h"
@@ -251,6 +252,13 @@ ConnectionState::ConnectionState(
 	) | rpl::on_next([=] {
 		refreshState();
 	}, _lifetime);
+
+	if (CustomBackend::Enabled()) {
+		CustomBackend::LiveUpdatesStatusValue(_account)
+		| rpl::on_next([=](const CustomBackend::LiveUpdatesStatus &) {
+			refreshState();
+		}, _lifetime);
+	}
 }
 
 void ConnectionState::createWidget() {
@@ -312,6 +320,50 @@ void ConnectionState::refreshState() {
 		const auto under = _widget && _widget->isOver();
 		const auto ready = !Core::UpdaterDisabled()
 			&& (Checker().state() == Checker::State::Ready);
+		if (CustomBackend::Enabled()) {
+			const auto status = CustomBackend::LiveUpdatesStatusFor(_account);
+			switch (status.state) {
+			case CustomBackend::LiveUpdatesState::Connected:
+				return {
+					State::Type::Connected,
+					false,
+					exposed,
+					under,
+					ready,
+				};
+			case CustomBackend::LiveUpdatesState::Connecting:
+				return {
+					State::Type::Connecting,
+					false,
+					exposed,
+					under,
+					ready,
+				};
+			case CustomBackend::LiveUpdatesState::Waiting: {
+				const auto remaining = std::max<crl::time>(
+					1,
+					status.retryAt - crl::now());
+				if (remaining <= kMinimalWaitingStateDuration) {
+					return {
+						State::Type::Connecting,
+						false,
+						exposed,
+						under,
+						ready,
+					};
+				}
+				return {
+					State::Type::Waiting,
+					false,
+					exposed,
+					under,
+					ready,
+					int(remaining / 1000) + 1,
+				};
+			}
+			}
+			Unexpected("Unknown live updates connection state.");
+		}
 		const auto state = _account->mtp().dcstate();
 		const auto proxy = Core::App().settings().proxy().isEnabled();
 		if (state == MTP::ConnectingState
@@ -328,6 +380,10 @@ void ConnectionState::refreshState() {
 		}
 		return { State::Type::Connected, proxy, exposed, under, ready };
 	}();
+	if (CustomBackend::Enabled()
+		&& state.type == State::Type::Connected) {
+		_connectingStartedAt = 0;
+	}
 	if (state.exposed && state.waitTillRetry > 0) {
 		_refreshTimer.callOnce(kRefreshTimeout);
 	}
@@ -505,10 +561,13 @@ ConnectionState::Widget::Widget(
 , _currentLayout(layout) {
 	_proxyIcon = Ui::CreateChild<ProxyIcon>(this);
 	_progress = Ui::CreateChild<Progress>(this);
+	_proxyIcon->setVisible(!CustomBackend::Enabled());
 
-	addClickHandler([=] {
-		Ui::show(ProxiesBoxController::CreateOwningBox(account));
-	});
+	if (!CustomBackend::Enabled()) {
+		addClickHandler([=] {
+			Ui::show(ProxiesBoxController::CreateOwningBox(account));
+		});
+	}
 
 	_progress->animationStepRequests(
 	) | rpl::on_next([=] {
@@ -640,7 +699,11 @@ void ConnectionState::Widget::refreshRetryLink(bool hasRetry) {
 			tr::lng_reconnecting_try_now(tr::now),
 			st::connectingRetryLink);
 		_retry->addClickHandler([=] {
-			_account->mtp().restart();
+			if (CustomBackend::Enabled()) {
+				CustomBackend::RestartLiveUpdates(_account);
+			} else {
+				_account->mtp().restart();
+			}
 		});
 		updateRetryGeometry();
 	} else if (!hasRetry) {

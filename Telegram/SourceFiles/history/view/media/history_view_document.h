@@ -184,6 +184,8 @@ private:
 
 	mutable float64 _voiceHoverProgress = -1;
 
+	mutable crl::time _statusDuration = -1;
+
 	bool _transcribedRound = false;
 
 };

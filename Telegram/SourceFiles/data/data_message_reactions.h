@@ -23,6 +23,25 @@ namespace Ui::Text {
 class CustomEmoji;
 } // namespace Ui::Text
 
+class HistoryItem;
+
+namespace Main {
+class Session;
+}
+
+namespace Data {
+class Reactions;
+}
+
+namespace CustomBackend::Reactions {
+void ApplyDefault(
+	not_null<Main::Session*> session,
+	not_null<Data::Reactions*> reactions);
+void SendChosen(
+	not_null<Main::Session*> session,
+	not_null<::HistoryItem*> item);
+}
+
 namespace Data {
 
 class SavedSublist;
@@ -372,6 +391,9 @@ private:
 
 	rpl::lifetime _lifetime;
 
+	friend void CustomBackend::Reactions::ApplyDefault(
+		not_null<Main::Session*> session,
+		not_null<Data::Reactions*> reactions);
 };
 
 struct RecentReaction {

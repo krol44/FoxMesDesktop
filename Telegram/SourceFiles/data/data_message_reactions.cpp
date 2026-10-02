@@ -6,6 +6,9 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_message_reactions.h"
+#include "custom_backend/native_runtime.h"
+#include "custom_backend/native_bridge.h"
+#include "custom_backend/native_reactions_adapter.h"
 
 #include "api/api_global_privacy.h"
 #include "calls/group/calls_group_call.h"
@@ -203,6 +206,7 @@ PossibleItemReactionsRef LookupPossibleReactions(
 	const auto &allowed = PeerAllowedReactions(peer);
 	const auto limit = UniqueReactionsLimit(peer);
 	const auto premiumPossible = session->premiumPossible();
+	const auto customPossible = premiumPossible || CustomBackend::Enabled();
 	const auto limited = (all.size() >= limit) && [&] {
 		const auto my = item->chosenReactions();
 		if (my.empty()) {
@@ -262,13 +266,14 @@ PossibleItemReactionsRef LookupPossibleReactions(
 		}
 		add([&](const Reaction &reaction) {
 			const auto id = reaction.id;
-			if (id.custom() && !premiumPossible) {
+			if (id.custom() && !customPossible) {
 				return false;
 			} else if ((allowed.type == AllowedReactionsType::Some)
 				&& !ranges::contains(allowed.some, id)) {
 				return false;
 			} else if (id.custom()
-				&& allowed.type == AllowedReactionsType::Default) {
+				&& allowed.type == AllowedReactionsType::Default
+				&& !CustomBackend::Enabled()) {
 				return false;
 			}
 			return true;
@@ -330,10 +335,11 @@ PossibleItemReactionsRef LookupPossibleReactions(
 	const auto &top = reactions->list(Reactions::Type::Top);
 	const auto &recent = reactions->list(Reactions::Type::Recent);
 	const auto premiumPossible = session->premiumPossible();
+	const auto customPossible = premiumPossible || CustomBackend::Enabled();
 	auto added = base::flat_set<ReactionId>();
 	result.recent.reserve(full.size());
 	for (const auto &reaction : ranges::views::concat(top, recent, full)) {
-		if (premiumPossible || !reaction.id.custom()) {
+		if (customPossible || !reaction.id.custom()) {
 			if (added.emplace(reaction.id).second) {
 				result.recent.push_back(&reaction);
 			}
@@ -1016,6 +1022,10 @@ void Reactions::requestRecent() {
 }
 
 void Reactions::requestDefault() {
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Reactions::ApplyDefault(&_owner->session(), this);
+		return;
+	}
 	if (_defaultRequestId) {
 		return;
 	}
@@ -1496,6 +1506,10 @@ std::optional<Reaction> Reactions::parse(const MTPAvailableEffect &entry) {
 }
 
 void Reactions::send(not_null<HistoryItem*> item, bool addToRecent) {
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Reactions::SendChosen(&_owner->session(), item);
+		return;
+	}
 	const auto id = item->fullId();
 	auto &api = _owner->session().api();
 	auto i = _sentRequests.find(id);
@@ -1566,7 +1580,10 @@ Reaction *Reactions::lookupTemporary(const ReactionId &id) {
 		return lookupPaid();
 	} else if (const auto emoji = id.emoji(); !emoji.isEmpty()) {
 		const auto i = ranges::find(_available, id, &Reaction::id);
-		return (i != end(_available)) ? &*i : nullptr;
+		if (i != end(_available)) {
+			return &*i;
+		}
+		return nullptr;
 	} else if (const auto customId = id.custom()) {
 		if (const auto i = _temporary.find(customId); i != end(_temporary)) {
 			return &i->second;

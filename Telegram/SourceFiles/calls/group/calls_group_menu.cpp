@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "calls/group/calls_group_menu.h"
 
+#include "custom_backend/native_runtime.h"
+
 #include "calls/group/calls_group_call.h"
 #include "calls/group/calls_group_settings.h"
 #include "calls/group/calls_group_panel.h"
@@ -511,7 +513,8 @@ void FillMenu(
 	const auto addEditTitle = !conference && call->canManage();
 	const auto addEditRecording = !conference
 		&& call->canManage()
-		&& !real->scheduleDate();
+		&& !real->scheduleDate()
+		&& !CustomBackend::HideGroupExtras;
 	const auto addScreenCast = call->videoIsWorking()
 		&& !real->scheduleDate();
 	if (addEditJoinAs) {

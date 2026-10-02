@@ -7,6 +7,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history.h"
 
+#include "custom_backend/native_chat_state_adapter.h"
+#include "custom_backend/native_runtime.h"
+
 #include "history/view/history_view_element.h"
 #include "history/view/history_view_item_preview.h"
 #include "history/view/history_view_translate_tracker.h"
@@ -1335,6 +1338,9 @@ void History::applyServiceChanges(
 			Data::ChannelAdminChanges(megagroup).remove(uid);
 		}
 	}, [&](const MTPDmessageActionChatEditPhoto &data) {
+		if (CustomBackend::Enabled()) {
+			return;
+		}
 		data.vphoto().match([&](const MTPDphoto &data) {
 			using Flag = MTPDchatPhoto::Flag;
 			const auto photo = owner().processPhoto(data);
@@ -3395,6 +3401,9 @@ bool History::trackUnreadMessages() const {
 }
 
 bool History::shouldBeInChatList() const {
+	if (CustomBackend::Enabled()) {
+		return CustomBackend::ShouldBeInChatList(this);
+	}
 	if (peer->migrateTo() || !folderKnown()) {
 		return false;
 	} else if (const auto community = peer->asChannel()

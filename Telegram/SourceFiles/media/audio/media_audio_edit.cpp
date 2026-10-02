@@ -184,7 +184,9 @@ namespace Media {
 
 	auto result = AudioEditResult();
 	result.content = std::move(outputWrap.content);
-	result.waveform = audioCountWaveform(Core::FileLocation(), result.content);
+	result.waveform = audioCountWaveform(
+		Core::FileLocation(),
+		result.content).waveform;
 	result.duration = durationPts
 		? PtsToTimeCeil(durationPts, outStream->time_base)
 		: (till - from);
@@ -397,7 +399,9 @@ namespace Media {
 
 	auto result = AudioEditResult();
 	result.content = std::move(outputWrap.content);
-	result.waveform = audioCountWaveform(Core::FileLocation(), result.content);
+	result.waveform = audioCountWaveform(
+		Core::FileLocation(),
+		result.content).waveform;
 	result.duration = durationPts
 		? PtsToTimeCeil(durationPts, outStream->time_base)
 		: 0;

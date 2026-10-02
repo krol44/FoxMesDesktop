@@ -6,6 +6,10 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_histories.h"
+#include "custom_backend/native_runtime.h"
+#include "custom_backend/native_bridge.h"
+#include "custom_backend/native_delete_adapter.h"
+#include "custom_backend/native_chat_state_adapter.h"
 
 #include "api/api_text_entities.h"
 #include "data/business/data_shortcut_messages.h"
@@ -380,6 +384,9 @@ void Histories::requestDialogEntry(not_null<Data::Folder*> folder) {
 void Histories::requestDialogEntry(
 		not_null<History*> history,
 		Fn<void()> callback) {
+	if (CustomBackend::Enabled()) {
+		return;
+	}
 	if (const auto channel = history->peer->asChannel()) {
 		if (channel->isCommunity()) {
 			return;
@@ -518,6 +525,11 @@ void Histories::changeDialogUnreadMark(
 		bool unread) {
 	history->setUnreadMark(unread);
 
+	if (CustomBackend::Enabled()) {
+		CustomBackend::SetChatUnreadMark(history, unread);
+		return;
+	}
+
 	using Flag = MTPmessages_MarkDialogUnread::Flag;
 	session().api().request(MTPmessages_MarkDialogUnread(
 		MTP_flags(unread ? Flag::f_unread : Flag(0)),
@@ -634,6 +646,7 @@ void Histories::sendPendingReadInbox(not_null<History*> history) {
 }
 
 void Histories::reportDelivery(not_null<HistoryItem*> item) {
+	if (CustomBackend::Enabled()) return;
 	auto &set = _pendingDeliveryReport[item->history()->peer];
 	if (!set.emplace(item->id).second) {
 		return;
@@ -741,6 +754,10 @@ void Histories::sendReadRequest(not_null<History*> history, State &state) {
 			sendReadRequests();
 			finish();
 		};
+		if (CustomBackend::Enabled()) {
+			CustomBackend::ReadHistory(history, tillId, finished);
+			return 0;
+		}
 		if (const auto channel = history->peer->asChannel()) {
 			return session().api().request(MTPchannels_ReadHistory(
 				channel->inputChannel(),
@@ -793,6 +810,10 @@ void Histories::deleteMessages(
 		const QVector<MTPint> &ids,
 		bool revoke) {
 	sendRequest(history, RequestType::Delete, [=](Fn<void()> finish) {
+		if (CustomBackend::Enabled()) {
+			CustomBackend::DeleteMessages(history, ids, revoke, finish);
+			return 0;
+		}
 		const auto done = [=](const MTPmessages_AffectedMessages &result) {
 			session().api().applyAffectedMessages(history->peer, result);
 			finish();
@@ -913,6 +934,10 @@ void Histories::deleteMessagesByDates(
 	TimeId minDate,
 	TimeId maxDate,
 	bool revoke) {
+	if (CustomBackend::Enabled()) {
+		CustomBackend::DeleteMessagesByDates(history, minDate, maxDate);
+		return;
+	}
 	sendRequest(history, RequestType::Delete, [=](Fn<void()> finish) {
 		const auto peer = history->peer;
 		using Flag = MTPmessages_DeleteHistory::Flag;
@@ -940,6 +965,10 @@ void Histories::deleteMessagesByDates(
 }
 
 void Histories::deleteMessages(const MessageIdsList &ids, bool revoke) {
+	if (CustomBackend::Enabled()) {
+		CustomBackend::DeleteSelectedMessages(&_owner->session(), ids, revoke);
+		return;
+	}
 	auto remove = std::vector<not_null<HistoryItem*>>();
 	remove.reserve(ids.size());
 	base::flat_map<not_null<History*>, QVector<MTPint>> idsByPeer;

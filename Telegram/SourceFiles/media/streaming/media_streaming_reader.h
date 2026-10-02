@@ -50,6 +50,9 @@ public:
 	// Any thread.
 	[[nodiscard]] int64 size() const;
 	[[nodiscard]] bool isRemoteLoader() const;
+	[[nodiscard]] bool mpegTsStream() const;
+	[[nodiscard]] std::optional<int64> mpegTsSegmentOffset(
+		crl::time position) const;
 
 	// Single thread.
 	[[nodiscard]] FillState fill(

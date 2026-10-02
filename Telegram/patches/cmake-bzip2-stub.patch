@@ -1,0 +1,71 @@
+diff --git a/external/CMakeLists.txt b/external/CMakeLists.txt
+index ce7e67d..8f79878 100644
+--- a/external/CMakeLists.txt
++++ b/external/CMakeLists.txt
+@@ -15,6 +15,7 @@ add_checked_subdirectory(ada)
+ add_checked_subdirectory(angle)
+ add_checked_subdirectory(auto_updates)
+ add_checked_subdirectory(boost)
++add_checked_subdirectory(bzip2_stub)
+ if (add_cld3_library)
+     add_checked_subdirectory(cld3)
+ endif()
+diff --git a/external/bzip2_stub/CMakeLists.txt b/external/bzip2_stub/CMakeLists.txt
+new file mode 100644
+index 0000000..7fc3196
+--- /dev/null
++++ b/external/bzip2_stub/CMakeLists.txt
+@@ -0,0 +1,2 @@
++add_library(external_bzip2_stub STATIC bzip2_stub.c)
++add_library(desktop-app::external_bzip2_stub ALIAS external_bzip2_stub)
+diff --git a/external/bzip2_stub/bzip2_stub.c b/external/bzip2_stub/bzip2_stub.c
+new file mode 100644
+index 0000000..5ade5f6
+--- /dev/null
++++ b/external/bzip2_stub/bzip2_stub.c
+@@ -0,0 +1,34 @@
++typedef struct {
++    char *next_in;
++    unsigned int avail_in;
++    unsigned int total_in_lo32;
++    unsigned int total_in_hi32;
++    char *next_out;
++    unsigned int avail_out;
++    unsigned int total_out_lo32;
++    unsigned int total_out_hi32;
++    void *state;
++    void *(*bzalloc)(void *, int, int);
++    void (*bzfree)(void *, void *);
++    void *opaque;
++} bz_stream;
++
++enum {
++    BZ_OK = 0,
++    BZ_PARAM_ERROR = -2,
++    BZ_STREAM_END = 4,
++};
++
++int BZ2_bzDecompressInit(bz_stream *strm, int verbosity, int small) {
++    (void)verbosity;
++    (void)small;
++    return strm ? BZ_OK : BZ_PARAM_ERROR;
++}
++
++int BZ2_bzDecompress(bz_stream *strm) {
++    return strm ? BZ_STREAM_END : BZ_PARAM_ERROR;
++}
++
++int BZ2_bzDecompressEnd(bz_stream *strm) {
++    return strm ? BZ_OK : BZ_PARAM_ERROR;
++}
+diff --git a/external/ffmpeg/CMakeLists.txt b/external/ffmpeg/CMakeLists.txt
+index 7854c9f..2e36d12 100644
+--- a/external/ffmpeg/CMakeLists.txt
++++ b/external/ffmpeg/CMakeLists.txt
+@@ -45,5 +45,5 @@ INTERFACE
+ )
+ 
+ if (APPLE)
+-    target_link_libraries(external_ffmpeg INTERFACE bz2)
++    target_link_libraries(external_ffmpeg INTERFACE desktop-app::external_bzip2_stub)
+ endif()

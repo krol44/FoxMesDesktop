@@ -113,6 +113,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/player/media_player_instance.h"
 #include "spellcheck/spellcheck_types.h"
 #include "apiwrap.h"
+#include "custom_backend/native_bridge.h"
+#include "custom_backend/native_runtime.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
 #include "styles/style_layers.h"
@@ -319,6 +321,30 @@ bool HasEditMessageAction(
 			return false;
 		}
 	}
+	return true;
+}
+
+bool AddRetryFailedMessageAction(
+		not_null<Ui::PopupMenu*> menu,
+		const ContextMenuRequest &request,
+		not_null<ListWidget*> list) {
+	const auto item = request.item;
+	if (!item || !item->hasFailed() || !request.selectedItems.empty()) {
+		return false;
+	}
+	const auto bridge = CustomBackend::BridgeFor(&request.navigation->session());
+	if (!bridge) {
+		return false;
+	}
+	const auto owner = &item->history()->owner();
+	const auto itemId = item->fullId();
+	menu->addAction(
+		tr::lng_bot_download_retry(tr::now),
+		crl::guard(list->controller(), [=] {
+			if (const auto current = owner->message(itemId)) {
+				bridge->retryFailedMessage(current);
+			}
+		}));
 	return true;
 }
 
@@ -1406,6 +1432,7 @@ void AddMessageActions(
 	AddForwardAction(menu, request, list);
 	AddOfferAction(menu, request, list);
 	AddSendNowAction(menu, request, list);
+	AddRetryFailedMessageAction(menu, request, list);
 	AddDeleteAction(menu, request, list);
 	AddDownloadFilesAction(menu, request, list);
 	AddSaveRichHtmlAction(menu, request, list);

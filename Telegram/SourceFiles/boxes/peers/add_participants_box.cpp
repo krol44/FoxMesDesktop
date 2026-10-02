@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/peers/add_participants_box.h"
 
+#include "custom_backend/native_runtime.h"
+
 #include "api/api_chat_participants.h"
 #include "api/api_invite_links.h"
 #include "api/api_premium.h"
@@ -285,9 +287,10 @@ InviteForbiddenController::InviteForbiddenController(
 : _peer(peer)
 , _forbidden(std::move(forbidden))
 , _users(_forbidden.users)
-, _can(peer->isChat()
-	? peer->asChat()->canHaveInviteLink()
-	: peer->asChannel()->canHaveInviteLink())
+, _can(!CustomBackend::HideGroupExtras
+	&& (peer->isChat()
+		? peer->asChat()->canHaveInviteLink()
+		: peer->asChannel()->canHaveInviteLink()))
 , _selected(_can
 	? (int(_users.size()) - int(_forbidden.premiumAllowsWrite.size()))
 	: 0) {
@@ -895,7 +898,7 @@ void AddParticipantsBoxController::updateTitle() {
 }
 
 bool AddParticipantsBoxController::needsInviteLinkButton() {
-	if (!_peer) {
+	if (!_peer || CustomBackend::HideGroupExtras) {
 		return false;
 	} else if (const auto channel = _peer->asChannel()) {
 		return channel->canHaveInviteLink();

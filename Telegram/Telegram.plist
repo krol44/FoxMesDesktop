@@ -5,7 +5,7 @@
 	<key>CFBundleExecutable</key>
 	<string>@output_name@</string>
 	<key>CFBundleGetInfoString</key>
-	<string>Telegram Desktop messaging app</string>
+	<string>FoxMes Desktop</string>
 	<key>CFBundleIconFile</key>
 	<string>Icon.icns</string>
 	<key>CFBundleIconName</key>
@@ -15,6 +15,8 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
+	<string>@output_name@</string>
+	<key>CFBundleDisplayName</key>
 	<string>@output_name@</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
@@ -37,8 +39,7 @@
 			<string>@bundle_identifier_plist@</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>tg</string>
-				<string>tonsite</string>
+				<string>foxmes</string>
 			</array>
 		</dict>
 	</array>

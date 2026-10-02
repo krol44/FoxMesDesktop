@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_self_destruct.h"
 
 #include "apiwrap.h"
+#include "custom_backend/native_runtime.h"
 
 namespace Api {
 
@@ -16,6 +17,9 @@ SelfDestruct::SelfDestruct(not_null<ApiWrap*> api)
 }
 
 void SelfDestruct::reload() {
+	if (CustomBackend::Enabled()) {
+		return;
+	}
 	if (!_accountTTL.requestId) {
 		_accountTTL.requestId = _api.request(MTPaccount_GetAccountTTL(
 		)).done([=](const MTPAccountDaysTTL &result) {

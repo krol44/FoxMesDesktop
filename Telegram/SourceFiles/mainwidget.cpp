@@ -7,6 +7,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "mainwidget.h"
 
+#include "custom_backend/native_runtime.h"
+#include "custom_backend/native_topic_channels.h"
+
 #include "api/api_updates.h"
 #include "api/api_views.h"
 #include "data/components/scheduled_messages.h"
@@ -444,7 +447,7 @@ MainWidget::MainWidget(
 	}
 	orderWidgets();
 
-	if (!Core::UpdaterDisabled()) {
+	if (Core::UpdateCheckAvailable()) {
 		Core::UpdateChecker checker;
 		checker.start();
 	}
@@ -1435,6 +1438,9 @@ void MainWidget::showHistory(
 		PeerId peerId,
 		const SectionShow &params,
 		MsgId showAtMsgId) {
+	if (CustomBackend::Enabled()) {
+		CustomBackend::TopicChannels::RedirectDiscussion(peerId, showAtMsgId);
+	}
 	if (peerId && _controller->window().locked()) {
 		if (params.activation != anim::activation::background) {
 			_controller->window().activate();

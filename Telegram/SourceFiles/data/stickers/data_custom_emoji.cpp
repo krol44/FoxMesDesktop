@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/stickers/data_custom_emoji.h"
 
+#include "custom_backend/native_runtime.h"
 #include "boxes/peers/edit_forum_topic_box.h" // MakeTopicIconEmoji.
 #include "chat_helpers/stickers_emoji_pack.h"
 #include "main/main_app_config.h"
@@ -770,7 +771,18 @@ QString CustomEmojiManager::lookupSetName(uint64 setId) {
 	return (i != end(sets)) ? i->second->title : QString();
 }
 
+void CustomEmojiManager::resolveLocalDocument(
+		not_null<DocumentData*> document) {
+	fillColoredFlags(document);
+	processLoaders(document);
+	processListeners(document);
+}
+
 void CustomEmojiManager::request() {
+	if (CustomBackend::Enabled()) {
+		_pendingForRequest.clear();
+		return;
+	}
 	auto ids = QVector<MTPlong>();
 	ids.reserve(std::min(kMaxPerRequest, int(_pendingForRequest.size())));
 	while (!_pendingForRequest.empty() && ids.size() < kMaxPerRequest) {

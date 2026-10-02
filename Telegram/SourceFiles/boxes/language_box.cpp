@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/language_box.h"
 
+#include "custom_backend/native_runtime.h"
+
 #include "base/platform/base_platform_info.h"
 #include "boxes/abstract_box.h"
 #include "boxes/premium_preview_box.h"
@@ -1710,6 +1712,11 @@ base::binary_guard LanguageBox::Show(
 	auto result = base::binary_guard();
 
 	auto &manager = Lang::CurrentCloudManager();
+	if (CustomBackend::Enabled()) {
+		manager.requestLanguageList();
+		Ui::show(Box<LanguageBox>(controller, highlightId));
+		return result;
+	}
 	if (manager.languageList().empty()) {
 		const auto weak = base::make_weak(controller);
 		auto guard = std::make_shared<base::binary_guard>(

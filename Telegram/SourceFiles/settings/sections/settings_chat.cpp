@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/sections/settings_chat.h"
 
+#include "custom_backend/native_runtime.h"
 #include "settings/settings_common_session.h"
 
 #include "base/timer_rpl.h"
@@ -1296,6 +1297,14 @@ void BuildSupportSection(SectionBuilder &builder) {
 }
 
 void BuildChatSectionContent(SectionBuilder &builder) {
+	if (CustomBackend::Enabled()) {
+		BuildThemeOptionsSection(builder);
+		BuildThemeSettingsSection(builder);
+		BuildChatBackgroundSection(builder);
+		BuildMessagesSection(builder);
+		return;
+	}
+
 	BuildThemeOptionsSection(builder);
 	BuildThemeSettingsSection(builder);
 	BuildCloudThemesSection(builder);
@@ -1343,6 +1352,9 @@ rpl::producer<QString> Chat::title() {
 }
 
 void Chat::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
+	if (CustomBackend::Enabled()) {
+		return;
+	}
 	const auto window = &controller()->window();
 	const auto createTheme = addAction(
 		tr::lng_settings_bg_theme_create(tr::now),
@@ -2735,11 +2747,13 @@ void SetupThemeSettings(
 		} });
 	}
 
-	AddPeerColorButton(
-		container,
-		controller->uiShow(),
-		controller->session().user(),
-		st::settingsColorButton);
+	if (!CustomBackend::Enabled()) {
+		AddPeerColorButton(
+			container,
+			controller->uiShow(),
+			controller->session().user(),
+			st::settingsColorButton);
+	}
 
 	const auto settings = &Core::App().settings();
 	if (settings->systemDarkMode().has_value()) {

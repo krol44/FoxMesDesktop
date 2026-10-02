@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "media/streaming/media_streaming_loader.h"
 #include "media/streaming/media_streaming_file_delegate.h"
+#include "custom_backend/native_streaming_loader.h"
 #include "ffmpeg/ffmpeg_utility.h"
 
 namespace Media {
@@ -248,13 +249,19 @@ void File::Context::seekToPosition(
 	//	return;
 	//}
 	//
-	error = av_seek_frame(
-		format,
-		stream.index,
-		FFmpeg::TimeToPts(
+	error = _reader->mpegTsStream()
+		? CustomBackend::Streaming::SeekMpegTs(
+			format,
+			stream.index,
 			std::clamp(position, crl::time(0), stream.duration - 1),
-			stream.timeBase),
-		AVSEEK_FLAG_BACKWARD);
+			_reader)
+		: av_seek_frame(
+			format,
+			stream.index,
+			FFmpeg::TimeToPts(
+				std::clamp(position, crl::time(0), stream.duration - 1),
+				stream.timeBase),
+			AVSEEK_FLAG_BACKWARD);
 	if (!error) {
 		return;
 	}
@@ -269,6 +276,11 @@ std::variant<FFmpeg::Packet, FFmpeg::AvErrorWrap> File::Context::readPacket() {
 	if (unroll()) {
 		return FFmpeg::AvErrorWrap();
 	} else if (!error) {
+		if (_reader->mpegTsStream()) {
+			CustomBackend::Streaming::ShiftMpegTsPacket(
+				_format.get(),
+				result.fields());
+		}
 		return result;
 	} else if (error.code() != AVERROR_EOF) {
 		logFatal(qstr("av_read_frame"), error);
@@ -288,7 +300,8 @@ void File::Context::start(StartOptions options) {
 		static_cast<void*>(this),
 		&Context::Read,
 		nullptr,
-		options.seekable ? &Context::Seek : nullptr);
+		options.seekable ? &Context::Seek : nullptr,
+		{ .mpegTs = _reader->mpegTsStream() });
 	if (!format) {
 		return fail(Error::OpenFailed);
 	}

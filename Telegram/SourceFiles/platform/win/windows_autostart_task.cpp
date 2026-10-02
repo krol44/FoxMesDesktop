@@ -71,7 +71,7 @@ void Toggle(bool enabled, Fn<void(bool)> done) {
 		});
 	};
 	base::WinRT::Try([&] {
-		StartupTask::GetAsync(L"TelegramStartupTask").Completed([=](
+		StartupTask::GetAsync(L"FoxMesStartupTask").Completed([=](
 				IAsyncOperation<StartupTask> operation,
 				AsyncStatus status) {
 			base::WinRT::Try([&] {
@@ -94,7 +94,7 @@ void RequestState(Fn<void(bool)> callback) {
 		callback(IsEnabled(task.State()));
 	};
 	base::WinRT::Try([&] {
-		StartupTask::GetAsync(L"TelegramStartupTask").Completed([=](
+		StartupTask::GetAsync(L"FoxMesStartupTask").Completed([=](
 				IAsyncOperation<StartupTask> operation,
 				AsyncStatus status) {
 			base::WinRT::Try([&] {

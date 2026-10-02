@@ -1,0 +1,17 @@
+diff --git a/webrtc/platform/mac/webrtc_environment_mac.mm b/webrtc/platform/mac/webrtc_environment_mac.mm
+index c133ccc..adff9c4 100644
+--- a/webrtc/platform/mac/webrtc_environment_mac.mm
++++ b/webrtc/platform/mac/webrtc_environment_mac.mm
+@@ -557,10 +557,8 @@ bool EnvironmentMac::refreshFullListOnChange(DeviceType type) {
+ 
+ bool EnvironmentMac::desktopCaptureAllowed() const {
+ 	if (@available(macOS 11.0, *)) {
+-		// Screen Recording is required on macOS 10.15 an later.
+-		// Even if user grants access, restart is required.
+-		static const auto result = CGPreflightScreenCaptureAccess();
+-		return result;
++		// Recheck after the user changes Screen Recording in System Settings.
++		return CGPreflightScreenCaptureAccess();
+ 	} else if (@available(macOS 10.15, *)) {
+ 		const auto stream = CGDisplayStreamCreate(
+ 			CGMainDisplayID(),

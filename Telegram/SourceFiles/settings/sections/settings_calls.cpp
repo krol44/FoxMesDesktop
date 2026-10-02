@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/sections/settings_calls.h"
 
+#include "custom_backend/native_calls_adapter.h"
+#include "custom_backend/native_runtime.h"
 #include "api/api_authorizations.h"
 #include "apiwrap.h"
 #include "base/timer.h"
@@ -385,16 +387,22 @@ void BuildOtherSection(SectionBuilder &builder) {
 		.keywords = { u"calls"_q, u"accept"_q, u"system"_q },
 	});
 
+	const auto bridged = CustomBackend::Enabled();
 	const auto api = &session->api();
 	const auto authorizations = &api->authorizations();
-	authorizations->reload();
-
+	if (!bridged) {
+		authorizations->reload();
+	}
 	const auto acceptCalls = builder.addButton({
 		.id = u"calls/accept"_q,
 		.title = tr::lng_settings_call_accept_calls(),
 		.st = &st::settingsButtonNoIcon,
-		.toggled = authorizations->callsDisabledHereValue()
-			| rpl::map(!rpl::mappers::_1),
+		.toggled = bridged
+			? (CustomBackend::Calls::AcceptCallsValue(session)
+				| rpl::type_erased)
+			: (authorizations->callsDisabledHereValue()
+				| rpl::map(!rpl::mappers::_1)
+				| rpl::type_erased),
 		.keywords = { u"accept"_q, u"receive"_q, u"incoming"_q },
 		.highlight = { .rippleShape = true },
 	});
@@ -402,10 +410,36 @@ void BuildOtherSection(SectionBuilder &builder) {
 	if (acceptCalls) {
 		acceptCalls->toggledChanges(
 		) | rpl::filter([=](bool value) {
-			return (value == authorizations->callsDisabledHere());
+			return bridged
+				? (value != CustomBackend::Calls::AcceptCallsCurrent(session))
+				: (value == authorizations->callsDisabledHere());
 		}) | rpl::on_next([=](bool value) {
-			authorizations->toggleCallsDisabledHere(!value);
+			if (bridged) {
+				CustomBackend::Calls::SetAcceptCalls(session, value);
+			} else {
+				authorizations->toggleCallsDisabledHere(!value);
+			}
 		}, acceptCalls->lifetime());
+	}
+
+	if (bridged) {
+		const auto peerToPeer = builder.addButton({
+			.id = u"calls/peer-to-peer"_q,
+			.title = tr::lng_settings_calls_peer_to_peer_title(),
+			.st = &st::settingsButtonNoIcon,
+			.toggled = CustomBackend::Calls::AllowP2PValue(session)
+				| rpl::type_erased,
+			.keywords = { u"p2p"_q, u"peer"_q, u"direct"_q },
+			.highlight = { .rippleShape = true },
+		});
+		if (peerToPeer) {
+			peerToPeer->toggledChanges(
+			) | rpl::filter([=](bool value) {
+				return value != CustomBackend::Calls::AllowP2PCurrent(session);
+			}) | rpl::on_next([=](bool value) {
+				CustomBackend::Calls::SetAllowP2P(session, value);
+			}, peerToPeer->lifetime());
+		}
 	}
 
 	builder.addButton({
@@ -425,6 +459,9 @@ void BuildOtherSection(SectionBuilder &builder) {
 	});
 
 	builder.addSkip();
+	if (bridged) {
+		builder.addDividerText(tr::lng_settings_peer_to_peer_about());
+	}
 }
 
 void BuildCallsSectionContent(
@@ -650,7 +687,9 @@ Calls::Calls(
 	QWidget *parent,
 	not_null<Window::SessionController*> controller)
 : Section(parent, controller) {
-	controller->session().api().authorizations().reload();
+	if (!CustomBackend::Enabled()) {
+		controller->session().api().authorizations().reload();
+	}
 
 	setupContent();
 	requestPermissionAndStartTestingMicrophone();

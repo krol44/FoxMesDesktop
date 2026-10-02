@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/weak_ptr.h"
 #include "core/application.h"
+#include "custom_backend/native_runtime.h"
 #include "core/click_handler_types.h"
 #include "core/core_settings.h"
 #include "core/ui_integration.h"
@@ -492,6 +493,9 @@ void TranslateBox(
 }
 
 bool SkipTranslate(TextWithEntities textWithEntities) {
+	if (CustomBackend::Enabled()) {
+		return true;
+	}
 	const auto &text = textWithEntities.text;
 	if (text.isEmpty()) {
 		return true;

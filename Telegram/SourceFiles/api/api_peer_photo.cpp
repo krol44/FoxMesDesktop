@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "api/api_peer_photo.h"
 
+#include "custom_backend/native_runtime.h"
+
 #include "api/api_updates.h"
 #include "apiwrap.h"
 #include "base/random.h"
@@ -333,6 +335,10 @@ void PeerPhoto::upload(
 		UserPhoto &&photo,
 		UploadType type,
 		Fn<void()> done) {
+	if (CustomBackend::Enabled() && !photo.video) {
+		CustomBackend::UploadPeerPhoto(peer, std::move(photo.image), std::move(done));
+		return;
+	}
 	peer = peer->migrateToOrMe();
 	if (photo.video) {
 		uploadWithVideo(peer, std::move(photo), type, std::move(done));
@@ -458,6 +464,25 @@ void PeerPhoto::videoTranscoded(
 	}
 
 	const auto peer = value.peer;
+	if (CustomBackend::Enabled()) {
+		const auto done = value.done;
+		clearUpload(msgId);
+		CustomBackend::UploadPeerVideoPhoto(
+			peer,
+			std::move(result.cover),
+			std::move(content),
+			result.coverOffset / 1000.,
+			crl::guard(_session, [=] {
+				_uploadDone.fire_copy(peer);
+				if (done) {
+					done();
+				}
+			}),
+			crl::guard(_session, [=] {
+				_uploadFailed.fire_copy(peer);
+			}));
+		return;
+	}
 	const auto videoId = FullMsgId(
 		peer->id,
 		_session->data().nextLocalMessageId());

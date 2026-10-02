@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/sections/settings_premium.h"
 
+#include "custom_backend/native_runtime.h"
 #include "boxes/premium_preview_box.h"
 #include "boxes/sticker_set_box.h"
 #include "chat_helpers/stickers_lottie.h" // LottiePlayerFromDocument.
@@ -1303,6 +1304,10 @@ void AddSummaryPremium(
 void BuildPremiumSectionContent(
 		SectionBuilder &builder,
 		std::shared_ptr<PremiumState> state) {
+	if (CustomBackend::Enabled()) {
+		return;
+	}
+
 	const auto controller = builder.controller();
 
 	if (controller && state) {

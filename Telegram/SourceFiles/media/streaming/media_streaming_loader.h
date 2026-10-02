@@ -49,6 +49,14 @@ public:
 		not_null<Storage::StreamedFileDownloader*> downloader) = 0;
 	virtual void clearAttachedDownloader() = 0;
 
+	[[nodiscard]] virtual bool mpegTsStream() const {
+		return false;
+	}
+	[[nodiscard]] virtual std::optional<int64> mpegTsSegmentOffset(
+			crl::time position) const {
+		return std::nullopt;
+	}
+
 	virtual ~Loader() = default;
 
 };

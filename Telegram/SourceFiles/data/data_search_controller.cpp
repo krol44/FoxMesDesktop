@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_search_controller.h"
 
+#include "custom_backend/native_runtime.h"
+#include "custom_backend/native_shared_media_adapter.h"
 #include "main/main_session.h"
 #include "data/data_session.h"
 #include "data/data_messages.h"
@@ -530,6 +532,27 @@ void SearchController::requestMore(
 		const Query &query,
 		Data *listData) {
 	if (listData->requests.contains(key)) {
+		return;
+	}
+	if (CustomBackend::Enabled()) {
+		CustomBackend::SharedMedia::Search(
+			listData,
+			_session,
+			listData->peer,
+			query.type,
+			query.query,
+			key.aroundId,
+			key.direction,
+			[=](SearchResult parsed) {
+				listData->requests.remove(key);
+				listData->list.addSlice(
+					std::move(parsed.messageIds),
+					parsed.noSkipRange,
+					parsed.fullCount);
+			});
+		listData->requests.emplace(key, [=] {
+			CustomBackend::SharedMedia::CancelSearch(listData);
+		});
 		return;
 	}
 	auto prepared = PrepareSearchRequest(

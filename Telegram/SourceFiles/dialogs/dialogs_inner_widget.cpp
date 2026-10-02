@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "dialogs/dialogs_inner_widget.h"
 
+#include "custom_backend/native_runtime.h"
 #include "dialogs/dialogs_three_state_icon.h"
 #include "dialogs/ui/chat_search_empty.h"
 #include "dialogs/ui/chat_search_in.h"
@@ -1903,10 +1904,12 @@ void InnerWidget::paintPeerSearchResult(
 			: context.selected
 			? &st::dialogsVerifiedIconOver
 			: &st::dialogsVerifiedIcon),
-		.premium = &ThreeStateIcon(
-			st::dialogsPremiumIcon,
-			context.active,
-			context.selected),
+		.premium = CustomBackend::DisableWhile
+			? nullptr
+			: &ThreeStateIcon(
+				st::dialogsPremiumIcon,
+				context.active,
+				context.selected),
 		.scam = (context.active
 			? &st::dialogsScamFgActive
 			: context.selected

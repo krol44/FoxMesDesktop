@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_chat_participants.h"
 
 #include "apiwrap.h"
+#include "custom_backend/native_runtime.h"
 #include "boxes/add_contact_box.h" // ShowAddParticipantsError
 #include "boxes/peers/add_participants_box.h" // ChatInviteForbidden
 #include "data/data_changes.h"
@@ -921,6 +922,9 @@ auto ChatParticipants::similarLoaded() const
 }
 
 void ChatParticipants::loadRecommendations() {
+	if (CustomBackend::Enabled() && !_recommendations.requestId) {
+		_recommendationsLoaded = false;
+	}
 	if (_recommendationsLoaded.current() || _recommendations.requestId) {
 		return;
 	}

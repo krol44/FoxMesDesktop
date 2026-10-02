@@ -23,6 +23,7 @@ struct GroupLevelsUpdate;
 struct GroupNetworkState;
 struct GroupParticipantDescription;
 class VideoCaptureInterface;
+struct ScreenSharingStats;
 enum class VideoCodecName;
 } // namespace tgcalls
 
@@ -446,6 +447,9 @@ public:
 	[[nodiscard]] QString screenSharingDeviceId() const;
 	[[nodiscard]] bool screenSharingWithAudio() const;
 	void toggleVideo(bool active);
+	void setScreenSharingQuality(int quality);
+	[[nodiscard]] int screenSharingQuality() const { return _screenSharingQuality; }
+	void getScreenSharingStats(Fn<void(tgcalls::ScreenSharingStats)> done);
 	void toggleScreenSharing(
 		std::optional<QString> uniqueId,
 		bool withAudio = false);
@@ -764,6 +768,7 @@ private:
 	rpl::variable<Webrtc::VideoState> _screenState;
 	rpl::variable<bool> _isSharingScreen = false;
 	QString _screenDeviceId;
+	int _screenSharingQuality = 0;
 	bool _screenWithAudio = false;
 
 	base::flags<SendUpdateType> _pendingSelfUpdates;

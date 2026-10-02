@@ -7,10 +7,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/window_peer_menu.h"
 
+#include "custom_backend/native_meet_adapter.h"
+#include "custom_backend/native_runtime.h"
+#include "custom_backend/native_wallpaper_adapter.h"
+#include "custom_backend/native_scheduled_adapter.h"
+#include "custom_backend/native_bridge.h"
+#include "custom_backend/native_message_actions_adapter.h"
 #include "base/call_delayed.h"
+#include "core/file_utilities.h"
 #include "menu/menu_check_item.h"
 #include "menu/menu_mark_as_read.h"
 #include "boxes/about_box.h"
+#include "boxes/background_box.h"
 #include "boxes/share_box.h"
 #include "boxes/star_gift_box.h"
 #include "chat_helpers/compose/compose_show.h"
@@ -303,6 +311,7 @@ private:
 	void addHidePromotion();
 	void addTogglePin();
 	void addToggleMuteSubmenu(bool addSeparator);
+	void addCreateMeet();
 	void addSupportInfo();
 	void addInfo();
 	void addStoryArchive();
@@ -442,6 +451,23 @@ void TogglePinnedThread(
 
 	owner->setChatPinned(entry, FilterId(), isPinned);
 	if (const auto history = entry->asHistory()) {
+		if (CustomBackend::Enabled()) {
+			if (const auto bridge = CustomBackend::BridgeFor(&owner->session())) {
+				bridge->setChatPinned(history, isPinned, [=](bool success) {
+					if (!success) {
+						return;
+					}
+					owner->notifyPinnedDialogsOrderUpdated();
+					if (onToggled) {
+						onToggled();
+					}
+				});
+				if (isPinned) {
+					controller->content()->dialogsToUp();
+				}
+				return;
+			}
+		}
 		const auto flags = isPinned
 			? MTPmessages_ToggleDialogPin::Flag::f_pinned
 			: MTPmessages_ToggleDialogPin::Flag(0);
@@ -655,7 +681,9 @@ void Filler::addInfo() {
 
 void Filler::addStoryArchive() {
 	const auto channel = _peer ? _peer->asChannel() : nullptr;
-	if (!channel || !channel->canEditStories()) {
+	if (CustomBackend::HideGroupExtras
+		|| !channel
+		|| !channel->canEditStories()) {
 		return;
 	}
 	const auto controller = _controller;
@@ -667,6 +695,19 @@ void Filler::addStoryArchive() {
 				Info::Stories::ArchiveId()));
 		}
 	}, &st::menuIconStoriesArchiveSection);
+}
+
+void Filler::addCreateMeet() {
+	if (!CustomBackend::Meet::Available(_peer)) {
+		return;
+	}
+	const auto history = _thread ? _thread->owningHistory().get() : nullptr;
+	if (!history) {
+		return;
+	}
+	_addAction(u"Create Meet"_q, [=] {
+		CustomBackend::Meet::Start(history);
+	}, &st::menuIconPhone);
 }
 
 void Filler::addToggleFolder() {
@@ -930,6 +971,14 @@ void Filler::addBlockUser() {
 		return;
 	}
 	const auto window = _controller;
+	if (CustomBackend::Enabled()) {
+		_addAction(tr::lng_profile_block_user(tr::now), [=] {
+			const auto &session = user->session();
+			File::OpenUrl(session.createInternalLinkFull(
+				session.user()->username() + u"/settings/blocked"_q));
+		}, &st::menuIconBlock);
+		return;
+	}
 	const auto blockText = [](not_null<UserData*> user) {
 		return user->isBlocked()
 			? ((user->isBot() && !user->isSupport())
@@ -1058,6 +1107,9 @@ void Filler::addDirectMessages() {
 }
 
 void Filler::addExportChat() {
+	if (CustomBackend::DisableWhile) {
+		return;
+	}
 	if (!_peer->canExportChatHistory()) {
 		return;
 	}
@@ -1097,7 +1149,8 @@ void Filler::addTranslate() {
 void Filler::addReport() {
 	const auto chat = _peer->asChat();
 	const auto channel = _peer->asChannel();
-	if (_topic
+	if ((CustomBackend::HideGroupExtras && (chat || channel))
+		|| _topic
 		|| ((!chat || chat->amCreator())
 			&& (!channel || channel->amCreator()))) {
 		return;
@@ -1144,6 +1197,9 @@ void Filler::addShareContact() {
 }
 
 void Filler::addEditContact() {
+	if (CustomBackend::DisableWhile) {
+		return;
+	}
 	const auto user = _peer->asUser();
 	if (!user || !user->isContact() || user->isSelf()) {
 		return;
@@ -1199,6 +1255,9 @@ void Filler::addNewMembers() {
 }
 
 void Filler::addDeleteContact() {
+	if (CustomBackend::DisableWhile) {
+		return;
+	}
 	const auto user = _peer->asUser();
 	if (!user || !user->isContact() || user->isSelf()) {
 		return;
@@ -1292,6 +1351,9 @@ void Filler::addManageChat() {
 }
 
 void Filler::addBoostChat() {
+	if (CustomBackend::HideGroupExtras) {
+		return;
+	}
 	if (const auto channel = _peer->asChannel()) {
 		if (channel->isMonoforum()) {
 			return;
@@ -1329,9 +1391,10 @@ void Filler::addViewStatistics() {
 				}
 			}, &st::menuIconStats);
 		}
-		if (canGetStats
-			|| channel->amCreator()
-			|| channel->canPostStories()) {
+		if (!CustomBackend::HideGroupExtras
+			&& (canGetStats
+				|| channel->amCreator()
+				|| channel->canPostStories())) {
 			_addAction(tr::lng_boosts_title(tr::now), [=] {
 				if ([[maybe_unused]] const auto strong = weak.get()) {
 					controller->showSection(Info::Boosts::Make(peer));
@@ -1397,7 +1460,9 @@ SendMenu::Details Filler::createSendMenuDetails() const {
 }
 
 void Filler::addCreatePoll() {
-	if (skipCreateActions()) {
+	if (skipCreateActions()
+		|| (CustomBackend::DisableWhile && _peer->isSelf())
+		|| (CustomBackend::HideGroupExtras && _peer->isChannel())) {
 		return;
 	}
 	const auto can = _topic
@@ -1433,6 +1498,9 @@ void Filler::addCreatePoll() {
 }
 
 void Filler::addCreateTodoList() {
+	if (CustomBackend::DisableWhile) {
+		return;
+	}
 	if (skipCreateActions()) {
 		return;
 	}
@@ -1480,7 +1548,9 @@ void Filler::addThemeEdit() {
 	const auto controller = _controller;
 	_addAction(
 		tr::lng_chat_theme_wallpaper(tr::now),
-		[=] { controller->toggleChooseChatTheme(user); },
+		[=] {
+			controller->toggleChooseChatTheme(user);
+		},
 		&st::menuIconChangeColors);
 }
 
@@ -1569,6 +1639,9 @@ void ShowDisableSharingBox(
 }
 
 void Filler::addToggleNoForwards() {
+	if (CustomBackend::DisableWhile) {
+		return;
+	}
 	const auto user = _peer->asUser();
 	if (!user
 		|| user->isInaccessible()
@@ -1649,6 +1722,9 @@ void Filler::addToggleNoForwards() {
 }
 
 void Filler::addTTLSubmenu(bool addSeparator) {
+	if (CustomBackend::DisableWhile) {
+		return;
+	}
 	if (_thread->asTopic() || !_peer || _peer->isMonoforum()) {
 		return; // #TODO later forum
 	}
@@ -1670,7 +1746,9 @@ void Filler::addTTLSubmenu(bool addSeparator) {
 
 void Filler::addSendGift() {
 	const auto user = _peer->asUser();
-	const auto channel = _peer->asBroadcast();
+	const auto channel = CustomBackend::HideGroupExtras
+		? nullptr
+		: _peer->asBroadcast();
 	if (!user && !channel) {
 		return;
 	} else if (user
@@ -1923,6 +2001,7 @@ void Filler::fillHistoryActions() {
 	addToggleMuteSubmenu(true);
 	addCreateTopic();
 	addInfo();
+	addCreateMeet();
 	addViewAsTopics();
 	addManageChat();
 	addStoryArchive();
@@ -3993,14 +4072,18 @@ base::weak_qptr<Ui::BoxContent> ShowSendNowMessagesBox(
 					MTP_int(session->scheduledMessages().lookupId(item)));
 			}
 		}
-		session->api().request(MTPmessages_SendScheduledMessages(
-			history->peer->input(),
-			MTP_vector<MTPint>(ids)
-		)).done([=](const MTPUpdates &result) {
-			session->api().applyUpdates(result);
-		}).fail([=](const MTP::Error &error) {
-			session->api().sendMessageFail(error, history->peer);
-		}).send();
+		if (CustomBackend::Enabled()) {
+			CustomBackend::Scheduled::SendNow(history->peer, ids);
+		} else {
+			session->api().request(MTPmessages_SendScheduledMessages(
+				history->peer->input(),
+				MTP_vector<MTPint>(ids)
+			)).done([=](const MTPUpdates &result) {
+				session->api().applyUpdates(result);
+			}).fail([=](const MTP::Error &error) {
+				session->api().sendMessageFail(error, history->peer);
+			}).send();
+		}
 		if (callback) {
 			callback();
 		}
@@ -4064,6 +4147,10 @@ void ToggleMessagePinned(
 		not_null<Window::SessionNavigation*> navigation,
 		FullMsgId itemId,
 		bool pin) {
+	if (CustomBackend::Enabled()
+		&& CustomBackend::Actions::TogglePin(navigation, itemId, pin)) {
+		return;
+	}
 	const auto item = navigation->session().data().message(itemId);
 	if (!item || !item->canPin()) {
 		return;
@@ -4112,6 +4199,13 @@ void UnpinMessages(
 		not_null<Window::SessionNavigation*> navigation,
 		MessageIdsList items,
 		Fn<void()> onConfirmed) {
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Actions::UnpinMessages(
+			navigation,
+			std::move(items),
+			std::move(onConfirmed));
+		return;
+	}
 	const auto count = int(items.size());
 	if (!count) {
 		return;
@@ -4202,6 +4296,10 @@ void HidePinnedBar(
 void UnpinAllMessages(
 		not_null<Window::SessionNavigation*> navigation,
 		not_null<Data::Thread*> thread) {
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Actions::UnpinAll(navigation, thread);
+		return;
+	}
 	const auto weak = base::make_weak(thread);
 	const auto callback = crl::guard(navigation, [=](Fn<void()> &&close) {
 		close();
@@ -4373,12 +4471,14 @@ bool FillVideoChatMenu(
 				: tr::lng_menu_start_group_call_scheduled)(tr::now),
 			[=] { callback({ .scheduleNeeded = true }); },
 			&st::menuIconReschedule);
-		addAction(
-			(livestream
-				? tr::lng_menu_start_group_call_with_channel
-				: tr::lng_menu_start_group_call_with)(tr::now),
-			rtmpCallback,
-			&st::menuIconStartStreamWith);
+		if (!CustomBackend::HideGroupExtras) {
+			addAction(
+				(livestream
+					? tr::lng_menu_start_group_call_with_channel
+					: tr::lng_menu_start_group_call_with)(tr::now),
+				rtmpCallback,
+				&st::menuIconStartStreamWith);
+		}
 	}
 	return has || manager;
 }
@@ -4707,6 +4807,7 @@ void ForwardToSelf(
 					.toCount = 1,
 					.singleMessage = (count == 1),
 					.to1 = session->user(),
+					.toSelfWithPremiumIsEmpty = !CustomBackend::Enabled(),
 				})).current();
 				if (!phrase.empty()) {
 					show->showToast({

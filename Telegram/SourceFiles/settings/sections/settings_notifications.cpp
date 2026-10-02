@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/sections/settings_notifications.h"
 
+#include "custom_backend/native_calls_adapter.h"
+#include "custom_backend/native_runtime.h"
 #include "settings/settings_common_session.h"
 
 #include "api/api_authorizations.h"
@@ -495,7 +497,7 @@ void NotificationsCount::prepareNotificationSampleLarge() {
 		p.setPen(st::dialogsNameFg);
 		p.setFont(st::msgNameFont);
 
-		auto notifyTitle = st::msgNameFont->elided(u"Telegram Desktop"_q, rectForName.width());
+		auto notifyTitle = st::msgNameFont->elided(u"FoxMes Desktop"_q, rectForName.width());
 		p.drawText(rectForName.left(), rectForName.top() + st::msgNameFont->ascent, notifyTitle);
 
 		st::notifyClose.icon.paint(p, w - st::notifyClosePos.x() - st::notifyClose.width + st::notifyClose.iconPosition.x(), st::notifyClosePos.y() + st::notifyClose.iconPosition.y(), w);
@@ -1173,33 +1175,38 @@ void BuildNotifyTypeSection(SectionBuilder &builder) {
 			ctx.container,
 			controller,
 			Data::DefaultNotify::Group,
-			showOther);
+			showOther).get();
 		const auto channels = AddTypeButton(
 			ctx.container,
 			controller,
 			Data::DefaultNotify::Broadcast,
-			showOther);
-		const auto reactions = AddReactionsButton(
-			ctx.container,
-			controller,
-			showOther);
+			showOther).get();
+		const auto reactions = CustomBackend::Enabled()
+			? static_cast<Ui::SettingsButton*>(nullptr)
+			: AddReactionsButton(ctx.container, controller, showOther).get();
 		if (ctx.highlights) {
 			ctx.highlights->push_back({
 				u"notifications/private"_q,
 				{ privateChats.get(), { .rippleShape = true } },
 			});
-			ctx.highlights->push_back({
-				u"notifications/groups"_q,
-				{ groups.get(), { .rippleShape = true } },
-			});
-			ctx.highlights->push_back({
-				u"notifications/channels"_q,
-				{ channels.get(), { .rippleShape = true } },
-			});
-			ctx.highlights->push_back({
-				u"notifications/reactions"_q,
-				{ reactions.get(), { .rippleShape = true } },
-			});
+			if (groups) {
+				ctx.highlights->push_back({
+					u"notifications/groups"_q,
+					{ groups, { .rippleShape = true } },
+				});
+			}
+			if (channels) {
+				ctx.highlights->push_back({
+					u"notifications/channels"_q,
+					{ channels, { .rippleShape = true } },
+				});
+			}
+			if (reactions) {
+				ctx.highlights->push_back({
+					u"notifications/reactions"_q,
+					{ reactions, { .rippleShape = true } },
+				});
+			}
 		}
 		return SectionBuilder::WidgetToAdd{};
 	}, [] {
@@ -1226,14 +1233,16 @@ void BuildNotifyTypeSection(SectionBuilder &builder) {
 			.icon = { &st::menuIconChannel },
 		};
 	});
-	builder.add(nullptr, [] {
-		return SearchEntry{
-			.id = u"notifications/reactions"_q,
-			.title = tr::lng_notification_reactions(tr::now),
-			.keywords = { u"reactions"_q },
-			.icon = { &st::menuIconGroupReactions },
-		};
-	});
+	if (!CustomBackend::Enabled()) {
+		builder.add(nullptr, [] {
+			return SearchEntry{
+				.id = u"notifications/reactions"_q,
+				.title = tr::lng_notification_reactions(tr::now),
+				.keywords = { u"reactions"_q },
+				.icon = { &st::menuIconGroupReactions },
+			};
+		});
+	}
 }
 
 void BuildEventNotificationsSection(SectionBuilder &builder) {
@@ -1249,25 +1258,27 @@ void BuildEventNotificationsSection(SectionBuilder &builder) {
 	const auto session = builder.session();
 	const auto &settings = Core::App().settings();
 
-	auto joinSilent = rpl::single(
-		session->api().contactSignupSilentCurrent().value_or(false)
-	) | rpl::then(session->api().contactSignupSilent());
+	if (!CustomBackend::DisableWhile) {
+		auto joinSilent = rpl::single(
+			session->api().contactSignupSilentCurrent().value_or(false)
+		) | rpl::then(session->api().contactSignupSilent());
 
-	const auto joined = builder.addButton({
-		.id = u"notifications/events/joined"_q,
-		.title = tr::lng_settings_events_joined(),
-		.icon = { &st::menuIconInvite },
-		.toggled = std::move(joinSilent) | rpl::map([](bool s) { return !s; }),
-		.keywords = { u"joined"_q, u"contacts"_q, u"signup"_q },
-	});
-	if (joined) {
-		joined->toggledChanges(
-		) | rpl::filter([=](bool enabled) {
-			const auto silent = session->api().contactSignupSilentCurrent();
-			return (enabled == silent.value_or(false));
-		}) | rpl::on_next([=](bool enabled) {
-			session->api().saveContactSignupSilent(!enabled);
-		}, joined->lifetime());
+		const auto joined = builder.addButton({
+			.id = u"notifications/events/joined"_q,
+			.title = tr::lng_settings_events_joined(),
+			.icon = { &st::menuIconInvite },
+			.toggled = std::move(joinSilent) | rpl::map([](bool s) { return !s; }),
+			.keywords = { u"joined"_q, u"contacts"_q, u"signup"_q },
+		});
+		if (joined) {
+			joined->toggledChanges(
+			) | rpl::filter([=](bool enabled) {
+				const auto silent = session->api().contactSignupSilentCurrent();
+				return (enabled == silent.value_or(false));
+			}) | rpl::on_next([=](bool enabled) {
+				session->api().saveContactSignupSilent(!enabled);
+			}, joined->lifetime());
+		}
 	}
 
 	const auto pinned = builder.addButton({
@@ -1301,23 +1312,36 @@ void BuildCallNotificationsSection(SectionBuilder &builder) {
 	});
 
 	const auto session = builder.session();
+	const auto bridged = CustomBackend::Enabled();
 	const auto authorizations = &session->api().authorizations();
-	authorizations->reload();
+	if (!bridged) {
+		authorizations->reload();
+	}
 
 	const auto acceptCalls = builder.addButton({
 		.id = u"notifications/calls/accept"_q,
 		.title = tr::lng_settings_call_accept_calls(),
 		.icon = { &st::menuIconCallsReceive },
-		.toggled = authorizations->callsDisabledHereValue()
-			| rpl::map([](bool disabled) { return !disabled; }),
+		.toggled = bridged
+			? (CustomBackend::Calls::AcceptCallsValue(session)
+				| rpl::type_erased)
+			: (authorizations->callsDisabledHereValue()
+				| rpl::map([](bool disabled) { return !disabled; })
+				| rpl::type_erased),
 		.keywords = { u"calls"_q, u"receive"_q, u"incoming"_q },
 	});
 	if (acceptCalls) {
 		acceptCalls->toggledChanges(
 		) | rpl::filter([=](bool toggled) {
-			return (toggled == authorizations->callsDisabledHere());
+			return bridged
+				? (toggled != CustomBackend::Calls::AcceptCallsCurrent(session))
+				: (toggled == authorizations->callsDisabledHere());
 		}) | rpl::on_next([=](bool toggled) {
-			authorizations->toggleCallsDisabledHere(!toggled);
+			if (bridged) {
+				CustomBackend::Calls::SetAcceptCalls(session, toggled);
+			} else {
+				authorizations->toggleCallsDisabledHere(!toggled);
+			}
 		}, acceptCalls->lifetime());
 	}
 }

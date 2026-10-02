@@ -36,6 +36,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/file_upload.h"
 #include "mainwidget.h"
 #include "apiwrap.h"
+#include "custom_backend/native_runtime.h"
+#include "custom_backend/native_send_files_adapter.h"
 
 namespace Api {
 namespace {
@@ -702,6 +704,10 @@ void SendExistingDocument(
 		MessageToSend &&message,
 		not_null<DocumentData*> document,
 		std::optional<MsgId> localMessageId) {
+	if (CustomBackend::Enabled()
+		&& CustomBackend::SendExistingDocument(document, message.action)) {
+		return;
+	}
 	const auto inputMedia = [=] {
 		return MTP_inputMediaDocument(
 			MTP_flags(message.action.options.mediaSpoiler
