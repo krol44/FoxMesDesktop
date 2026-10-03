@@ -57,6 +57,8 @@
 #include "history/history_item_helpers.h"
 #include "main/main_account.h"
 #include "main/main_session.h"
+#include "media/media_video_encode.h"
+#include "storage/localimageloader.h"
 #include "storage/storage_facade.h"
 #include "storage/storage_account.h"
 #include "storage/storage_shared_media.h"
@@ -84,6 +86,7 @@
 #include <QUuid>
 
 #include <algorithm>
+#include <atomic>
 #include <climits>
 #include <cmath>
 #include <map>
@@ -146,6 +149,9 @@ constexpr auto kMaxSendReplays = 3;
 }
 
 constexpr auto kDeliveredBatchDelayMs = 400;
+// A pinned order change arrives as one chat.updated per pinned chat, all
+// from one transaction: the order is applied once the burst settles.
+constexpr auto kPinnedOrderSettleMs = 150;
 
 constexpr auto kSlowHistoryPage = crl::time(700);
 
@@ -1007,6 +1013,11 @@ NativeBridge::NativeBridge(Main::Session *session)
 	connect(&_readRetryTimer, &QTimer::timeout, this, [this] { flushReadJournal(); });
 	_deliveredTimer.setSingleShot(true);
 	connect(&_deliveredTimer, &QTimer::timeout, this, [this] { flushDelivered(); });
+	_pinnedOrderTimer.setSingleShot(true);
+	connect(&_pinnedOrderTimer, &QTimer::timeout, this, [this] {
+		rebuildPinnedOrder();
+		_session->data().sendHistoryChangeNotifications();
+	});
 	loadReadJournal();
     Ui::ThanosEffect::WarmUp();
     _session->user()->addFlags(UserDataFlag::Premium);
@@ -4224,8 +4235,9 @@ void NativeBridge::sendFiles(
         auto posters = std::make_shared<QMap<qint64, QString>>();
         auto meta = std::make_shared<QMap<qint64, AttachmentMeta>>();
         auto next = std::make_shared<std::function<void()>>();
-        *next = [weak, history, target, chatId, files = std::move(files), trimmedCaption, replyTo, localIds, nonces, forceFile, options, failAll, index, ids, posters, meta, next]() mutable {
-            if (!weak || !history) return;
+        *next = [weak, history, target, chatId, files = std::move(files), trimmedCaption, replyTo, localIds, nonces, forceFile, options, failAll, index, ids, posters, meta, weakNext = std::weak_ptr<std::function<void()>>(next)]() mutable {
+            const auto next = weakNext.lock();
+            if (!weak || !history || !next) return;
             if (*index >= files.size()) {
                 for (const auto localId : localIds) {
                     if (const auto i = weak->_pendingSends.find(localId)
@@ -4443,37 +4455,123 @@ void NativeBridge::sendFiles(
                     owner.requestDocumentViewRepaint(document);
                 }
             };
-            auto cancel = ApiClient::CancelHandle();
-            if (!file.path.isEmpty()) {
-                cancel = weak->client().uploadFile(
-                    file.path,
-                    file.mime,
-                    target,
-                    file.forceFile,
-                    uploaded,
-                    onProgress,
-                    file.kind);
-            } else if (!file.content.isEmpty()) {
-                cancel = weak->client().uploadData(
-                    file.displayName.isEmpty() ? u"upload.bin"_q : file.displayName,
-                    file.content,
-                    file.mime,
-                    target,
-                    file.forceFile,
-                    uploaded,
-                    onProgress,
-                    file.kind);
-            } else {
-                LOG(("NativeBridge: attachment has neither path nor content"));
-                failAll(kSendNoStatus);
-                return;
-            }
+            const auto cancelled = std::make_shared<std::atomic<bool>>(false);
+            const auto uploadCancel = std::make_shared<ApiClient::CancelHandle>();
+            const auto cancel = [cancelled, uploadCancel] {
+                cancelled->store(true);
+                if (*uploadCancel) {
+                    (*uploadCancel)();
+                }
+            };
             for (const auto pendingId : localIds) {
-                if (const auto i = weak->_pendingSends.find(pendingId)
-                    ; i != weak->_pendingSends.end()) {
+                const auto i = weak->_pendingSends.find(pendingId);
+                if (i != weak->_pendingSends.end()) {
                     i->second.cancelUpload = cancel;
                 }
             }
+            const auto uploadReady = [=] {
+                if (!weak || cancelled->load()) return;
+                const auto path = (file.prepared
+                    && !file.prepared->transcodedTempPath.isEmpty())
+                    ? file.prepared->transcodedTempPath
+                    : file.path;
+                if (!path.isEmpty()) {
+                    *uploadCancel = weak->client().uploadFile(
+                        path,
+                        file.mime,
+                        target,
+                        file.forceFile,
+                        uploaded,
+                        onProgress,
+                        file.kind,
+                        file.displayName);
+                } else if (!file.content.isEmpty()) {
+                    *uploadCancel = weak->client().uploadData(
+                        file.displayName.isEmpty() ? u"upload.bin"_q : file.displayName,
+                        file.content,
+                        file.mime,
+                        target,
+                        file.forceFile,
+                        uploaded,
+                        onProgress,
+                        file.kind);
+                } else {
+                    LOG(("NativeBridge: attachment has neither path nor content"));
+                    failAll(kSendNoStatus);
+                }
+            };
+            const auto prepared = file.prepared;
+            if (!prepared || !prepared->videoSource
+                || !prepared->transcodedTempPath.isEmpty()) {
+                uploadReady();
+                return;
+            }
+            const auto document = weak->_session->data().document(
+                LocalAttachmentMediaId(localId));
+            if (document->uploadingData) {
+                document->uploadingData->preparing = true;
+                document->uploadingData->prepareProgress = 0.;
+            }
+            crl::async([=] {
+                auto lastReported = -1.;
+                const auto progress = [&](float64 value) {
+                    if (cancelled->load()) return false;
+                    if (value - lastReported >= 0.01 || value >= 1.) {
+                        lastReported = value;
+                        crl::on_main([=] {
+                            if (!weak || cancelled->load()) return;
+                            auto &owner = weak->_session->data();
+                            const auto document = owner.document(
+                                LocalAttachmentMediaId(localId));
+                            if (document->uploadingData) {
+                                document->uploadingData->prepareProgress = value;
+                                owner.requestDocumentViewRepaint(document);
+                            }
+                        });
+                    }
+                    return !cancelled->load();
+                };
+                const auto result = Media::Encode::TranscodeVideo(
+                    *prepared->videoSource,
+                    progress);
+                crl::on_main([=] {
+                    if (!weak || cancelled->load()) {
+                        QFile::remove(result.path);
+                        return;
+                    }
+                    const auto size = QFileInfo(result.path).size();
+                    if (result.empty() || size <= 0) {
+                        QFile::remove(result.path);
+                        failAll(400, u"Could not prepare video."_q);
+                        return;
+                    }
+                    prepared->transcodedTempPath = result.path;
+                    prepared->filepath = result.path;
+                    prepared->filesize = size;
+                    const auto i = weak->_pendingSends.find(localId);
+                    if (i != weak->_pendingSends.end()) {
+                        i->second.localAttachment.path = result.path;
+                        i->second.localAttachment.bytes = QByteArray();
+                        for (auto &file : i->second.files) {
+                            file.path = result.path;
+                            file.content = QByteArray();
+                        }
+                    }
+                    auto &owner = weak->_session->data();
+                    const auto document = owner.document(
+                        LocalAttachmentMediaId(localId));
+                    document->setLocation(Core::FileLocation(result.path));
+                    document->size = size;
+                    if (document->uploadingData) {
+                        document->uploadingData->size = size;
+                        document->uploadingData->offset = 0;
+                        document->uploadingData->preparing = false;
+                        document->uploadingData->prepareProgress = 1.;
+                    }
+                    owner.requestDocumentViewRepaint(document);
+                    uploadReady();
+                });
+            });
         };
         (*next)();
     };
@@ -5371,7 +5469,7 @@ void NativeBridge::setChatPinned(
             finish(false);
             return;
         }
-        weak->client().setChatPinned(chatId, pinned, [weak, history, pinned, finish](
+        auto handle = [weak, history, pinned, finish](
                 QJsonDocument,
                 QString error,
                 int) mutable {
@@ -5390,22 +5488,35 @@ void NativeBridge::setChatPinned(
                 return;
             }
             finish(true);
-        });
+        };
+        // The server ranks a single new pin last, while the list shows it
+        // first, as upstream does: a pin stores the whole order the list
+        // shows, which pins the chat with its rank in one request.
+        if (pinned) {
+            weak->client().savePinnedOrder(
+                weak->pinnedOrderIds(history->folder()),
+                std::move(handle));
+        } else {
+            weak->client().setChatPinned(chatId, false, std::move(handle));
+        }
     });
 }
 
-void NativeBridge::savePinnedOrder(Data::Folder *folder) {
-    const auto &order = _session->data().pinnedChatsOrder(folder);
+QList<qint64> NativeBridge::pinnedOrderIds(Data::Folder *folder) const {
     auto ids = QList<qint64>();
-    for (const auto &key : order) {
+    for (const auto &key : _session->data().pinnedChatsOrder(folder)) {
         if (const auto history = key.history()) {
             if (const auto chatId = chatIdFor(history)) {
                 ids.append(chatId);
             }
         }
     }
+    return ids;
+}
+
+void NativeBridge::savePinnedOrder(Data::Folder *folder) {
     const auto weak = QPointer<NativeBridge>(this);
-    client().savePinnedOrder(ids, [weak](QJsonDocument, QString error, int) {
+    client().savePinnedOrder(pinnedOrderIds(folder), [weak](QJsonDocument, QString error, int) {
         if (!weak) return;
         if (!error.isEmpty()) {
             weak->reloadChats();
@@ -5435,31 +5546,35 @@ void NativeBridge::rebuildPinnedOrder() {
         }
     }
     std::sort(ordered.begin(), ordered.end());
-    std::unordered_set<qint64> wanted;
+    auto wanted = std::vector<not_null<History*>>();
     for (const auto &[rank, chatId] : ordered) {
-        wanted.insert(chatId);
+        if (const auto history = historyForChatId(chatId)
+            ; history && !history->folder()) {
+            wanted.push_back(history);
+        }
     }
     auto &owner = _session->data();
-    bool changed = false;
+    auto current = std::vector<not_null<History*>>();
     for (const auto &key : owner.pinnedChatsOrder(static_cast<Data::Folder *>(nullptr))) {
-        const auto history = key.history();
-        if (!history) continue;
-        if (!wanted.contains(chatIdFor(history)) && history->isPinnedDialog(FilterId())) {
+        if (const auto history = key.history()) {
+            current.push_back(history);
+        }
+    }
+    if (current == wanted) {
+        return;
+    }
+    for (const auto history : current) {
+        if (std::find(wanted.begin(), wanted.end(), history) == wanted.end()) {
             owner.setChatPinned(history, FilterId(), false);
-            changed = true;
         }
     }
-    for (const auto &[rank, chatId] : ordered) {
-        if (const auto history = historyForChatId(chatId)) {
-            if (!history->isPinnedDialog(FilterId())) {
-                owner.setChatPinned(history, FilterId(), true);
-                changed = true;
-            }
-        }
+    // setChatPinned() moves the chat to the top of the pinned list, already
+    // pinned or not, so pinning from the last rank to the first leaves the
+    // list in rank order.
+    for (auto i = wanted.rbegin(); i != wanted.rend(); ++i) {
+        owner.setChatPinned(*i, FilterId(), true);
     }
-    if (changed) {
-        owner.notifyPinnedDialogsOrderUpdated();
-    }
+    owner.notifyPinnedDialogsOrderUpdated();
 }
 
 void NativeBridge::applyChatLookPatch(const QJsonObject &data) {
@@ -5506,22 +5621,25 @@ void NativeBridge::applyChatSettingsPatch(const QJsonObject &data) {
         history->updateChatListExistence();
         changed = true;
     }
+    // A reorder arrives as one event per pinned chat, so the ranks are only
+    // consistent after the last of them: here a chat is pinned or unpinned
+    // in place, and the rank order is applied once the burst settles.
     if (data.contains(u"pinned"_q)) {
         const auto pinned = data.value("pinned").toBool();
         if (!pinned) {
-            if (_pinnedRanks.erase(chatId) > 0 || history->isPinnedDialog(FilterId())) {
-                rebuildPinnedOrder();
+            _pinnedRanks.erase(chatId);
+            if (history->isPinnedDialog(FilterId())) {
+                _session->data().setChatPinned(history, FilterId(), false);
                 changed = true;
             }
         } else if (data.contains(u"pinned_rank"_q)) {
-            const auto rank = qMax<qint64>(
+            _pinnedRanks[chatId] = qMax<qint64>(
                 data.value("pinned_rank").toVariant().toLongLong(), 1);
-            const auto old = _pinnedRanks.find(chatId);
-            if (old == _pinnedRanks.end() || old->second != rank) {
-                _pinnedRanks[chatId] = rank;
-                rebuildPinnedOrder();
+            if (!history->isPinnedDialog(FilterId()) && history->folderKnown()) {
+                _session->data().setChatPinned(history, FilterId(), true);
                 changed = true;
             }
+            _pinnedOrderTimer.start(kPinnedOrderSettleMs);
         } else {
             needsReload = true;
         }

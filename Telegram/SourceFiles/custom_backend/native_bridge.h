@@ -26,6 +26,7 @@
 #include <unordered_set>
 #include <vector>
 
+struct FilePrepareResult;
 class ChannelData;
 class History;
 class HistoryItem;
@@ -126,6 +127,7 @@ struct UploadSpec {
     QString title;
     QByteArray cover;
     bool spoiler = false;
+    std::shared_ptr<FilePrepareResult> prepared;
 };
 
 struct LocalAttachment {
@@ -409,6 +411,7 @@ private:
     void applyChats(const QJsonDocument &doc);
     void removeChat(qint64 chatId);
     void rebuildPinnedOrder();
+    [[nodiscard]] QList<qint64> pinnedOrderIds(Data::Folder *folder) const;
     void applyChatLookPatch(const QJsonObject &data);
     void applyChatSettingsPatch(const QJsonObject &data);
     void loadCachedChats();
@@ -637,6 +640,7 @@ private:
 	std::unordered_set<qint64> _pendingDeletes;
 	std::unordered_map<qint64, QList<qint64>> _pendingDelivered;
 	QTimer _deliveredTimer;
+	QTimer _pinnedOrderTimer;
 	std::unordered_map<MessageKey, qint64, MessageKeyHash> _messageRevisions;
 	struct AppliedReadState {
 		qint64 readThroughId = 0;

@@ -7,8 +7,7 @@
 #include "custom_backend/native_runtime.h"
 #include "apiwrap.h"
 #include "core/file_utilities.h"
-#include "ffmpeg/ffmpeg_bytes_io_wrap.h"
-#include "ffmpeg/ffmpeg_utility.h"
+#include "storage/localimageloader.h"
 #include "data/data_document.h"
 #include "data/data_user.h"
 #include "history/history.h"
@@ -55,7 +54,9 @@ constexpr auto kPhotoJpegQuality = 87;
 	case Type::Music:
 		return u"audio"_q;
 	case Type::Video:
-		return file.isGifv() ? u"animation"_q : u"video"_q;
+		return (file.isGifv() || file.sendsVideoAsGif())
+			? u"animation"_q
+			: u"video"_q;
 	}
 	return u"document"_q;
 }
@@ -208,106 +209,63 @@ struct MaterializedImage {
 		&& ((file.type == Type::Photo) || (file.type == Type::Video));
 }
 
-[[nodiscard]] bool ChatVideoContainer(
-		const QString &mime,
-		const QString &name) {
-	if (mime == u"video/mp4"_q || mime == u"video/quicktime"_q) {
-		return true;
+void PrepareVideo(
+		UploadSpec &spec,
+		const Ui::PreparedFile &file,
+		const Api::SendAction &action) {
+	if (spec.forceFile || !file.information
+		|| !std::get_if<Ui::PreparedFileInformation::Video>(
+			&file.information->media)) {
+		return;
 	}
-	static const auto extensions = {
-		u".mp4"_q,
-		u".mov"_q,
-		u".m4v"_q,
-	};
-	for (const auto &extension : extensions) {
-		if (name.endsWith(extension, Qt::CaseInsensitive)) {
-			return true;
+	const auto to = FileLoadTo(
+		action.history->peer->id,
+		action.options,
+		action.replyTo,
+		action.replaceMediaOf);
+	auto task = FileLoadTask(FileLoadTask::Args{
+		.session = &action.history->session(),
+		.filepath = file.path,
+		.content = file.content,
+		.information = std::make_unique<Ui::PreparedFileInformation>(
+			*file.information),
+		.videoCover = file.videoCover
+			? std::make_unique<FileLoadTask>(FileLoadTask::Args{
+				.session = &action.history->session(),
+				.filepath = file.videoCover->path,
+				.content = file.videoCover->content,
+				.information = file.videoCover->information
+					? std::make_unique<Ui::PreparedFileInformation>(
+						*file.videoCover->information)
+					: nullptr,
+				.type = SendMediaType::Photo,
+				.to = to,
+			})
+			: nullptr,
+		.type = SendMediaType::File,
+		.to = to,
+		.displayName = file.displayName,
+	});
+	task.process({ .generateGoodThumbnail = false });
+	spec.prepared = task.peekResult();
+	if (!spec.prepared || spec.prepared->document.type() != mtpc_document) {
+		return;
+	}
+	const auto &prepared = *spec.prepared;
+	spec.mime = prepared.filemime;
+	spec.displayName = prepared.filename;
+	spec.cover = prepared.videoCover
+		? prepared.videoCover->content
+		: prepared.thumbbytes;
+	for (const auto &attribute : prepared.document.c_document().vattributes().v) {
+		if (attribute.type() == mtpc_documentAttributeFilename) {
+			spec.displayName = qs(
+				attribute.c_documentAttributeFilename().vfile_name());
+		} else if (attribute.type() == mtpc_documentAttributeVideo) {
+			spec.durationMs = qRound64(
+				attribute.c_documentAttributeVideo().vduration().v * 1000.);
 		}
 	}
-	return false;
-}
-
-[[nodiscard]] bool ChatVideoCodecSupported(
-		const QString &path,
-		const QByteArray &content) {
-	auto fileWrap = FFmpeg::ReadFileWrap();
-	auto bytesWrap = FFmpeg::ReadBytesWrap();
-	auto format = FFmpeg::FormatPointer();
-	if (!content.isEmpty()) {
-		bytesWrap = FFmpeg::ReadBytesWrap{
-			.size = int64(content.size()),
-			.data = reinterpret_cast<const uchar*>(content.constData()),
-		};
-		format = FFmpeg::MakeFormatPointer(
-			&bytesWrap,
-			&FFmpeg::ReadBytesWrap::Read,
-			nullptr,
-			&FFmpeg::ReadBytesWrap::Seek);
-	} else {
-		fileWrap.file.setFileName(path);
-		if (!fileWrap.file.open(QIODevice::ReadOnly)) {
-			return false;
-		}
-		format = FFmpeg::MakeFormatPointer(
-			&fileWrap,
-			&FFmpeg::ReadFileWrap::Read,
-			nullptr,
-			&FFmpeg::ReadFileWrap::Seek);
-	}
-	if (!format) {
-		return false;
-	} else if (avformat_find_stream_info(format.get(), nullptr) < 0) {
-		return false;
-	}
-	const auto codecOf = [&](AVMediaType type) {
-		const auto id = av_find_best_stream(
-			format.get(),
-			type,
-			-1,
-			-1,
-			nullptr,
-			0);
-		return (id < 0)
-			? AV_CODEC_ID_NONE
-			: format->streams[id]->codecpar->codec_id;
-	};
-	const auto videoCodec = codecOf(AVMEDIA_TYPE_VIDEO);
-	const auto audioCodec = codecOf(AVMEDIA_TYPE_AUDIO);
-	if (videoCodec != AV_CODEC_ID_H264) {
-		return false;
-	}
-	switch (audioCodec) {
-	case AV_CODEC_ID_NONE:
-	case AV_CODEC_ID_AAC:
-	case AV_CODEC_ID_MP3:
-		return true;
-	default:
-		return false;
-	}
-}
-
-[[nodiscard]] bool RasterizedGif(const UploadSpec &spec) {
-	if (spec.mime == u"image/gif"_q) {
-		return true;
-	}
-	const auto name = spec.displayName.isEmpty() ? spec.path : spec.displayName;
-	return name.endsWith(u".gif"_q, Qt::CaseInsensitive);
-}
-
-void DemoteUnsupportedVideo(UploadSpec &spec) {
-	if (spec.kind != u"video"_q && spec.kind != u"animation"_q) {
-		return;
-	}
-	if (RasterizedGif(spec)) {
-		return;
-	}
-	const auto name = spec.displayName.isEmpty() ? spec.path : spec.displayName;
-	if (ChatVideoContainer(spec.mime, name)
-		&& ChatVideoCodecSupported(spec.path, spec.content)) {
-		return;
-	}
-	spec.kind = u"document"_q;
-	spec.forceFile = true;
 }
 
 } // namespace
@@ -350,7 +308,7 @@ void SendFiles(
 			.cover = CoverOf(file),
 			.spoiler = file.spoiler,
 		};
-		DemoteUnsupportedVideo(spec);
+		PrepareVideo(spec, file, action);
 		if (auto image = MaterializeImage(file, type); !image.bytes.isEmpty()) {
 			spec.displayName = std::move(image.name);
 			spec.mime = std::move(image.mime);
@@ -410,7 +368,23 @@ void SendFileContent(
 					? u"video"_q
 					: u"document"_q)),
 	};
-	DemoteUnsupportedVideo(spec);
+	if (!forceFile && mimeName.startsWith(u"video/"_q)) {
+		auto file = Ui::PreparedFile(QString());
+		file.displayName = name;
+		file.content = content;
+		file.information = FileLoadTask::ReadMediaInformation(
+			QString(), content, mimeName);
+		using Video = Ui::PreparedFileInformation::Video;
+		if (file.information
+			&& std::get_if<Video>(&file.information->media)) {
+			file.type = Ui::PreparedFile::Type::Video;
+			spec.kind = KindOf(file, type);
+			PrepareVideo(spec, file, action);
+		} else {
+			spec.kind = u"document"_q;
+			spec.forceFile = true;
+		}
+	}
 	auto files = std::vector<UploadSpec>();
 	files.push_back(std::move(spec));
 	bridge->sendFiles(

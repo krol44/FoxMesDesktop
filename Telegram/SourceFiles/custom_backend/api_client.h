@@ -399,7 +399,7 @@ public:
     using CancelHandle = std::function<void()>;
     CancelHandle uploadFile(const QString &filePath, const QString &mime, qint64 chatId, bool forceFile, Callback done, ProgressCallback progress = {}, const QString &kind = QString());
     CancelHandle uploadData(const QString &name, const QByteArray &data, const QString &mime, qint64 chatId, bool forceFile, Callback done, ProgressCallback progress = {}, const QString &kind = QString());
-    CancelHandle uploadFile(const QString &filePath, const QString &mime, const UploadTarget &target, bool forceFile, Callback done, ProgressCallback progress = {}, const QString &kind = QString());
+    CancelHandle uploadFile(const QString &filePath, const QString &mime, const UploadTarget &target, bool forceFile, Callback done, ProgressCallback progress = {}, const QString &kind = QString(), const QString &displayName = QString());
     CancelHandle uploadData(const QString &name, const QByteArray &data, const QString &mime, const UploadTarget &target, bool forceFile, Callback done, ProgressCallback progress = {}, const QString &kind = QString());
     void downloadFile(const QString &path, BytesCallback done);
     void downloadUrl(const QUrl &url, BytesCallback done);

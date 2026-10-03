@@ -1858,7 +1858,8 @@ ApiClient::CancelHandle ApiClient::uploadFile(
         bool forceFile,
         Callback done,
         ProgressCallback progress,
-        const QString &kind) {
+        const QString &kind,
+        const QString &displayName) {
     const auto effectiveMime = mime.isEmpty()
         ? QMimeDatabase().mimeTypeForFile(filePath).name()
         : mime;
@@ -1868,7 +1869,7 @@ ApiClient::CancelHandle ApiClient::uploadFile(
         delete file;
         return {};
     }
-    return uploadPrepared(QFileInfo(filePath).fileName(), file, effectiveMime, target, forceFile, std::move(done), std::move(progress), kind);
+    return uploadPrepared(displayName.isEmpty() ? QFileInfo(filePath).fileName() : displayName, file, effectiveMime, target, forceFile, std::move(done), std::move(progress), kind);
 }
 
 ApiClient::CancelHandle ApiClient::uploadData(
