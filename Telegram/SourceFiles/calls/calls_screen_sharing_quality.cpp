@@ -118,23 +118,29 @@ QString ScreenSharingQuality::statisticsText() const {
 	const auto rate = [](int value) { return value < 0 ? u"—"_q : BitrateLabel(value); };
 	auto text = u"Mode: "_q + QualityLabel(_quality()) + u"\n\n"_q;
 	if (c.available) {
-		text += u"CAPTURE → CONVERSION\n"_q
+		text += (c.nativeCapture ? u"CAPTURE → NATIVE NV12\nScreenCaptureKit / CVPixelBuffer / IOSurface\n"_q : u"CAPTURE → CONVERSION\n"_q)
 			+ u"Source: "_q + resolution(c.sourceWidth, c.sourceHeight)
 			+ u" → "_q + resolution(c.width, c.height) + u"\n"_q
-			+ u"Requested / captured / converted / delivered FPS: "_q
+			+ (c.nativeCapture ? u"Requested / captured / delivered FPS: "_q : u"Requested / captured / converted / delivered FPS: "_q)
 			+ QString::number(c.requestedFps) + u" / "_q + number(c.captureFps)
-			+ u" / "_q + number(c.convertedFps) + u" / "_q + number(c.deliveredFps) + u"\n"_q
-			+ u"Frames with changed pixels: "_q + number(c.changedFps) + u" FPS\n"_q
-			+ u"Capture / scale / ARGB→I420 / delivery: "_q
-			+ number(c.captureMs) + u" / "_q + number(c.scaleMs) + u" / "_q
-			+ number(c.convertMs) + u" / "_q + number(c.deliverMs) + u" ms\n"_q
-			+ u"Loop average / maximum: "_q + number(c.loopMs) + u" / "_q + number(c.maxLoopMs) + u" ms\n"_q
+			+ (c.nativeCapture ? QString() : u" / "_q + number(c.convertedFps)) + u" / "_q + number(c.deliveredFps) + u"\n"_q
+			+ (c.nativeCapture ? u"Frames with updated content: "_q : u"Frames with changed pixels: "_q) + number(c.changedFps) + u" FPS\n"_q
+			+ (c.nativeCapture
+				? u"Native buffer delivery: "_q + number(c.deliverMs) + u" ms\nScale / color conversion: performed by ScreenCaptureKit; GPU timings unavailable\n"_q
+				: u"Capture / scale / ARGB→I420 / delivery: "_q
+					+ number(c.captureMs) + u" / "_q + number(c.scaleMs) + u" / "_q
+					+ number(c.convertMs) + u" / "_q + number(c.deliverMs) + u" ms\n"_q
+					+ u"Loop average / maximum: "_q + number(c.loopMs) + u" / "_q + number(c.maxLoopMs) + u" ms\n"_q)
 			+ u"Frame interval / scheduler lateness: "_q + number(c.intervalMs) + u" / "_q + number(c.schedulerDelayMs) + u" ms\n"_q
 			+ u"Captured / delivered frames: "_q + QString::number(c.capturedFrames) + u" / "_q + QString::number(c.deliveredFrames) + u"\n"_q
-			+ u"Capture errors / unchanged / skipped unchanged / buffer drops / conversion errors: "_q
-			+ QString::number(c.captureErrors) + u" / "_q + QString::number(c.unchangedFrames)
-			+ u" / "_q + QString::number(c.skippedUnchangedFrames)
-			+ u" / "_q + QString::number(c.poolDrops) + u" / "_q + QString::number(c.conversionErrors) + u"\n\n"_q;
+			+ (c.nativeCapture
+				? u"Capture errors / idle frames / skipped repeats: "_q
+					+ QString::number(c.captureErrors) + u" / "_q + QString::number(c.unchangedFrames)
+					+ u" / "_q + QString::number(c.skippedUnchangedFrames) + u"\n\n"_q
+				: u"Capture errors / unchanged / skipped unchanged / buffer drops / conversion errors: "_q
+					+ QString::number(c.captureErrors) + u" / "_q + QString::number(c.unchangedFrames)
+					+ u" / "_q + QString::number(c.skippedUnchangedFrames)
+					+ u" / "_q + QString::number(c.poolDrops) + u" / "_q + QString::number(c.conversionErrors) + u"\n\n"_q);
 	} else {
 		text += u"Capture measurements: unavailable / warming up\n\n"_q;
 	}

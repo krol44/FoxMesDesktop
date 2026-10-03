@@ -113,19 +113,23 @@ void Request(
 		const QByteArray &method,
 		const QString &path,
 		const QJsonObject &body,
-		Fn<void(QJsonObject)> done) {
+		Fn<void(QJsonObject)> done,
+		Fn<QString(QString)> upstreamError = nullptr) {
 	const auto answer = context.answer;
 	context.client->communityRequest(method, path, body, [=](
 			QJsonDocument doc,
 			QString error,
 			int status) {
 		if (!error.isEmpty()) {
-			const auto type = Mtp::ErrorType(
+			auto type = Mtp::ErrorType(
 				doc,
 				error,
 				status,
 				u"CHANNEL_INVALID"_q,
 				u"CHAT_ADMIN_REQUIRED"_q);
+			if (upstreamError) {
+				type = upstreamError(type);
+			}
 			LOG(("FoxMes Channels: %1 %2 failed, status %3, error %4").arg(
 				QString::fromLatin1(method),
 				path,
@@ -577,6 +581,13 @@ void JoinChannel(const Context &context, Reader &reader) {
 			{ MTP_updateChannel(MTP_long(chatId)) },
 			{ Community::Channel(chat, me) })));
 		Reapply(context, chatId);
+	}, [](QString type) {
+		// The server answers INVITE_HASH_EXPIRED for a chat with no public
+		// name; ApiWrap::joinChannel shows nothing for it, but toasts "not
+		// accessible" for CHANNEL_PRIVATE.
+		return (type == u"INVITE_HASH_EXPIRED"_q)
+			? u"CHANNEL_PRIVATE"_q
+			: type;
 	});
 }
 

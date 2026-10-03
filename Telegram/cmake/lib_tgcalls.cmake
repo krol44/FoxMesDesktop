@@ -226,6 +226,11 @@ PRIVATE
 )
 
 if (APPLE)
+    target_sources(lib_tgcalls PRIVATE
+        ${tgcalls_loc}/platform/darwin/MacScreenCapture.h
+        ${tgcalls_loc}/platform/darwin/MacScreenCapture.mm
+    )
+    target_link_libraries(lib_tgcalls PRIVATE "-weak_framework ScreenCaptureKit" "-framework IOSurface")
     target_compile_options(lib_tgcalls
     PRIVATE
         -fobjc-arc

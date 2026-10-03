@@ -251,7 +251,7 @@
  } // namespace tgcalls
 --- /dev/null
 +++ b/tgcalls/ScreenSharing.h
-@@ -0,0 +1,133 @@
+@@ -0,0 +1,134 @@
 +#ifndef TGCALLS_SCREEN_SHARING_H
 +#define TGCALLS_SCREEN_SHARING_H
 +#include <algorithm>
@@ -293,6 +293,7 @@
 +}
 +struct ScreenCaptureStats {
 +    bool available = false;
++    bool nativeCapture = false;
 +    int sourceWidth = 0, sourceHeight = 0;
 +    int width = 0, height = 0, requestedFps = 0;
 +    double captureFps = 0, changedFps = 0, convertedFps = 0, deliveredFps = 0;
@@ -1389,7 +1390,7 @@
 +++ b/tgcalls/platform/darwin/DarwinVideoSource.mm
 @@ -39,6 +39,10 @@
  }
- 
+
  void DarwinVideoTrackSource::OnOutputFormatRequest(int width, int height, int fps) {
 +  if (width == 0 || height == 0) {
 +    video_adapter()->OnOutputFormatRequest(absl::nullopt, absl::nullopt, fps);
@@ -1398,6 +1399,28 @@
    cricket::VideoFormat format(width, height, cricket::VideoFormat::FpsToInterval(fps), 0);
    video_adapter()->OnOutputFormatRequest(format);
  }
+@@ -75,16 +79,11 @@
+   } else if ([frame.buffer isKindOfClass:[RTC_OBJC_TYPE(RTCCVPixelBuffer) class]]) {
+     // Adapted CVPixelBuffer frame.
+     @autoreleasepool {
+-    RTC_OBJC_TYPE(RTCCVPixelBuffer) *rtcPixelBuffer =
+-        (RTC_OBJC_TYPE(RTCCVPixelBuffer) *)frame.buffer;
+-    buffer = new rtc::RefCountedObject<webrtc::ObjCFrameBuffer>([[RTC_OBJC_TYPE(RTCCVPixelBuffer) alloc]
+-        initWithPixelBuffer:rtcPixelBuffer.pixelBuffer
+-               adaptedWidth:adapted_width
+-              adaptedHeight:adapted_height
+-                  cropWidth:crop_width
+-                 cropHeight:crop_height
+-                      cropX:crop_x + rtcPixelBuffer.cropX
+-                      cropY:crop_y + rtcPixelBuffer.cropY]);
++    // Native CropAndScale preserves platform-specific buffer ownership (the
++    // ScreenCaptureKit surface lease) and composes existing crop coordinates.
++    buffer = new rtc::RefCountedObject<webrtc::ObjCFrameBuffer>(frame.buffer);
++    buffer = buffer->CropAndScale(crop_x, crop_y, crop_width, crop_height,
++                                  adapted_width, adapted_height);
+     }
+   } else {
+     @autoreleasepool {
 --- a/tgcalls/platform/darwin/DesktopSharingCapturer.h
 +++ b/tgcalls/platform/darwin/DesktopSharingCapturer.h
 @@ -16,9 +16,11 @@
@@ -1415,7 +1438,19 @@
  
 --- a/tgcalls/platform/darwin/DesktopSharingCapturer.mm
 +++ b/tgcalls/platform/darwin/DesktopSharingCapturer.mm
-@@ -62,18 +62,13 @@
+@@ -14,6 +14,7 @@
+ #include "tgcalls/desktop_capturer/DesktopCaptureSourceHelper.h"
+ #include "tgcalls/desktop_capturer/DesktopCaptureSourceManager.h"
+ #include "DarwinVideoSource.h"
++#include "MacScreenCapture.h"
+
+ #import "helpers/RTCDispatcher+Private.h"
+ #import <QuartzCore/QuartzCore.h>
+@@ -59,40 +60,51 @@
+
+ @implementation DesktopSharingCapturer {
+     absl::optional<tgcalls::DesktopCaptureSourceHelper> renderer;
++    std::unique_ptr<tgcalls::MacScreenCapture> nativeRenderer;
      std::shared_ptr<RendererAdapterImpl> _sink;
      BOOL _isPaused;
  }
@@ -1426,27 +1461,77 @@
          _sink.reset(new RendererAdapterImpl(^(CGSize size, RTCVideoFrame *videoFrame, RTCVideoRotation rotation) {
              getObjCVideoSource(trackSource)->OnCapturedFrame(videoFrame);
          }));
- 
+
 -        tgcalls::DesktopCaptureSourceData data{
 -	        /*.aspectSize = */{ 1920, 1080 },
 -	        /*.fps = */25,
 -	        /*.captureMouse = */true,
 -        };
-         renderer.emplace(captureSource, data);
-         renderer->setOutput(_sink);
+-        renderer.emplace(captureSource, data);
+-        renderer->setOutput(_sink);
++        if (@available(macOS 12.3, *)) {
++            nativeRenderer = std::make_unique<tgcalls::MacScreenCapture>(captureSource, data);
++            nativeRenderer->setOutput(_sink);
++        } else {
++            renderer.emplace(captureSource, data);
++            renderer->setOutput(_sink);
++        }
      }
-@@ -89,6 +84,11 @@
- 
+     return self;
+ }
+
+ -(void)setOnFatalError:(std::function<void ()>)error {
+-    renderer->setOnFatalError(error);
++    if (nativeRenderer) nativeRenderer->setOnFatalError(error);
++    else renderer->setOnFatalError(error);
+ }
+ -(void)setOnPause:(std::function<void (bool)>)pause {
+-    renderer->setOnPause(pause);
++    if (nativeRenderer) nativeRenderer->setOnPause(pause);
++    else renderer->setOnPause(pause);
+ }
+
  -(void)start {
-     renderer->start();
+-    renderer->start();
++    if (nativeRenderer) nativeRenderer->start();
++    else renderer->start();
 +}
 +
 +- (void)getScreenCaptureStats:(std::function<void(tgcalls::ScreenCaptureStats)>)completion {
-+    if (renderer) renderer->getStats(std::move(completion));
++    if (nativeRenderer) nativeRenderer->getStats(std::move(completion));
++    else if (renderer) renderer->getStats(std::move(completion));
 +    else completion({});
  }
- 
+
  -(void)stop {
+-    renderer->stop();
++    if (nativeRenderer) nativeRenderer->stop();
++    else renderer->stop();
+ }
+
+ - (void)setIsEnabled:(bool)isEnabled {
+@@ -100,9 +112,9 @@
+     _isPaused = !isEnabled;
+     if (updated) {
+         if (isEnabled) {
+-            renderer->start();
++            [self start];
+         } else {
+-            renderer->stop();
++            [self stop];
+         }
+     }
+ }
+@@ -111,7 +123,8 @@
+ }
+
+ - (void)setUncroppedSink:(std::shared_ptr<rtc::VideoSinkInterface<webrtc::VideoFrame> >)sink {
+-    renderer->setSecondaryOutput(sink);
++    if (nativeRenderer) nativeRenderer->setSecondaryOutput(sink);
++    else renderer->setSecondaryOutput(sink);
+ }
+
+ @end
 --- a/tgcalls/platform/darwin/VideoCapturerInterfaceImpl.mm
 +++ b/tgcalls/platform/darwin/VideoCapturerInterfaceImpl.mm
 @@ -223,7 +223,7 @@
@@ -2536,3 +2621,760 @@
 +};
 +} // namespace tgcalls
 +#endif
+--- a/tgcalls/platform/darwin/TGRTCVideoEncoderH265.mm
++++ b/tgcalls/platform/darwin/TGRTCVideoEncoderH265.mm
+@@ -13,6 +13,8 @@
+
+ #import <VideoToolbox/VideoToolbox.h>
+ #include <vector>
++#include <atomic>
++#include "H265BitrateRecovery.h"
+
+ #import "RTCCodecSpecificInfoH265.h"
+ #import "api/peerconnection/RTCVideoCodecInfo+Private.h"
+@@ -84,12 +86,14 @@
+   }
+
+   RTC_OBJC_TYPE(RTCVideoEncoderH265) * encoder;
+-  RTC_OBJC_TYPE(RTCCodecSpecificInfoH265) * codecSpecificInfo;
++  RTC_OBJC_TYPE(RTCCodecSpecificInfoH265) * codecSpecificInfo = nil;
+   int32_t width;
+   int32_t height;
+   int64_t render_time_ms;
+   uint32_t timestamp;
+   RTCVideoRotation rotation;
++  // Keep the native surface leased until the asynchronous VT callback.
++  id<RTCVideoFrameBuffer> inputBuffer = nil;
+ };
+
+ // We receive I420Frames as input, but we need to feed CVPixelBuffers into the
+@@ -149,19 +153,10 @@
+
+ // This is the callback function that VideoToolbox calls when encode is
+ // complete. From inspection this happens on its own queue.
+-void compressionOutputCallback(void* encoder,
+-                               void* params,
+-                               OSStatus status,
+-                               VTEncodeInfoFlags infoFlags,
+-                               CMSampleBufferRef sampleBuffer)
+-    API_AVAILABLE(ios(11.0)) {
+-  if (!params) {
+-    // If there are pending callbacks when the encoder is destroyed, this can happen.
+-    return;
+-  }
+-  std::unique_ptr<RTCFrameEncodeParams> encodeParams(
+-      reinterpret_cast<RTCFrameEncodeParams*>(params));
+-  RTC_CHECK(encodeParams->encoder);
++static void compressionOutputCallback(const std::shared_ptr<RTCFrameEncodeParams> &encodeParams,
++                                      OSStatus status,
++                                      VTEncodeInfoFlags infoFlags,
++                                      CMSampleBufferRef sampleBuffer) {
+   [encodeParams->encoder frameWasEncoded:status
+                                    flags:infoFlags
+                             sampleBuffer:sampleBuffer
+@@ -186,6 +181,8 @@
+   VTCompressionSessionRef _compressionSession;
+   RTCVideoCodecMode _mode;
+   int framesLeft;
++  tgcalls::H265BitrateRecovery _bitrateRecovery;
++  std::atomic<int> _lastQp;
+
+   webrtc::H265BitstreamParser _h265BitstreamParser;
+   std::vector<uint8_t> _nv12ScaleBuffer;
+@@ -221,7 +218,9 @@
+   _mode = settings.mode;
+
+   // We can only set average bitrate on the HW encoder.
+-  _targetBitrateBps = settings.startBitrate;
++  _targetBitrateBps = settings.startBitrate * 1000;  // startBitrate is in kbps.
++  _bitrateRecovery = tgcalls::H265BitrateRecovery();
++  _lastQp.store(-1, std::memory_order_relaxed);
+   _bitrateAdjuster->SetTargetBitrateBps(_targetBitrateBps);
+
+   // TODO(tkchin): Try setting payload size via
+@@ -239,6 +238,23 @@
+     return WEBRTC_VIDEO_CODEC_UNINITIALIZED;
+   }
+   BOOL isKeyframeRequired = NO;
++
++#if defined(WEBRTC_MAC) && !defined(WEBRTC_IOS)
++  if (_mode == RTCVideoCodecModeScreensharing
++      && _bitrateRecovery.update(rtc::TimeMillis(), _targetBitrateBps,
++          _bitrateAdjuster->GetEstimatedBitrateBps().value_or(0),
++          _lastQp.load(std::memory_order_relaxed))) {
++    // Reset only VT rate control. Keep WebRTC's CPU/FPS restrictions and RTP
++    // state; clearing adaptation here would overload an already busy encoder.
++    const auto resetStatus = [self resetCompressionSession];
++    if (resetStatus != WEBRTC_VIDEO_CODEC_OK) {
++      return resetStatus;
++    }
++    _lastQp.store(-1, std::memory_order_relaxed);
++    isKeyframeRequired = YES;
++    RTC_LOG(LS_INFO) << "FoxMes: reset H265 rate control after bitrate recovery";
++  }
++#endif
+
+   // Get a pixel buffer from the pool and copy frame data over.
+   CVPixelBufferPoolRef pixelBufferPool =
+@@ -327,18 +343,24 @@
+     frameProperties = CreateCFTypeDictionary(keys, values, 1);
+   }
+
+-  std::unique_ptr<RTCFrameEncodeParams> encodeParams;
++  std::shared_ptr<RTCFrameEncodeParams> encodeParams;
+   encodeParams.reset(new RTCFrameEncodeParams(
+       self, codecSpecificInfo,_width, _height,
+       frame.timeStampNs / rtc::kNumNanosecsPerMillisec, frame.timeStamp,
+       frame.rotation));
+
++  encodeParams->inputBuffer = frame.buffer;
++
+   // Update the bitrate if needed.
+   [self setBitrateBps:_bitrateAdjuster->GetAdjustedBitrateBps()];
+
+-  OSStatus status = VTCompressionSessionEncodeFrame(
++  // The copied output block retains the native buffer through asynchronous
++  // encoding. It also releases it on submission failure, without a raw refcon.
++  OSStatus status = VTCompressionSessionEncodeFrameWithOutputHandler(
+       _compressionSession, pixelBuffer, presentationTimeStamp, kCMTimeInvalid,
+-      frameProperties, encodeParams.release(), nullptr);
++      frameProperties, nullptr, ^(OSStatus result, VTEncodeInfoFlags flags, CMSampleBufferRef sample) {
++          compressionOutputCallback(encodeParams, result, flags, sample);
++      });
+   if (frameProperties) {
+     CFRelease(frameProperties);
+   }
+@@ -423,7 +445,7 @@
+       encoder_specs,  // use hardware accelerated encoder if available
+       sourceAttributes,
+       nullptr,  // use default compressed data allocator
+-      compressionOutputCallback, nullptr, &_compressionSession);
++      nullptr, nullptr, &_compressionSession);
+   if (sourceAttributes) {
+     CFRelease(sourceAttributes);
+     sourceAttributes = nullptr;
+@@ -593,6 +615,7 @@
+
+   _h265BitstreamParser.ParseBitstream(rtc::ArrayView<const uint8_t>(buffer->data(), buffer->size()));
+   absl::optional<int> qp = _h265BitstreamParser.GetLastSliceQp();
++  _lastQp.store(qp.value_or(-1), std::memory_order_relaxed);
+   frame.qp = @(qp.value_or(1));
+
+   BOOL res = _callback(frame, codecSpecificInfo);
+--- /dev/null
++++ b/tgcalls/platform/darwin/H265BitrateRecovery.h
+@@ -0,0 +1,46 @@
++#ifndef TGCALLS_H265_BITRATE_RECOVERY_H
++#define TGCALLS_H265_BITRATE_RECOVERY_H
++
++#include <algorithm>
++#include <cstdint>
++
++namespace tgcalls {
++
++// VideoToolbox can retain near-maximum QP after a bitrate dip even when its
++// allocation has recovered. A keyframe alone does not reset that rate control.
++class H265BitrateRecovery {
++public:
++    bool update(int64_t now, uint32_t target, uint32_t media, int qp) {
++        if (_healthyTarget && target < _healthyTarget * 0.55) {
++            _dip = true;
++        }
++        if (target && qp >= 0 && qp < 40) {
++            _healthyTarget = std::max(_healthyTarget, target);
++            _dip = false;
++        }
++        const auto stalled = _dip && target >= _healthyTarget * 0.75
++            && qp >= 48 && media > 0 && int64_t(media) * 4 < target;
++        if (!stalled) {
++            _stalledSince = -1;
++            return false;
++        }
++        if (_stalledSince < 0) {
++            _stalledSince = now;
++        }
++        if (now - _stalledSince < 3000 || now < _retryAfter) {
++            return false;
++        }
++        _stalledSince = -1;
++        _retryAfter = now + 30000;
++        return true;
++    }
++
++private:
++    uint32_t _healthyTarget = 0;
++    bool _dip = false;
++    int64_t _stalledSince = -1;
++    int64_t _retryAfter = 0;
++};
++
++} // namespace tgcalls
++#endif
+--- a/tgcalls/platform/darwin/TGRTCVideoEncoderH264.mm
++++ b/tgcalls/platform/darwin/TGRTCVideoEncoderH264.mm
+@@ -87,12 +87,14 @@
+   }
+
+   TGRTCVideoEncoderH264 *encoder;
+-  RTCCodecSpecificInfoH264 *codecSpecificInfo;
++  RTCCodecSpecificInfoH264 *codecSpecificInfo = nil;
+   int32_t width;
+   int32_t height;
+   int64_t render_time_ms;
+   uint32_t timestamp;
+   RTCVideoRotation rotation;
++  // Keep the native surface leased until the asynchronous VT callback.
++  id<RTCVideoFrameBuffer> inputBuffer = nil;
+ };
+
+ // We receive I420Frames as input, but we need to feed CVPixelBuffers into the
+@@ -152,17 +154,10 @@
+
+ // This is the callback function that VideoToolbox calls when encode is
+ // complete. From inspection this happens on its own queue.
+-static void compressionOutputCallback(void *encoder,
+-                               void *params,
+-                               OSStatus status,
+-                               VTEncodeInfoFlags infoFlags,
+-                               CMSampleBufferRef sampleBuffer) {
+-  if (!params) {
+-    // If there are pending callbacks when the encoder is destroyed, this can happen.
+-    return;
+-  }
+-  std::unique_ptr<RTCFrameEncodeParams> encodeParams(
+-      reinterpret_cast<RTCFrameEncodeParams *>(params));
++static void compressionOutputCallback(const std::shared_ptr<RTCFrameEncodeParams> &encodeParams,
++                                      OSStatus status,
++                                      VTEncodeInfoFlags infoFlags,
++                                      CMSampleBufferRef sampleBuffer) {
+   [encodeParams->encoder frameWasEncoded:status
+                                    flags:infoFlags
+                             sampleBuffer:sampleBuffer
+@@ -479,7 +474,7 @@
+     frameProperties = CreateCFTypeDictionary(keys, values, 1);
+   }
+
+-  std::unique_ptr<RTCFrameEncodeParams> encodeParams;
++  std::shared_ptr<RTCFrameEncodeParams> encodeParams;
+   encodeParams.reset(new RTCFrameEncodeParams(self,
+                                               codecSpecificInfo,
+                                               _width,
+@@ -489,16 +484,18 @@
+                                               frame.rotation));
+   encodeParams->codecSpecificInfo.packetizationMode = _packetizationMode;
+
++  encodeParams->inputBuffer = frame.buffer;
++
+   // Update the bitrate if needed.
+   [self setBitrateBps:_bitrateAdjuster->GetAdjustedBitrateBps() frameRate:_encoderFrameRate];
+
+-  OSStatus status = VTCompressionSessionEncodeFrame(_compressionSession,
+-                                                    pixelBuffer,
+-                                                    presentationTimeStamp,
+-                                                    kCMTimeInvalid,
+-                                                    frameProperties,
+-                                                    encodeParams.release(),
+-                                                    nullptr);
++  // The copied output block retains the native buffer through asynchronous
++  // encoding. It also releases it on submission failure, without a raw refcon.
++  OSStatus status = VTCompressionSessionEncodeFrameWithOutputHandler(
++      _compressionSession, pixelBuffer, presentationTimeStamp, kCMTimeInvalid,
++      frameProperties, nullptr, ^(OSStatus result, VTEncodeInfoFlags flags, CMSampleBufferRef sample) {
++          compressionOutputCallback(encodeParams, result, flags, sample);
++      });
+   if (frameProperties) {
+     CFRelease(frameProperties);
+   }
+@@ -658,7 +655,7 @@
+                                  encoder_specs,  // use hardware accelerated encoder if available
+                                  sourceAttributes,
+                                  nullptr,  // use default compressed data allocator
+-                                 compressionOutputCallback,
++                                 nullptr,  // use per-frame output handlers
+                                  nullptr,
+                                  &_compressionSession);
+   if (sourceAttributes) {
+--- /dev/null
++++ b/tgcalls/platform/darwin/MacScreenCapture.h
+@@ -0,0 +1,34 @@
++#ifndef TGCALLS_MAC_SCREEN_CAPTURE_H
++#define TGCALLS_MAC_SCREEN_CAPTURE_H
++
++#include "tgcalls/desktop_capturer/DesktopCaptureSource.h"
++#include "tgcalls/ScreenSharing.h"
++#include "api/video/video_frame.h"
++#include "api/video/video_sink_interface.h"
++#include <CoreMedia/CoreMedia.h>
++#include <functional>
++#include <memory>
++
++namespace tgcalls {
++// The lease keeps ScreenCaptureKit's IOSurface in use until the last native
++// frame (including an asynchronously encoding frame) has been released.
++rtc::scoped_refptr<webrtc::VideoFrameBuffer> MacScreenFrame(CMSampleBufferRef sample);
++DesktopSize MacScreenCaptureSize(DesktopSize source, DesktopSize limit);
++
++class MacScreenCapture {
++public:
++    MacScreenCapture(DesktopCaptureSource source, DesktopCaptureSourceData data);
++    ~MacScreenCapture();
++    void start();
++    void stop();
++    void setOutput(std::shared_ptr<rtc::VideoSinkInterface<webrtc::VideoFrame>> sink);
++    void setSecondaryOutput(std::shared_ptr<rtc::VideoSinkInterface<webrtc::VideoFrame>> sink);
++    void setOnFatalError(std::function<void()> callback);
++    void setOnPause(std::function<void(bool)> callback);
++    void getStats(std::function<void(ScreenCaptureStats)> completion);
++private:
++    struct State;
++    std::unique_ptr<State> _state;
++};
++} // namespace tgcalls
++#endif
+--- /dev/null
++++ b/tgcalls/platform/darwin/MacScreenCapture.mm
+@@ -0,0 +1,444 @@
++#include "MacScreenCapture.h"
++
++#import <ScreenCaptureKit/ScreenCaptureKit.h>
++#import <IOSurface/IOSurface.h>
++#import "components/video_frame_buffer/RTCCVPixelBuffer.h"
++#include "sdk/objc/native/src/objc_frame_buffer.h"
++#include "rtc_base/time_utils.h"
++#include "rtc_base/logging.h"
++#include <cmath>
++
++namespace {
++struct SurfaceLease {
++    explicit SurfaceLease(CMSampleBufferRef value) : sample(value) {
++        CFRetain(sample);
++        surface = CVPixelBufferGetIOSurface(CMSampleBufferGetImageBuffer(sample));
++        if (surface) IOSurfaceIncrementUseCount(surface);
++    }
++    ~SurfaceLease() {
++        if (surface) IOSurfaceDecrementUseCount(surface);
++        CFRelease(sample);
++    }
++    CMSampleBufferRef sample;
++    IOSurfaceRef surface = nullptr;
++};
++}
++
++// WebRTC's native crop operation must preserve the surface lease as well as
++// the CVPixelBuffer. Retaining only a CVPixelBuffer does not mark it in use.
++@interface FoxMesScreenPixelBuffer : RTCCVPixelBuffer
++- (instancetype)initWithLease:(std::shared_ptr<SurfaceLease>)lease
++                       width:(int)width height:(int)height
++                   cropWidth:(int)cropWidth cropHeight:(int)cropHeight
++                       cropX:(int)cropX cropY:(int)cropY;
++- (id<RTCVideoFrameBuffer>)cropAndScaleWith:(int)x offsetY:(int)y
++                               cropWidth:(int)width cropHeight:(int)height
++                              scaleWidth:(int)scaledWidth scaleHeight:(int)scaledHeight;
++@end
++@implementation FoxMesScreenPixelBuffer {
++    std::shared_ptr<SurfaceLease> _lease;
++}
++- (instancetype)initWithLease:(std::shared_ptr<SurfaceLease>)lease
++                       width:(int)width height:(int)height
++                   cropWidth:(int)cropWidth cropHeight:(int)cropHeight
++                       cropX:(int)cropX cropY:(int)cropY {
++    self = [super initWithPixelBuffer:CMSampleBufferGetImageBuffer(lease->sample)
++                        adaptedWidth:width adaptedHeight:height
++                           cropWidth:cropWidth cropHeight:cropHeight cropX:cropX cropY:cropY];
++    if (self) _lease = std::move(lease);
++    return self;
++}
++- (id<RTCVideoFrameBuffer>)cropAndScaleWith:(int)x offsetY:(int)y
++                               cropWidth:(int)width cropHeight:(int)height
++                              scaleWidth:(int)scaledWidth scaleHeight:(int)scaledHeight {
++    return [[FoxMesScreenPixelBuffer alloc] initWithLease:_lease
++        width:scaledWidth height:scaledHeight
++        cropWidth:width * self.cropWidth / self.width
++        cropHeight:height * self.cropHeight / self.height
++        cropX:self.cropX + x * self.cropWidth / self.width
++        cropY:self.cropY + y * self.cropHeight / self.height];
++}
++@end
++
++namespace tgcalls {
++rtc::scoped_refptr<webrtc::VideoFrameBuffer> MacScreenFrame(CMSampleBufferRef sample) {
++    if (!sample || !CMSampleBufferIsValid(sample)) return nullptr;
++    const auto pixel = CMSampleBufferGetImageBuffer(sample);
++    if (!pixel) return nullptr;
++    const auto width = int(CVPixelBufferGetWidth(pixel));
++    const auto height = int(CVPixelBufferGetHeight(pixel));
++    if (width < 2 || height < 2) return nullptr;
++    int x = 0, y = 0, visibleWidth = width, visibleHeight = height;
++    // Resizing a window may temporarily leave its content in a larger surface.
++    // Carry the visible region as native crop metadata instead of sending padding.
++    if (@available(macOS 12.3, *)) {
++        NSArray *attachments = (__bridge NSArray *)CMSampleBufferGetSampleAttachmentsArray(sample, false);
++        NSDictionary *metadata = attachments.firstObject;
++        auto rectValue = (__bridge CFTypeRef)metadata[SCStreamFrameInfoContentRect];
++        CGRect rect;
++        const auto scale = [metadata[SCStreamFrameInfoScaleFactor] doubleValue];
++        if (rectValue && CFGetTypeID(rectValue) == CFDictionaryGetTypeID() && scale > 0.
++            && CGRectMakeWithDictionaryRepresentation((CFDictionaryRef)rectValue, &rect)) {
++            x = std::clamp(int(std::lround(rect.origin.x * scale)), 0, width - 2) & ~1;
++            y = std::clamp(int(std::lround(rect.origin.y * scale)), 0, height - 2) & ~1;
++            visibleWidth = std::min(width - x, (int(std::lround(rect.size.width * scale)) + 1) & ~1);
++            visibleHeight = std::min(height - y, (int(std::lround(rect.size.height * scale)) + 1) & ~1);
++            if (visibleWidth <= 0 || visibleHeight <= 0) return nullptr;
++        }
++    }
++    return rtc::make_ref_counted<webrtc::ObjCFrameBuffer>(
++        [[FoxMesScreenPixelBuffer alloc] initWithLease:std::make_shared<SurfaceLease>(sample)
++            width:visibleWidth height:visibleHeight cropWidth:visibleWidth cropHeight:visibleHeight cropX:x cropY:y]);
++}
++DesktopSize MacScreenCaptureSize(DesktopSize source, DesktopSize limit) {
++    if (source.width <= 0 || source.height <= 0) return {};
++    double scale = 1.;
++    if (limit.width > 0 && limit.height > 0) {
++        scale = std::min({1., double(limit.width) / source.width, double(limit.height) / source.height});
++    }
++    // NV12 requires even dimensions. Preserve odd source pixels by rounding
++    // up; constrained modes round down to keep their advertised size limit.
++    const auto even = [scale](int dimension) {
++        return std::max(2, (scale == 1. ? (dimension + 1) / 2 : int(dimension * scale) / 2) * 2);
++    };
++    return {even(source.width), even(source.height)};
++}
++}
++
++API_AVAILABLE(macos(12.3))
++@interface FoxMesNativeScreenCapture : NSObject <SCStreamOutput, SCStreamDelegate> {
++@public
++    dispatch_queue_t queue;
++    long long sourceId;
++    bool sourceIsWindow;
++    tgcalls::DesktopCaptureSourceData data;
++    std::shared_ptr<rtc::VideoSinkInterface<webrtc::VideoFrame>> output, secondaryOutput;
++    std::function<void()> fatalError;
++    std::function<void(bool)> onPause;
++    tgcalls::ScreenCaptureStats stats;
++@private
++    SCStream *_stream;
++    SCStreamConfiguration *_configuration;
++    dispatch_source_t _timer;
++    rtc::scoped_refptr<webrtc::VideoFrameBuffer> _latest;
++    bool _running, _paused, _updatingConfiguration;
++    uint64_t _generation, _serial, _deliveredSerial;
++    int64_t _windowStart, _lastDelivery, _deadline;
++    int64_t _period;
++    uint64_t _captured, _changed, _delivered;
++    double _deliveryTotal, _intervalTotal, _lateTotal;
++    tgcalls::DesktopSize _configuredSize;
++}
++- (instancetype)initWithSource:(tgcalls::DesktopCaptureSource)value data:(tgcalls::DesktopCaptureSourceData)options;
++- (void)begin;
++- (void)end;
++- (void)publishStats;
++@end
++
++@implementation FoxMesNativeScreenCapture
++- (instancetype)initWithSource:(tgcalls::DesktopCaptureSource)value data:(tgcalls::DesktopCaptureSourceData)options {
++    if ((self = [super init])) {
++        queue = dispatch_queue_create("ing.foxtail.FoxMes.screen-capture", DISPATCH_QUEUE_SERIAL);
++        sourceId = value.uniqueId();
++        sourceIsWindow = value.isWindow();
++        data = options;
++        data.fps = std::clamp(data.fps, 1., 60.);
++        _period = int64_t(std::llround(1000000. / data.fps));
++    }
++    return self;
++}
++- (void)setPaused:(bool)value {
++    if (_paused == value) return;
++    _paused = value;
++    if (onPause) onPause(value);
++}
++- (void)fail:(NSError *)error {
++    RTC_LOG(LS_ERROR) << "ScreenCaptureKit: " << (error ? error.localizedDescription.UTF8String : "selected source unavailable");
++    ++stats.captureErrors;
++    [self end];
++    if (fatalError) fatalError();
++}
++- (void)begin {
++    if (_running) return;
++    _running = true;
++    const auto generation = ++_generation;
++    stats = {};
++    stats.nativeCapture = true;
++    stats.requestedFps = int(std::lround(data.fps));
++    _serial = _deliveredSerial = 0;
++    _captured = _changed = _delivered = 0;
++    _deliveryTotal = _intervalTotal = _lateTotal = 0;
++    _windowStart = rtc::TimeMicros();
++    _lastDelivery = 0;
++    [self setPaused:false];
++    [SCShareableContent getShareableContentWithCompletionHandler:^(SCShareableContent *content, NSError *error) {
++        dispatch_async(self->queue, ^{
++            if (!self->_running || self->_generation != generation) return;
++            if (error) { [self fail:error]; return; }
++            SCContentFilter *filter = nil;
++            tgcalls::DesktopSize size;
++            if (self->sourceIsWindow) {
++                for (SCWindow *window in content.windows) {
++                    if (window.windowID != self->sourceId) continue;
++                    filter = [[SCContentFilter alloc] initWithDesktopIndependentWindow:window];
++                    double scale = 1.;
++                    for (SCDisplay *display in content.displays) {
++                        if (!CGRectIntersectsRect(display.frame, window.frame) || display.width <= 0) continue;
++                        scale = double(CGDisplayPixelsWide(display.displayID)) / display.width;
++                        break;
++                    }
++                    size = {int(std::lround(window.frame.size.width * scale)), int(std::lround(window.frame.size.height * scale))};
++                    break;
++                }
++            } else {
++                for (SCDisplay *display in content.displays) {
++                    if (display.displayID != self->sourceId) continue;
++                    filter = [[SCContentFilter alloc] initWithDisplay:display excludingWindows:@[]];
++                    size = {int(CGDisplayPixelsWide(display.displayID)), int(CGDisplayPixelsHigh(display.displayID))};
++                    break;
++                }
++            }
++            if (!filter) { [self fail:nil]; return; }
++            if (@available(macOS 14.0, *)) {
++                size = {int(std::lround(filter.contentRect.size.width * filter.pointPixelScale)),
++                        int(std::lround(filter.contentRect.size.height * filter.pointPixelScale))};
++            }
++            if (size.width <= 0 || size.height <= 0) { [self fail:nil]; return; }
++            self->stats.sourceWidth = size.width;
++            self->stats.sourceHeight = size.height;
++            self->_configuredSize = tgcalls::MacScreenCaptureSize(size, self->data.aspectSize);
++            SCStreamConfiguration *config = [[SCStreamConfiguration alloc] init];
++            config.width = self->_configuredSize.width;
++            config.height = self->_configuredSize.height;
++            config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarFullRange;
++            config.minimumFrameInterval = CMTimeMake(1, self->stats.requestedFps);
++            config.queueDepth = 8;
++            config.showsCursor = self->data.captureMouse;
++            config.scalesToFit = NO;
++            const double contentScale = std::min({1., double(config.width) / size.width, double(config.height) / size.height});
++            config.destinationRect = CGRectMake(0, 0, size.width * contentScale, size.height * contentScale);
++            config.colorSpaceName = kCGColorSpaceSRGB;
++            if (@available(macOS 14.0, *)) {
++                config.captureResolution = SCCaptureResolutionBest;
++                config.ignoreShadowsSingleWindow = YES;
++                config.preservesAspectRatio = YES;
++            }
++            self->_configuration = config;
++            SCStream *stream = [[SCStream alloc] initWithFilter:filter configuration:config delegate:self];
++            self->_stream = stream;
++            NSError *addError = nil;
++            if (![stream addStreamOutput:self type:SCStreamOutputTypeScreen sampleHandlerQueue:self->queue error:&addError]) {
++                [self fail:addError]; return;
++            }
++            [stream startCaptureWithCompletionHandler:^(NSError *startError) {
++                dispatch_async(self->queue, ^{
++                    if (!self->_running || self->_generation != generation) return;
++                    if (startError) { [self fail:startError]; return; }
++                    [self startTimer];
++                });
++            }];
++        });
++    }];
++}
++- (void)end {
++    _running = false;
++    ++_generation;
++    _updatingConfiguration = false;
++    if (_timer) { dispatch_source_cancel(_timer); _timer = nil; }
++    _latest = nullptr;
++    if (_stream) {
++        [_stream removeStreamOutput:self type:SCStreamOutputTypeScreen error:nil];
++        [_stream stopCaptureWithCompletionHandler:^(NSError *error) {}];
++        _stream = nil;
++    }
++    _configuration = nil;
++}
++- (void)startTimer {
++    if (_timer || !_running) return;
++    _deadline = rtc::TimeMicros();
++    _timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, queue);
++    __weak FoxMesNativeScreenCapture *weakSelf = self;
++    dispatch_source_set_event_handler(_timer, ^{ [weakSelf deliver]; });
++    dispatch_source_set_timer(_timer, DISPATCH_TIME_NOW, uint64_t(std::llround(1000000000. / data.fps)), 250000);
++    dispatch_resume(_timer);
++}
++- (void)deliver {
++    if (!_running) return;
++    const auto now = rtc::TimeMicros();
++    const auto lateness = std::max<int64_t>(0, now - _deadline);
++    _deadline += (lateness / _period + 1) * _period;
++    if (!_latest || (!output && !secondaryOutput)) return;
++    if (data.fps <= 5 && _deliveredSerial == _serial) {
++        ++stats.skippedUnchangedFrames;
++        [self publishStats];
++        return;
++    }
++    _deliveredSerial = _serial;
++    auto frame = webrtc::VideoFrame::Builder().set_video_frame_buffer(_latest)
++        .set_rotation(webrtc::kVideoRotation_0).set_timestamp_us(now).build();
++    // Capture and delivery run on this serial queue. Consumers may retain a
++    // frame, but the immutable surface will remain leased until they release it.
++    auto sink = output;
++    auto preview = secondaryOutput;
++    if (sink) sink->OnFrame(frame);
++    if (preview) preview->OnFrame(frame);
++    const auto delivery = double(rtc::TimeMicros() - now) / 1000.;
++    _deliveryTotal += delivery;
++    stats.maxLoopMs = std::max(stats.maxLoopMs, delivery);
++    _lateTotal += double(lateness) / 1000.;
++    if (_lastDelivery) _intervalTotal += double(now - _lastDelivery) / 1000.;
++    _lastDelivery = now;
++    ++_delivered;
++    ++stats.deliveredFrames;
++    [self publishStats];
++}
++- (void)publishStats {
++    const auto now = rtc::TimeMicros();
++    const auto seconds = double(now - _windowStart) / 1000000.;
++    if (seconds < 1.) return;
++    stats.captureFps = _captured / seconds;
++    stats.changedFps = _changed / seconds;
++    stats.deliveredFps = _delivered / seconds;
++    stats.deliverMs = _delivered ? _deliveryTotal / _delivered : 0.;
++    stats.loopMs = stats.deliverMs;
++    stats.intervalMs = _delivered ? _intervalTotal / _delivered : 0.;
++    stats.schedulerDelayMs = _delivered ? _lateTotal / _delivered : 0.;
++    _captured = _changed = _delivered = 0;
++    _deliveryTotal = _intervalTotal = _lateTotal = 0.;
++    _windowStart = now;
++}
++- (void)updateSourceSize:(NSDictionary *)metadata {
++    auto rectValue = (__bridge CFTypeRef)metadata[SCStreamFrameInfoContentRect];
++    if (!rectValue || CFGetTypeID(rectValue) != CFDictionaryGetTypeID()) return;
++    CGRect rect;
++    if (!CGRectMakeWithDictionaryRepresentation((__bridge CFDictionaryRef)metadata[SCStreamFrameInfoContentRect], &rect)) return;
++    const double scale = [metadata[SCStreamFrameInfoScaleFactor] doubleValue];
++    const double contentScale = [metadata[SCStreamFrameInfoContentScale] doubleValue];
++    if (scale <= 0. || contentScale <= 0.) return;
++    tgcalls::DesktopSize size = {int(std::lround(rect.size.width * scale / contentScale)),
++                                int(std::lround(rect.size.height * scale / contentScale))};
++    if (size.width <= 0 || size.height <= 0) return;
++    stats.sourceWidth = size.width;
++    stats.sourceHeight = size.height;
++    const auto wanted = tgcalls::MacScreenCaptureSize(size, data.aspectSize);
++    if (_updatingConfiguration || (wanted.width == _configuredSize.width && wanted.height == _configuredSize.height)) return;
++    _updatingConfiguration = true;
++    const auto generation = _generation;
++    _configuration.width = wanted.width;
++    _configuration.height = wanted.height;
++    const double destinationScale = std::min({1., double(wanted.width) / size.width, double(wanted.height) / size.height});
++    _configuration.destinationRect = CGRectMake(0, 0, size.width * destinationScale, size.height * destinationScale);
++    [_stream updateConfiguration:_configuration completionHandler:^(NSError *error) {
++        dispatch_async(self->queue, ^{
++            if (!self->_running || generation != self->_generation) return;
++            self->_updatingConfiguration = false;
++            if (error) { [self fail:error]; return; }
++            self->_configuredSize = wanted;
++        });
++    }];
++}
++- (void)stream:(SCStream *)stream didOutputSampleBuffer:(CMSampleBufferRef)sample ofType:(SCStreamOutputType)type {
++    if (!_running || stream != _stream || type != SCStreamOutputTypeScreen || !CMSampleBufferIsValid(sample)) return;
++    NSArray *attachments = (__bridge NSArray *)CMSampleBufferGetSampleAttachmentsArray(sample, false);
++    NSDictionary *metadata = attachments.firstObject;
++    if (!metadata[SCStreamFrameInfoStatus]) return;
++    const auto status = SCFrameStatus([metadata[SCStreamFrameInfoStatus] integerValue]);
++    if (status == SCFrameStatusIdle) { ++stats.unchangedFrames; return; }
++    if (status == SCFrameStatusBlank || status == SCFrameStatusSuspended || status == SCFrameStatusStopped) {
++        _latest = nullptr;
++        [self setPaused:true];
++        return;
++    }
++    if (status != SCFrameStatusComplete) return;
++    auto buffer = tgcalls::MacScreenFrame(sample);
++    if (!buffer) { ++stats.captureErrors; return; }
++    [self setPaused:false];
++    [self updateSourceSize:metadata];
++    _latest = std::move(buffer);
++    ++_captured;
++    ++stats.capturedFrames;
++    NSArray *dirty = metadata[SCStreamFrameInfoDirtyRects];
++    if (!dirty || dirty.count || _serial == 0
++        || stats.width != _latest->width() || stats.height != _latest->height()) {
++        ++_serial;
++        ++_changed;
++    } else ++stats.unchangedFrames;
++    stats.available = true;
++    stats.width = _latest->width();
++    stats.height = _latest->height();
++}
++- (void)stream:(SCStream *)stream didStopWithError:(NSError *)error {
++    // Delegate callbacks are not documented to use the sample queue.
++    dispatch_async(queue, ^{
++        if (self->_running && stream == self->_stream) [self fail:error];
++    });
++}
++@end
++
++namespace tgcalls {
++struct MacScreenCapture::State {
++    FoxMesNativeScreenCapture *capture;
++};
++MacScreenCapture::MacScreenCapture(DesktopCaptureSource source, DesktopCaptureSourceData data)
++: _state(std::make_unique<State>()) {
++    if (@available(macOS 12.3, *)) {
++        _state->capture = [[FoxMesNativeScreenCapture alloc] initWithSource:std::move(source) data:data];
++    }
++}
++MacScreenCapture::~MacScreenCapture() {
++    if (@available(macOS 12.3, *)) {
++        auto capture = _state->capture;
++        dispatch_async(capture->queue, ^{
++            [capture end];
++            capture->output.reset();
++            capture->secondaryOutput.reset();
++            capture->fatalError = {};
++            capture->onPause = {};
++        });
++    }
++}
++void MacScreenCapture::start() {
++    if (@available(macOS 12.3, *)) {
++        auto capture = _state->capture;
++        dispatch_async(capture->queue, ^{ [capture begin]; });
++    }
++}
++void MacScreenCapture::stop() {
++    if (@available(macOS 12.3, *)) {
++        auto capture = _state->capture;
++        dispatch_async(capture->queue, ^{
++            [capture end];
++        });
++    }
++}
++void MacScreenCapture::setOutput(std::shared_ptr<rtc::VideoSinkInterface<webrtc::VideoFrame>> sink) {
++    if (@available(macOS 12.3, *)) {
++        auto capture = _state->capture;
++        dispatch_async(capture->queue, ^{ capture->output = sink; });
++    }
++}
++void MacScreenCapture::setSecondaryOutput(std::shared_ptr<rtc::VideoSinkInterface<webrtc::VideoFrame>> sink) {
++    if (@available(macOS 12.3, *)) {
++        auto capture = _state->capture;
++        dispatch_async(capture->queue, ^{ capture->secondaryOutput = sink; });
++    }
++}
++void MacScreenCapture::setOnFatalError(std::function<void()> callback) {
++    if (@available(macOS 12.3, *)) {
++        auto capture = _state->capture;
++        dispatch_async(capture->queue, ^{ capture->fatalError = callback; });
++    }
++}
++void MacScreenCapture::setOnPause(std::function<void(bool)> callback) {
++    if (@available(macOS 12.3, *)) {
++        auto capture = _state->capture;
++        dispatch_async(capture->queue, ^{ capture->onPause = callback; });
++    }
++}
++void MacScreenCapture::getStats(std::function<void(ScreenCaptureStats)> completion) {
++    if (@available(macOS 12.3, *)) {
++        auto capture = _state->capture;
++        dispatch_async(capture->queue, ^{ [capture publishStats]; completion(capture->stats); });
++    } else completion({});
++}
++}

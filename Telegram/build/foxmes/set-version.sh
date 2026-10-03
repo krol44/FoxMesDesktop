@@ -101,7 +101,7 @@ sync_release_md() {
   [ -f "$file" ] || return 0
   NEW_VER="$v" perl -pi -e '
     s/(make version VERSION=)\d+\.\d+\.\d+/$1$ENV{NEW_VER}/g;
-    s/(git commit -m ")\d+\.\d+\.\d+(")/$1$ENV{NEW_VER}$2/g;
+    s/(-m ")\d+\.\d+\.\d+(")/$1$ENV{NEW_VER}$2/g;
     s/(git tag v)\d+\.\d+\.\d+/$1$ENV{NEW_VER}/g;
     s/(git push origin v)\d+\.\d+\.\d+/$1$ENV{NEW_VER}/g;
   ' "$file"
