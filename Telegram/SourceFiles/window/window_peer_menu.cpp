@@ -14,7 +14,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "custom_backend/native_bridge.h"
 #include "custom_backend/native_message_actions_adapter.h"
 #include "base/call_delayed.h"
-#include "core/file_utilities.h"
 #include "menu/menu_check_item.h"
 #include "menu/menu_mark_as_read.h"
 #include "boxes/about_box.h"
@@ -312,6 +311,7 @@ private:
 	void addTogglePin();
 	void addToggleMuteSubmenu(bool addSeparator);
 	void addCreateMeet();
+	void addContactInHistory();
 	void addSupportInfo();
 	void addInfo();
 	void addStoryArchive();
@@ -710,6 +710,13 @@ void Filler::addCreateMeet() {
 	}, &st::menuIconPhone);
 }
 
+void Filler::addContactInHistory() {
+	if (!CustomBackend::Enabled()) {
+		return;
+	}
+	addEditContact();
+}
+
 void Filler::addToggleFolder() {
 	const auto controller = _controller;
 	const auto history = _request.key.history();
@@ -971,14 +978,6 @@ void Filler::addBlockUser() {
 		return;
 	}
 	const auto window = _controller;
-	if (CustomBackend::Enabled()) {
-		_addAction(tr::lng_profile_block_user(tr::now), [=] {
-			const auto &session = user->session();
-			File::OpenUrl(session.createInternalLinkFull(
-				session.user()->username() + u"/settings/blocked"_q));
-		}, &st::menuIconBlock);
-		return;
-	}
 	const auto blockText = [](not_null<UserData*> user) {
 		return user->isBlocked()
 			? ((user->isBot() && !user->isSupport())
@@ -1197,9 +1196,6 @@ void Filler::addShareContact() {
 }
 
 void Filler::addEditContact() {
-	if (CustomBackend::DisableWhile) {
-		return;
-	}
 	const auto user = _peer->asUser();
 	if (!user || !user->isContact() || user->isSelf()) {
 		return;
@@ -2002,6 +1998,7 @@ void Filler::fillHistoryActions() {
 	addCreateTopic();
 	addInfo();
 	addCreateMeet();
+	addContactInHistory();
 	addViewAsTopics();
 	addManageChat();
 	addStoryArchive();

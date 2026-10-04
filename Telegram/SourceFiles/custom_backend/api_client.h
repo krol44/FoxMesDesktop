@@ -97,6 +97,8 @@ public:
 
     void users(const QString &query, Callback done);
     void user(qint64 userId, Callback done);
+    void setUserBlocked(qint64 userId, bool blocked, Callback done);
+    void setUserContact(qint64 userId, QJsonObject fields, Callback done);
     void reactionsCatalog(Callback done);
     void reactionUsage(Callback done);
 

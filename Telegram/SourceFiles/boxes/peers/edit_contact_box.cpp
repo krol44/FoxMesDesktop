@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/peers/edit_contact_box.h"
 
 #include "api/api_peer_photo.h"
+#include "custom_backend/native_contacts_adapter.h"
+#include "custom_backend/native_runtime.h"
 #include "api/api_text_entities.h"
 #include "apiwrap.h"
 #include "base/call_delayed.h"
@@ -952,6 +954,10 @@ void EditContactBox(
 		not_null<Ui::GenericBox*> box,
 		not_null<Window::SessionController*> window,
 		not_null<UserData*> user) {
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Contacts::FillEditBox(box, window, user);
+		return;
+	}
 	box->setWidth(st::boxWideWidth);
 	box->lifetime().make_state<Controller>(box, window, user)->prepare();
 }
@@ -960,6 +966,10 @@ void EditContactNoteBox(
 		not_null<Ui::GenericBox*> box,
 		not_null<Window::SessionController*> window,
 		not_null<UserData*> user) {
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Contacts::FillEditBox(box, window, user, true);
+		return;
+	}
 	box->setWidth(st::boxWideWidth);
 	box->lifetime().make_state<Controller>(
 		box,

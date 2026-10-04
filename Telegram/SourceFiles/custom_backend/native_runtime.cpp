@@ -10,8 +10,10 @@
 #include "base/algorithm.h"
 #include "custom_backend/api_client.h"
 #include "custom_backend/native_bridge.h"
+#include "custom_backend/native_contacts_adapter.h"
 #include "custom_backend/token_store.h"
 #include "data/data_peer.h"
+#include "data/data_user.h"
 #include "lang/lang_keys.h"
 #include "main/main_account.h"
 #include "main/main_session.h"
@@ -462,6 +464,10 @@ void UploadPeerPhoto(
         not_null<PeerData*> peer,
         QImage &&image,
         std::function<void()> done) {
+    if (const auto user = peer->asUser(); user && !user->isSelf()) {
+        Contacts::UploadPhoto(user, std::move(image), std::move(done));
+        return;
+    }
     const auto channel = peer->asChannel();
     const auto bridge = channel ? BridgeFor(&peer->session()) : nullptr;
     if (bridge) {

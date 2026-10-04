@@ -1,62 +1,68 @@
 #include "tgcalls/platform/darwin/H265BitrateRecovery.h"
-#include <cassert>
+#include <cstdlib>
+#define REQUIRE(value) do { if (!(value)) { std::cerr << #value << " at " << __LINE__ << "\n"; std::abort(); } } while (false)
 #include <iostream>
 
 namespace {
 constexpr auto kHealthy = uint32_t(30000000);
-constexpr auto kRecovered = uint32_t(49000000);
 constexpr auto kLow = uint32_t(400000);
 
 tgcalls::H265BitrateRecovery AfterDip() {
     auto result = tgcalls::H265BitrateRecovery();
-    assert(!result.update(0, kHealthy, kLow, 25));
-    assert(!result.update(1000, kLow, kLow, 40));
-    assert(!result.update(2000, kLow, kLow, 51));
+    REQUIRE(!result.update(0, kHealthy, kLow, 25));
+    REQUIRE(!result.update(1000, kLow, kLow, 40));
+    REQUIRE(!result.update(2000, kLow, kLow, 51));
     return result;
 }
 }
 
 int main() {
+    // Recorded failure: target stays at 9.8 Mbps instead of returning to the
+    // old 30 Mbps peak; QP 51 and 228 kbps output must still trigger recovery.
     auto stuck = AfterDip();
     for (auto time = 3000; time < 6000; time += 100) {
-        assert(!stuck.update(time, kRecovered, kLow, 51));
+        REQUIRE(!stuck.update(time, 9800000, 228000, 51));
     }
-    assert(stuck.update(6000, kRecovered, kLow, 51));
+    REQUIRE(stuck.update(6000, 9800000, 228000, 51));
     for (auto time = 6100; time < 36000; time += 100) {
-        assert(!stuck.update(time, kRecovered, kLow, 51));
+        REQUIRE(!stuck.update(time, 9800000, 228000, 51));
     }
-    assert(stuck.update(36000, kRecovered, kLow, 51));
-    assert(!stuck.update(37000, kRecovered, kLow, 24));
-    for (auto time = 38000; time < 100000; time += 1000) {
-        assert(!stuck.update(time, kRecovered, kLow, 51));
-    }
+    REQUIRE(stuck.update(36000, 9800000, 228000, 51));
+    REQUIRE(!stuck.update(37000, 9800000, 228000, 24));
+    REQUIRE(!stuck.update(38000, 9800000, 228000, 51));
+    REQUIRE(!stuck.update(65999, 9800000, 228000, 51));
+    REQUIRE(stuck.update(66000, 9800000, 228000, 51));
+
+    auto startup = tgcalls::H265BitrateRecovery();
+    REQUIRE(!startup.update(0, 9800000, 228000, 51));
+    REQUIRE(!startup.update(2999, 9800000, 228000, 51));
+    REQUIRE(startup.update(3000, 9800000, 228000, 51));
 
     auto staticPicture = AfterDip();
-    for (auto time = 3000; time < 60000; time += 100) {
-        assert(!staticPicture.update(time, kRecovered, kLow, 25));
-    }
     auto insufficientBandwidth = AfterDip();
-    for (auto time = 3000; time < 60000; time += 100) {
-        assert(!insufficientBandwidth.update(time, 1000000, kLow, 51));
-    }
     auto expensivePicture = AfterDip();
+    auto paused = AfterDip();
+    auto noOutput = AfterDip();
     for (auto time = 3000; time < 60000; time += 100) {
-        assert(!expensivePicture.update(time, kRecovered, 30000000, 51));
+        REQUIRE(!staticPicture.update(time, 9800000, 228000, 25));
+        REQUIRE(!insufficientBandwidth.update(time, 1000000, 228000, 51));
+        REQUIRE(!expensivePicture.update(time, 9800000, 8000000, 51));
+        REQUIRE(!paused.update(time, 0, 228000, 51));
+        REQUIRE(!noOutput.update(time, 9800000, 0, 51));
     }
-    auto unknownQp = AfterDip();
-    assert(!unknownQp.update(3000, kRecovered, kLow, -1));
     auto transient = AfterDip();
-    assert(!transient.update(3000, kRecovered, kLow, 51));
-    assert(!transient.update(5000, kRecovered, kLow, -1));
-    assert(!transient.update(6000, kRecovered, kLow, 51));
-    assert(!transient.update(8999, kRecovered, kLow, 51));
-    assert(transient.update(9000, kRecovered, kLow, 51));
+    REQUIRE(!transient.update(3000, 9800000, 228000, 51));
+    REQUIRE(!transient.update(5000, 9800000, 228000, -1));
+    REQUIRE(!transient.update(6000, 9800000, 228000, 51));
+    REQUIRE(!transient.update(8999, 9800000, 228000, 51));
+    REQUIRE(transient.update(9000, 9800000, 228000, 51));
 
-    auto gradual = AfterDip();
-    for (auto rate = 800000; rate < 22000000; rate += 800000) {
-        assert(!gradual.update(3000 + rate / 800, rate, kLow, 51));
-    }
-    assert(!gradual.update(40000, 25000000, kLow, 51));
-    assert(gradual.update(43000, 25000000, kLow, 51));
-    std::cout << "H265 bitrate recovery tests passed\n";
+    auto changing = AfterDip();
+    REQUIRE(!changing.update(0, 4000000, 228000, 51));
+    REQUIRE(!changing.update(2000, 8000000, 228000, 51));
+    REQUIRE(!changing.update(4000, 15000000, 228000, 51));
+    REQUIRE(!changing.update(6000, 9800000, 228000, 51));
+    REQUIRE(!changing.update(8999, 9800000, 228000, 51));
+    REQUIRE(changing.update(9000, 9800000, 228000, 51));
+    std::cout << "H265 current-allocation recovery and cooldown tests passed\n";
 }

@@ -18,7 +18,7 @@ int main() {
     params.encodings[1].max_bitrate_bps = 19900000;
     const auto profile = tgcalls::ScreenSharingProfileForQuality(4);
     tgcalls::ConfigureVp9ScreenSharing(params, profile, 720);
-    Require(params.encodings[0].max_bitrate_bps == 20000000);
+    Require(params.encodings[0].max_bitrate_bps == 15000000);
     Require(params.encodings[0].scale_resolution_down_by == 1.0);
     Require(params.encodings[0].active && !params.encodings[1].active);
     Require(params.encodings[0].ssrc == 123 && params.encodings[1].ssrc == 125);
@@ -31,7 +31,7 @@ int main() {
     Require(params.encodings[0].active);
     params.encodings.resize(1);
     tgcalls::ConfigureVp9ScreenSharing(params, profile, 720);
-    Require(params.encodings[0].max_bitrate_bps == 20000000);
+    Require(params.encodings[0].max_bitrate_bps == 15000000);
     params.encodings.resize(2);
     params.encodings[0].ssrc = 123;
     params.encodings[1].ssrc = 125;

@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "api/api_blocked_peers.h"
 
+#include "custom_backend/native_contacts_adapter.h"
+#include "custom_backend/native_runtime.h"
 #include "apiwrap.h"
 #include "base/unixtime.h"
 #include "data/data_changes.h"
@@ -81,6 +83,10 @@ void BlockedPeers::block(not_null<PeerData*> peer) {
 	} else if (blockAlreadySent(peer, true)) {
 		return;
 	}
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Contacts::Block(peer);
+		return;
+	}
 	const auto requestId = _api.request(MTPcontacts_Block(
 		MTP_flags(0),
 		peer->input()
@@ -123,6 +129,10 @@ void BlockedPeers::unblock(
 			Data::PeerUpdate::Flag::IsBlocked);
 		return;
 	} else if (blockAlreadySent(peer, false, done)) {
+		return;
+	}
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Contacts::Unblock(peer, std::move(done));
 		return;
 	}
 	const auto requestId = _api.request(MTPcontacts_Unblock(

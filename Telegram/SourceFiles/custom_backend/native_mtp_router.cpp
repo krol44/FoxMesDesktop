@@ -7,6 +7,7 @@ This file is part of FoxMes Desktop.
 #include "core/application.h"
 #include "custom_backend/native_channels_adapter.h"
 #include "custom_backend/native_conference_adapter.h"
+#include "custom_backend/native_contacts_adapter.h"
 #include "custom_backend/native_topic_channels.h"
 #include "main/main_account.h"
 #include "main/main_domain.h"
@@ -94,6 +95,7 @@ QString ErrorType(
 
 bool Intercepts(const SerializedRequest &request) {
 	return Conferences::Intercepts(request)
+		|| Contacts::Intercepts(request)
 		|| TopicChannels::Intercepts(request)
 		|| Channels::Intercepts(request);
 }
@@ -104,6 +106,8 @@ void Intercept(
 		const SerializedRequest &request) {
 	if (Conferences::Intercepts(request)) {
 		Conferences::Intercept(instance, requestId, request);
+	} else if (Contacts::Intercepts(request)) {
+		Contacts::Intercept(instance, requestId, request);
 	} else if (TopicChannels::Intercepts(request)) {
 		TopicChannels::Intercept(instance, requestId, request);
 	} else {

@@ -75,8 +75,26 @@ int main() {
     stats = Healthy(24);
     stats.cpuLimited = true;
     stats.averageQp = 51;
+    stats.encodeUsagePercent = 210;
     Require(Sample(policy, now, stats, 8) && policy.fps() == 50,
-        "bad image quality must block upward probes and allow reducing CPU load");
+        "real CPU overload must lower FPS even with bitrate-constrained quality");
+
+    stats = Healthy(50);
+    stats.averageQp = 45;
+    Require(Sample(policy, now, stats, 60) && policy.fps() == 60,
+        "high QP at the bitrate cap must not block CPU headroom recovery");
+
+    policy.reset(60, now);
+    stats = Healthy(8);
+    stats.encoderInputFps = 60;
+    stats.averageQp = 45;
+    stats.encodeMs = 7;
+    stats.availableBitrate = 15000000;
+    stats.targetBitrate = 14600000;
+    stats.capture.available = true;
+    stats.capture.deliveredFps = stats.capture.changedFps = 60;
+    Require(!Sample(policy, now, stats, 100) && policy.fps() == 60,
+        "bitrate-constrained frame drops without CPU evidence must not lower selected FPS");
 
     policy.reset(5, now);
     stats = Healthy(5);

@@ -1451,6 +1451,24 @@ void NativeBridge::ensureUser(const QJsonObject &user, bool contact) {
     if (contact && id != client().meId()) {
         data->setIsContact(true);
     }
+	// "blocked" rides only on payloads built for this account, so its
+	// presence also marks the contact fields as stated.
+	if (user.contains(u"blocked"_q)) {
+		data->setIsBlocked(user.value(u"blocked"_q).toBool());
+		_contactViews[id] = ContactView{
+			.name = user.value(u"contact_name"_q).toString(),
+			.photoUrl = user.value(u"contact_photo_url"_q).toString(),
+			.originalName = user.value(u"original_display_name"_q).toString(),
+		};
+		const auto note = user.value(u"contact_note"_q).toString();
+		if (data->note().text != note) {
+			data->setNote(TextWithEntities{ note });
+			// The profile's notes row re-reads note() on FullInfo only.
+			_session->changes().peerUpdated(
+				data,
+				Data::PeerUpdate::Flag::FullInfo);
+		}
+	}
 	const auto avatarId = user.value("avatar_id").toString().trimmed();
 	const auto avatarUrl = user.value("avatar_url").toString().trimmed();
 	const auto revision = avatarId.isEmpty() ? avatarUrl : avatarId;
@@ -1480,6 +1498,11 @@ void NativeBridge::ensureUser(const QJsonObject &user, bool contact) {
 	_session->changes().peerUpdated(
 		data,
 		Data::PeerUpdate::Flag::Photo);
+}
+
+NativeBridge::ContactView NativeBridge::contactView(qint64 userId) const {
+	const auto i = _contactViews.find(userId);
+	return (i == _contactViews.end()) ? ContactView() : i->second;
 }
 
 void NativeBridge::refreshSelf() {

@@ -331,6 +331,13 @@ public:
 		qint64 messageId) const;
 	void ensureUser(const QJsonObject &user, bool contact = false);
 
+	struct ContactView {
+		QString name;
+		QString photoUrl;
+		QString originalName;
+	};
+	[[nodiscard]] ContactView contactView(qint64 userId) const;
+
 	PeerId ensureQuotedChannel(const QJsonObject &channel);
 	[[nodiscard]] bool isOwnMessage(
 		not_null<History*> history,
@@ -631,6 +638,7 @@ private:
 	std::unordered_map<qint64, PendingSendRequest> _pendingSends;
 	std::unordered_map<QString, qint64> _pendingSendNonceToLocalId;
 	std::unordered_map<qint64, QString> _avatarIds;
+	std::unordered_map<qint64, ContactView> _contactViews;
 	std::unordered_map<qint64, std::unordered_map<qint64, qint64>>
 		_presenceObservedAt;
 	std::unordered_set<Window::SessionController*> _trackedWindows;

@@ -2905,9 +2905,6 @@ void ActionsFiller::addShareContactAction(not_null<UserData*> user) {
 }
 
 void ActionsFiller::addEditContactAction(not_null<UserData*> user) {
-	if (CustomBackend::DisableWhile) {
-		return;
-	}
 	const auto controller = _controller->parentController();
 	const auto edit = [=] {
 		if (controller->showFrozenError()) {
@@ -3175,8 +3172,7 @@ void ActionsFiller::fillUserActions(not_null<UserData*> user) {
 	}
 	if (!user->isSelf()
 			&& !user->isSupport()
-			&& !user->isVerifyCodes()
-			&& !CustomBackend::Enabled()) {
+			&& !user->isVerifyCodes()) {
 		addBlockAction(user);
 	}
 }

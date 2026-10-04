@@ -85,6 +85,8 @@ QString UploadTypeFor(const QString &mime, bool forceFile, const QString &kind) 
         return u"audio-message"_q;
     } else if (kind == u"wallpaper"_q) {
         return u"wallpaper-chat"_q;
+    } else if (kind == u"contact_photo"_q) {
+        return u"contact-photo"_q;
     } else if (forceFile) {
         return u"file"_q;
     } else if (mime == u"image/gif"_q) {
@@ -295,6 +297,30 @@ void ApiClient::updateMe(const QString &displayName, Callback done) {
     jsonRequest("PUT", "/me", QJsonDocument(QJsonObject{
         {"display_name", displayName},
     }), std::move(done));
+}
+
+void ApiClient::setUserBlocked(qint64 userId, bool blocked, Callback done) {
+    jsonRequest(
+        blocked ? "PUT" : "DELETE",
+        QString("/users/%1/block").arg(userId),
+        QJsonDocument(QJsonObject{
+            {"operation_id", QUuid::createUuid().toString(QUuid::WithoutBraces)},
+        }),
+        std::move(done));
+}
+
+void ApiClient::setUserContact(
+        qint64 userId,
+        QJsonObject fields,
+        Callback done) {
+    fields.insert(
+        "operation_id",
+        QUuid::createUuid().toString(QUuid::WithoutBraces));
+    jsonRequest(
+        "PUT",
+        QString("/users/%1/contact").arg(userId),
+        QJsonDocument(fields),
+        std::move(done));
 }
 
 void ApiClient::users(const QString &query, Callback done) {
@@ -1470,7 +1496,9 @@ ApiClient::CancelHandle ApiClient::uploadPrepared(
         ProgressCallback progress,
         const QString &kind) {
     const auto type = UploadTypeFor(mime, forceFile, kind);
-    if (type == u"image"_q || type == u"wallpaper-chat"_q) {
+    if (type == u"image"_q
+        || type == u"wallpaper-chat"_q
+        || type == u"contact-photo"_q) {
         return uploadDevice(name, device, mime, target, forceFile, std::move(done), std::move(progress), kind);
     }
     return uploadDeviceChunked(name, device, mime, target, type, std::move(done), std::move(progress));

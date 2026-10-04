@@ -168,6 +168,8 @@ PRIVATE
     custom_backend/topic_channels_prompt.h
     custom_backend/native_mtp_router.cpp
     custom_backend/native_mtp_router.h
+    custom_backend/native_contacts_adapter.cpp
+    custom_backend/native_contacts_adapter.h
     custom_backend/native_meet_adapter.cpp
     custom_backend/native_meet_adapter.h
     custom_backend/native_send_files_adapter.cpp
