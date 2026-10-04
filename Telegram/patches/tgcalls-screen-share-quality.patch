@@ -251,7 +251,7 @@
  } // namespace tgcalls
 --- /dev/null
 +++ b/tgcalls/ScreenSharing.h
-@@ -0,0 +1,134 @@
+@@ -0,0 +1,140 @@
 +#ifndef TGCALLS_SCREEN_SHARING_H
 +#define TGCALLS_SCREEN_SHARING_H
 +#include <algorithm>
@@ -309,6 +309,7 @@
 +    int bitrate = 0;
 +    int inputFps = 0;
 +    double encoderInputFps = 0;
++    std::string configurationError;
 +    bool cpuLimited = false;
 +    std::string codec;
 +    ScreenCaptureStats capture;
@@ -337,7 +338,7 @@
 +    int baselineBitrate() const { return _healthyBandwidth; }
 +    int recoveredSamples() const { return _recoveredSamples; }
 +    int cooldown() const { return _cooldown; }
-+    VideoRecoveryAction update(int bandwidth, int pixels, int fps, bool cpuLimited, int inputFps = 0) {
++    VideoRecoveryAction update(int bandwidth, int pixels, int fps, bool cpuLimited, double sourceFps = 0, double changedFps = -1) {
 +        if (_cooldown > 0) --_cooldown;
 +        if (_healthyBandwidth > 0 && bandwidth < _healthyBandwidth * 0.55) _dip = true;
 +        if (pixels <= 0 || fps <= 0 || bandwidth <= 0 || cpuLimited) {
@@ -364,7 +365,12 @@
 +        if (++_recoveredSamples < 8 || _cooldown > 0) return VideoRecoveryAction::None;
 +        const auto outputRecovered = pixels >= _healthyPixels * 0.90
 +            && (fps >= _healthyFps * 0.75
-+                || (inputFps > 0 && inputFps < _healthyFps * 0.75));
++                // Quiet or genuinely slow capture is not an encoder limit.
++                // Never use the encoder input estimate as capture evidence.
++                || (sourceFps > 0 && sourceFps < _healthyFps * 0.75
++                    && fps >= sourceFps * 0.75)
++                || (changedFps >= 0 && changedFps < _healthyFps * 0.75
++                    && fps >= changedFps * 0.75));
 +        // Keep monitoring a restricted output after a reset. A failed reset
 +        // must not silently mark the stream healthy forever.
 +        _dip = !outputRecovered;
@@ -388,7 +394,7 @@
 +#endif
 --- /dev/null
 +++ b/tgcalls/ScreenSharingMedia.h
-@@ -0,0 +1,102 @@
+@@ -0,0 +1,107 @@
 +#ifndef TGCALLS_SCREEN_SHARING_MEDIA_H
 +#define TGCALLS_SCREEN_SHARING_MEDIA_H
 +#include "ScreenSharing.h"
@@ -480,7 +486,12 @@
 +inline bool ApplyScreenPerformance(cricket::VideoMediaSendChannelInterface *channel, uint32_t ssrc, int fps) {
 +    auto params = channel->GetRtpSendParameters(ssrc);
 +    if (params.encodings.empty()) return false;
-+    for (auto &encoding : params.encodings) encoding.max_framerate = fps;
++    for (auto i = size_t(0); i < params.encodings.size(); ++i) {
++        auto &encoding = params.encodings[i];
++        const auto thumbnail = i + 1 < params.encodings.size()
++            && encoding.requested_resolution && encoding.requested_resolution->height <= 360;
++        encoding.max_framerate = thumbnail ? std::min(fps, 5) : fps;
++    }
 +    const auto error = channel->SetRtpSendParameters(ssrc, params);
 +    if (!error.ok()) {
 +        RTC_LOG(LS_WARNING) << "FoxMes: failed to change screen FPS: " << error.message();
@@ -505,7 +516,17 @@
  webrtc::scoped_refptr<webrtc::VideoTrackSourceInterface> VideoCaptureInterfaceObject::source() {
  	return _videoSource;
  }
-@@ -42,6 +47,7 @@
+@@ -38,10 +43,17 @@
+ }
+
+ void VideoCaptureInterfaceObject::switchToDevice(std::string deviceId, bool isScreenCapture) {
++    if (_isScreenCapture && isScreenCapture && _videoCapturer
++            && _videoCapturer->updateScreenCapture(deviceId, _videoCapturerResolution)) {
++        _screenSharingQuality = ScreenSharingQualityFromDeviceId(deviceId);
++        updateAspectRateAdaptation();
++        return;
++    }
+     if (_videoCapturer) {
  		_videoCapturer->setUncroppedOutput(nullptr);
      }
      _isScreenCapture = isScreenCapture;
@@ -513,7 +534,7 @@
  	if (_videoSource) {
          //this should outlive the capturer
          _videoCapturer = nullptr;
-@@ -86,6 +92,7 @@
+@@ -86,6 +98,7 @@
          }
  		_videoCapturer->setState(_state);
  	}
@@ -521,7 +542,7 @@
  }
 
  void VideoCaptureInterfaceObject::withNativeImplementation(std::function<void(void *)> completion) {
-@@ -111,6 +118,10 @@
+@@ -111,6 +124,10 @@
  }
 
  void VideoCaptureInterfaceObject::updateAspectRateAdaptation() {
@@ -532,7 +553,7 @@
      if (_videoCapturer) {
          if (_videoCapturerResolution.first != 0 && _videoCapturerResolution.second != 0) {
              if (_preferredAspectRatio > 0.01 && _shouldBeAdaptedToReceiverAspectRate) {
-@@ -174,6 +185,12 @@
+@@ -174,6 +191,12 @@
 
  VideoCaptureInterfaceImpl::~VideoCaptureInterfaceImpl() = default;
 
@@ -700,7 +721,7 @@
      }
 
  private:
-@@ -79,9 +87,52 @@
+@@ -79,9 +87,55 @@
  };
  #endif // WEBRTC_MAC
 
@@ -708,7 +729,10 @@
 +// queue. The UI receives a value snapshot and never touches these counters.
 +class CaptureDiagnostics {
 +public:
-+    explicit CaptureDiagnostics(int fps) { _totals.requestedFps = fps; }
++    explicit CaptureDiagnostics(int fps) { setRequestedFps(fps); }
++    void setRequestedFps(int fps) {
++        _totals.requestedFps = totals.requestedFps = _last.requestedFps = fps;
++    }
 +    ScreenCaptureStats totals;
 +    int64_t captureStartedUs = 0;
 +    double captureUs = 0, scaleUs = 0, convertUs = 0, deliverUs = 0;
@@ -754,9 +778,14 @@
 
      void OnCaptureResult(
          webrtc::DesktopCapturer::Result result,
-@@ -93,11 +144,16 @@
+@@ -92,12 +146,21 @@
+ 		std::shared_ptr<rtc::VideoSinkInterface<webrtc::VideoFrame>> sink);
      void setOnFatalError(std::function<void ()>);
      void setOnPause(std::function<void (bool)>);
++    void updateProfile(DesktopCaptureSourceData data) {
++        size_ = data.aspectSize;
++        _lowFrameRate = data.fps <= 5;
++    }
  private:
 -    rtc::scoped_refptr<webrtc::I420Buffer> i420_buffer_;
 +    CaptureDiagnostics &_diagnostics;
@@ -772,11 +801,14 @@
      std::function<void ()> _onFatalError;
      std::function<void (bool)> _onPause;
  };
-@@ -116,9 +172,11 @@
+@@ -116,9 +179,14 @@
      void loop();
      void setOnFatalError(std::function<void ()>);
      void setOnPause(std::function<void (bool)>);
 +    ScreenCaptureStats stats() { return _diagnostics.snapshot(); }
++    void updateProfile(DesktopCaptureSourceData data);
++    void setCaptureFps(int fps);
++    void scheduleNext();
  private:
      CaptureScheduler &_scheduler;
      std::unique_ptr<webrtc::DesktopCapturer> _capturer;
@@ -784,12 +816,13 @@
      SourceFrameCallbackImpl _callback;
      std::shared_ptr<bool> _timerGuard;
      std::function<void()> _onFatalError;
-@@ -126,22 +184,27 @@
+@@ -126,22 +194,28 @@
      bool _isRunning = false;
      bool _fatalError = false;
      bool _currentlyOnPause = false;
 -    double _delayMs = 0.;
 +    DesktopCaptureSchedule _schedule;
++    int _selectedFps = 1, _adaptiveFps = 60, _captureFps = 1;
 +    int64_t _lastLoopStartedUs = 0, _scheduledAtUs = 0;
 
  };
@@ -815,7 +848,7 @@
          if (result == webrtc::DesktopCapturer::Result::ERROR_PERMANENT) {
              if (_onFatalError) {
                  _onFatalError();
-@@ -154,81 +217,81 @@
+@@ -154,81 +228,82 @@
          _onPause(false);
      }
 
@@ -903,6 +936,11 @@
 -
 -	assert(i420Result == 0);
 -	(void)i420Result;
++    // The encoder can retain older frames; obtain an exclusive buffer for each
++    // capture instead of overwriting memory still referenced by WebRTC.
++    auto i420Buffer = _frameBufferPool.CreateI420Buffer(outputSize.width(), outputSize.height());
++    if (!i420Buffer) { ++_diagnostics.totals.poolDrops; return; }
++
 +    const uint8_t *argb = frame->data();
 +    auto argbStride = frame->stride();
 +    const auto scaleStartedUs = rtc::TimeMicros();
@@ -921,10 +959,6 @@
 +    _diagnostics.scaleUs += rtc::TimeMicros() - scaleStartedUs;
 +    ++_diagnostics.scaleSamples;
 +
-+    // The encoder can retain older frames; obtain an exclusive buffer for each
-+    // capture instead of overwriting memory still referenced by WebRTC.
-+    auto i420Buffer = _frameBufferPool.CreateI420Buffer(outputSize.width(), outputSize.height());
-+    if (!i420Buffer) { ++_diagnostics.totals.poolDrops; return; }
 +    const auto convertStartedUs = rtc::TimeMicros();
 +    const auto i420Result = _conversion.convert(
 +        argb, argbStride,
@@ -956,7 +990,7 @@
  }
 
  void SourceFrameCallbackImpl::setOutput(
-@@ -253,8 +316,9 @@
+@@ -253,8 +328,11 @@
      DesktopCaptureSource source,
      DesktopCaptureSourceData data)
  : _scheduler(scheduler)
@@ -964,11 +998,21 @@
 -, _delayMs(1000. / data.fps) {
 +, _diagnostics(data.fps)
 +, _callback(data.aspectSize, data.fps, _diagnostics)
-+, _schedule(data.fps) {
++, _schedule(data.fps)
++, _selectedFps(int(data.fps))
++, _captureFps(int(data.fps)) {
      _callback.setOnFatalError([=, this] {
  		stop();
  		_fatalError = true;
-@@ -312,6 +376,8 @@
+@@ -300,6 +378,7 @@
+     }
+     _capturer->SelectSource(source.uniqueId());
+     _capturer->Start(&_callback);
++    _capturer->SetMaxFrameRate(_captureFps);
+ }
+
+ void DesktopSourceRenderer::start() {
+@@ -312,6 +391,8 @@
  //#endif // WEBRTC_MAC
 
      _isRunning = true;
@@ -977,7 +1021,7 @@
      _timerGuard = std::make_shared<bool>(true);
      loop();
  }
-@@ -333,9 +399,29 @@
+@@ -333,13 +414,62 @@
          return;
      }
 
@@ -1001,14 +1045,47 @@
 +    if (!_isRunning) {
 +        return;
 +    }
-+    _scheduledAtUs = _schedule.next(finishedUs);
++    scheduleNext();
++}
++
++void DesktopSourceRenderer::scheduleNext() {
++    _scheduledAtUs = _schedule.next(rtc::TimeMicros());
      const auto guard = std::weak_ptr<bool>(_timerGuard);
 -    _scheduler.runDelayed(_delayMs, [=, this] {
 +    _scheduler.runAt(_scheduledAtUs, [=, this] {
          if (guard.lock()) {
              loop();
          }
-@@ -379,7 +465,7 @@
+     });
++}
++
++void DesktopSourceRenderer::setCaptureFps(int fps) {
++    _adaptiveFps = std::max(1, fps);
++    const auto captureFps = std::min(_selectedFps, _adaptiveFps);
++    if (_captureFps == captureFps) return;
++    _captureFps = captureFps;
++    if (_capturer) _capturer->SetMaxFrameRate(_captureFps);
++    _schedule.setFps(_captureFps, rtc::TimeMicros());
++    _lastLoopStartedUs = _scheduledAtUs = 0;
++    if (_isRunning) {
++        // Cancel the former cadence without closing or restarting capture.
++        _timerGuard = std::make_shared<bool>(true);
++        scheduleNext();
++    }
++}
++
++void DesktopSourceRenderer::updateProfile(DesktopCaptureSourceData data) {
++    _callback.updateProfile(data);
++    _diagnostics.setRequestedFps(int(data.fps));
++    _selectedFps = std::max(1, int(data.fps));
++    setCaptureFps(_adaptiveFps);
++    // Keep the original portal stream pixels. Scaling is performed below;
++    // renegotiating PipeWire to smaller dimensions would lose Source pixels
++    // unless its original dimensions were tracked independently.
+ }
+
+ void DesktopSourceRenderer::setOnFatalError(std::function<void ()> error) {
+@@ -379,7 +509,7 @@
      if (!ShouldBeDesktopCapture(uniqueKey)) {
  		return DesktopCaptureSource::Invalid();
      }
@@ -1017,7 +1094,7 @@
          return DesktopCaptureSource(0, "pipewire", false);
      }
      const auto windowPrefix = std::string("desktop_capturer_window_");
-@@ -397,6 +483,11 @@
+@@ -397,6 +527,11 @@
          }
      }
      return DesktopCaptureSource::Invalid();
@@ -1029,7 +1106,31 @@
  }
 
  bool ShouldBeDesktopCapture(const std::string &uniqueKey) {
-@@ -458,4 +549,10 @@
+@@ -417,6 +552,23 @@
+
+ DesktopCaptureSourceHelper::~DesktopCaptureSourceHelper() {
+     _renderer->scheduler.runAsync([renderer = _renderer] {
++        renderer->renderer.reset();
++    });
++}
++
++std::function<void(int)> DesktopCaptureSourceHelper::fpsUpdateCallback() const {
++    return [weak = std::weak_ptr<Renderer>(_renderer)](int fps) {
++        if (const auto renderer = weak.lock()) {
++            renderer->scheduler.runAsync([renderer, fps] {
++                if (renderer->renderer) renderer->renderer->setCaptureFps(fps);
++            });
++        }
++    };
++}
++
++void DesktopCaptureSourceHelper::updateProfile(DesktopCaptureSourceData data) const {
++    _renderer->scheduler.runAsync([renderer = _renderer, data] {
++        if (renderer->renderer) renderer->renderer->updateProfile(data);
+     });
+ }
+
+@@ -458,4 +610,10 @@
  	});
  }
 
@@ -1058,9 +1159,16 @@
  bool ShouldBeDesktopCapture(const std::string &uniqueKey);
 
  class DesktopCaptureSourceHelper {
-@@ -43,6 +45,7 @@
+@@ -41,8 +43,13 @@
+ 	void setSecondaryOutput(
+ 		std::shared_ptr<
  		rtc::VideoSinkInterface<webrtc::VideoFrame>> sink) const;
- 	void start() const;
+-	void start() const;
++	// Both operations are serialized on the existing capture scheduler.
++    // The callback holds a weak renderer so the source cannot prolong capture.
++    std::function<void(int)> fpsUpdateCallback() const;
++    void updateProfile(DesktopCaptureSourceData data) const;
++    void start() const;
  	void stop() const;
 +    void getStats(std::function<void(ScreenCaptureStats)> completion) const;
      void setOnFatalError(std::function<void ()>) const;
@@ -1156,7 +1264,17 @@
            assert(!_getVideoSource);
            _getVideoSource = videoCaptureToGetVideoSource(std::move(descriptor.videoCapture));
          }
-@@ -2307,8 +2316,8 @@
+@@ -2192,6 +2201,9 @@
+
+         webrtc::field_trial::InitFieldTrialsFromString(
+             "WebRTC-DataChannel-Dcsctp/Enabled/"
++#if defined(WEBRTC_WIN) || defined(WEBRTC_LINUX)
++            "WebRTC-VideoEncoderSettings/encoder_thread_limit:4/"
++#endif
+             "WebRTC-Audio-Allocation/min:32kbps,max:32kbps/"
+             "WebRTC-Audio-OpusMinPacketLossRate/Enabled-1/"
+             "WebRTC-TaskQueuePacer/Enabled/"
+@@ -2307,8 +2319,8 @@
          peerConnectionFactoryDeps.audio_encoder_factory = webrtc::CreateAudioEncoderFactory<webrtc::AudioEncoderOpus, webrtc::AudioEncoderL16>();
          peerConnectionFactoryDeps.audio_decoder_factory = webrtc::CreateAudioDecoderFactory<webrtc::AudioDecoderOpus, webrtc::AudioDecoderL16>();
 
@@ -1167,7 +1285,7 @@
 
  #if USE_RNNOISE
          if (_audioLevelsUpdated && audioProcessor) {
-@@ -2352,6 +2361,7 @@
+@@ -2352,6 +2364,7 @@
              webrtc::CallConfig callConfig(_webrtcEnvironment, _threads->getNetworkThread());
              callConfig.neteq_factory = _netEqFactory.get();
              callConfig.audio_state = _channelManager->media_engine()->voice().GetAudioState();
@@ -1175,7 +1293,7 @@
              _call = peerConnectionFactoryDeps.media_factory->CreateCall(callConfig);
          });
 
-@@ -2414,7 +2424,52 @@
+@@ -2414,7 +2427,73 @@
          }, webrtc::TimeDelta::Millis(delayMs));
      }
 
@@ -1190,9 +1308,24 @@
 +        if (_videoContentType == VideoContentType::Screencast
 +            && _outgoingVideoChannel && _getVideoSource
 +            && !_outgoingVideoSsrcs.simulcastLayers.empty()) {
++            if (_videoCapture) {
++                const auto generation = _captureStatsGeneration;
++                const auto weak = std::weak_ptr<GroupInstanceCustomInternal>(shared_from_this());
++                _videoCapture->getScreenCaptureStats([weak, generation, threads = _threads](ScreenCaptureStats stats) {
++                    threads->getMediaThread()->PostTask([weak, generation, stats] {
++                        if (const auto strong = weak.lock()) {
++                            if (strong->_captureStatsGeneration != generation) return;
++                            strong->_captureStats = stats;
++                            strong->_captureStatsTime = rtc::TimeMillis();
++                        }
++                    });
++                });
++            }
 +            _threads->getWorkerThread()->BlockingCall([&] {
 +                auto channel = _outgoingVideoChannel->send_channel();
 +                auto stats = ReadOutgoingVideoStats(channel, _statsAccumulator);
++                if (_captureStatsTime && rtc::TimeMillis() - _captureStatsTime <= 3000) stats.capture = _captureStats;
++                stats.configurationError = _configurationError;
 +                const auto network = _call->GetStats();
 +                stats.availableBitrate = network.send_bandwidth_bps;
 +                stats.rttMs = network.rtt_ms;
@@ -1200,15 +1333,21 @@
 +                _screenSharingStats = stats;
 +                const auto now = rtc::TimeMillis();
 +                const auto previousPerformance = _performance;
-+                auto performanceChanged = _performance.update(now, stats);
++                const auto params = channel->GetRtpSendParameters(_outgoingVideoSsrcs.simulcastLayers[0].ssrc);
++                const auto vp9 = _selectedPayloadType && _selectedPayloadType->videoCodec.name == cricket::kVp9CodecName;
++                const auto fullLayerRequested = !params.encodings.empty()
++                    && (vp9 ? params.encodings.front().active : params.encodings.back().active);
++                if (!fullLayerRequested) _performance.suspend(now);
++                auto performanceChanged = fullLayerRequested && _performance.update(now, stats);
 +                if (performanceChanged && !ApplyScreenPerformance(channel,
 +                        _outgoingVideoSsrcs.simulcastLayers[0].ssrc, _performance.fps())) {
 +                    _performance = previousPerformance;
 +                    _performance.suspend(now);
 +                    performanceChanged = false;
 +                }
-+                const auto action = performanceChanged ? VideoRecoveryAction::None
-+                    : _recovery.update(network.send_bandwidth_bps, stats.width * stats.height, stats.fps, stats.cpuLimited, stats.inputFps);
++                const auto action = (performanceChanged || !fullLayerRequested) ? VideoRecoveryAction::None
++                    : _recovery.update(network.send_bandwidth_bps, stats.width * stats.height, stats.fps, stats.cpuLimited, stats.capture.available ? stats.capture.deliveredFps : 0,
++                        stats.capture.available ? stats.capture.changedFps : -1);
 +                if (action == VideoRecoveryAction::RefreshFrame) {
 +                    channel->GenerateSendKeyFrame(_outgoingVideoSsrcs.simulcastLayers[0].ssrc, {});
 +                } else if (action == VideoRecoveryAction::ResetAdaptation) {
@@ -1228,7 +1367,7 @@
          const auto weak = std::weak_ptr<GroupInstanceCustomInternal>(shared_from_this());
          _threads->getWorkerThread()->PostTask([weak]() {
              auto strong = weak.lock();
-@@ -2485,7 +2540,9 @@
+@@ -2485,7 +2564,9 @@
              videoOptions.is_screencast = true;
              #endif
          }
@@ -1239,7 +1378,7 @@
          _threads->getNetworkThread()->BlockingCall([&]() {
              _outgoingVideoChannel->SetRtpTransport(_rtpTransport);
          });
-@@ -2540,7 +2597,10 @@
+@@ -2540,7 +2621,10 @@
              outgoingVideoCodecs.push_back(_selectedPayloadType->rtxCodec.value());
          }
          outgoingVideoDescription->set_codecs(outgoingVideoCodecs);
@@ -1251,7 +1390,7 @@
          outgoingVideoDescription->AddStream(videoSendStreamParams);
 
          auto incomingVideoDescription = std::make_unique<cricket::VideoContentDescription>();
-@@ -2551,7 +2611,10 @@
+@@ -2551,7 +2635,10 @@
          incomingVideoDescription->set_rtcp_reduced_size(true);
          incomingVideoDescription->set_direction(webrtc::RtpTransceiverDirection::kRecvOnly);
          incomingVideoDescription->set_codecs(outgoingVideoCodecs);
@@ -1263,45 +1402,59 @@
 
          _threads->getWorkerThread()->BlockingCall([&]() {
              std::string errorDesc;
-@@ -2578,7 +2641,10 @@
+@@ -2578,44 +2665,27 @@
          if (_videoContentType == VideoContentType::Screencast) {
              _threads->getWorkerThread()->BlockingCall([this]() {
                  webrtc::RtpParameters rtpParameters = _outgoingVideoChannel->send_channel()->GetRtpSendParameters(_outgoingVideoSsrcs.simulcastLayers[0].ssrc);
 -                if (rtpParameters.encodings.size() == 3) {
+-                    for (int i = 0; i < (int)rtpParameters.encodings.size(); i++) {
+-                        if (i == 0) {
+-                            rtpParameters.encodings[i].min_bitrate_bps = 50000;
+-                            rtpParameters.encodings[i].max_bitrate_bps = 100000;
+-                            rtpParameters.encodings[i].scale_resolution_down_by = 4.0;
+-                            rtpParameters.encodings[i].active = _outgoingVideoConstraint >= 180;
+-                        } else if (i == 1) {
+-                            rtpParameters.encodings[i].min_bitrate_bps = 150000;
+-                            rtpParameters.encodings[i].max_bitrate_bps = 200000;
+-                            rtpParameters.encodings[i].scale_resolution_down_by = 2.0;
+-                            rtpParameters.encodings[i].active = _outgoingVideoConstraint >= 360;
+-                        } else if (i == 2) {
+-                            rtpParameters.encodings[i].min_bitrate_bps = 300000;
+-                            rtpParameters.encodings[i].max_bitrate_bps = 800000 + 100000;
+-                            rtpParameters.encodings[i].active = _outgoingVideoConstraint >= 720;
+-                        }
+-                    }
+-                } else if (rtpParameters.encodings.size() == 2) {
+-                    for (int i = 0; i < (int)rtpParameters.encodings.size(); i++) {
+-                        if (i == 0) {
+-                            rtpParameters.encodings[i].min_bitrate_bps = 50000;
+-                            rtpParameters.encodings[i].max_bitrate_bps = 100000;
+-                            rtpParameters.encodings[i].scale_resolution_down_by = 2.0;
+-                        } else if (i == 1) {
+-                            rtpParameters.encodings[i].min_bitrate_bps = 200000;
+-                            rtpParameters.encodings[i].max_bitrate_bps = 900000 + 100000;
+-                        }
+-                    }
 +                if (rtpParameters.encodings.empty()) return;
 +                if (_selectedPayloadType && _selectedPayloadType->videoCodec.name == cricket::kVp9CodecName) {
 +                    ConfigureVp9ScreenSharing(rtpParameters, _screenProfile, _outgoingVideoConstraint);
-+                } else if (rtpParameters.encodings.size() == 3) {
-                     for (int i = 0; i < (int)rtpParameters.encodings.size(); i++) {
-                         if (i == 0) {
-                             rtpParameters.encodings[i].min_bitrate_bps = 50000;
-@@ -2592,7 +2658,7 @@
-                             rtpParameters.encodings[i].active = _outgoingVideoConstraint >= 360;
-                         } else if (i == 2) {
-                             rtpParameters.encodings[i].min_bitrate_bps = 300000;
--                            rtpParameters.encodings[i].max_bitrate_bps = 800000 + 100000;
-+                            rtpParameters.encodings[i].max_bitrate_bps = _screenProfile.maxBitrate - 300000;
-                             rtpParameters.encodings[i].active = _outgoingVideoConstraint >= 720;
-                         }
-                     }
-@@ -2604,18 +2670,21 @@
-                             rtpParameters.encodings[i].scale_resolution_down_by = 2.0;
-                         } else if (i == 1) {
-                             rtpParameters.encodings[i].min_bitrate_bps = 200000;
--                            rtpParameters.encodings[i].max_bitrate_bps = 900000 + 100000;
-+                            rtpParameters.encodings[i].max_bitrate_bps = _screenProfile.maxBitrate - 100000;
-                         }
-                     }
                  } else {
 -                    rtpParameters.encodings[0].max_bitrate_bps = (800000 + 100000) * 2;
 -                }
 -
-+                    rtpParameters.encodings[0].max_bitrate_bps = _screenProfile.maxBitrate;
+-                _outgoingVideoChannel->send_channel()->SetRtpSendParameters(_outgoingVideoSsrcs.simulcastLayers[0].ssrc, rtpParameters);
++                    ConfigureH264ScreenSharing(rtpParameters, _screenProfile,
++                        _outgoingVideoConstraint, _performance.fps());
 +                }
 +
 +                rtpParameters.degradation_preference = webrtc::DegradationPreference::MAINTAIN_RESOLUTION;
-+                for (auto &encoding : rtpParameters.encodings) encoding.max_framerate = _performance.fps();
-                 _outgoingVideoChannel->send_channel()->SetRtpSendParameters(_outgoingVideoSsrcs.simulcastLayers[0].ssrc, rtpParameters);
++                if (_selectedPayloadType && _selectedPayloadType->videoCodec.name == cricket::kVp9CodecName) {
++                    for (auto &encoding : rtpParameters.encodings) encoding.max_framerate = _performance.fps();
++                }
++                const auto error = _outgoingVideoChannel->send_channel()->SetRtpSendParameters(
++                    _outgoingVideoSsrcs.simulcastLayers[0].ssrc, rtpParameters);
++                _configurationError = error.ok() ? std::string() : error.message();
++                if (!error.ok()) RTC_LOG(LS_WARNING) << "FoxMes: failed to apply group screen profile: " << error.message();
              });
          } else {
              _threads->getWorkerThread()->BlockingCall([this]() {
@@ -1310,7 +1463,7 @@
                  if (rtpParameters.encodings.size() == 3) {
                      for (int i = 0; i < (int)rtpParameters.encodings.size(); i++) {
                          if (i == 0) {
-@@ -3118,7 +3187,7 @@
+@@ -3118,7 +3188,7 @@
              std::string codecName;
              switch (name) {
              case VideoCodecName::VP8: {
@@ -1319,7 +1472,7 @@
                  break;
              }
              case VideoCodecName::VP9: {
-@@ -3138,8 +3207,7 @@
+@@ -3138,8 +3208,7 @@
              }
          }
          std::vector<std::string> defaultCodecPriorities = {
@@ -1329,7 +1482,7 @@
          };
 
          bool enableH264 = false;
-@@ -3199,10 +3267,14 @@
+@@ -3199,10 +3268,14 @@
          if (_getVideoSource) {
              preferences.min_bitrate_bps = _minOutgoingVideoBitrateKbit * 1024;
              if (resetStartBitrate) {
@@ -1346,7 +1499,7 @@
              } else {
                  preferences.max_bitrate_bps = std::max(preferences.min_bitrate_bps, (1020 + 32) * 1000);
              }
-@@ -3370,12 +3442,15 @@
+@@ -3370,12 +3443,15 @@
                          const auto idealHeight = videoConstraints->second.object_items().find("idealHeight");
                          if (idealHeight != videoConstraints->second.object_items().end() && idealHeight->second.is_number()) {
                              int outgoingVideoConstraint = idealHeight->second.int_value();
@@ -1365,7 +1518,7 @@
 
                                      const auto weak = std::weak_ptr<GroupInstanceCustomInternal>(shared_from_this());
                                      _threads->getMediaThread()->PostDelayedTask([weak, requestId]() {
-@@ -3392,8 +3467,6 @@
+@@ -3392,8 +3468,6 @@
                                          }
                                      }, webrtc::TimeDelta::Millis(2000));
                                  } else {
@@ -1374,13 +1527,17 @@
                                      _outgoingVideoConstraint = outgoingVideoConstraint;
                                      adjustVideoSendParams();
                                  }
-@@ -3812,8 +3885,28 @@
+@@ -3812,8 +3886,32 @@
      }
 
      void setVideoCapture(std::shared_ptr<VideoCaptureInterface> videoCapture, bool isInitializing) {
 +        const auto resetScreen = bool(_getVideoSource) && bool(videoCapture)
 +            && !isInitializing && _videoContentType == VideoContentType::Screencast;
          _videoCapture = videoCapture;
++        ++_captureStatsGeneration;
++        _captureStats = {};
++        _captureStatsTime = 0;
++        _configurationError.clear();
 +        _recovery = VideoQualityRecovery();
 +        _statsAccumulator = ScreenSharingStatsAccumulator();
 +        if (videoCapture && _videoContentType == VideoContentType::Screencast) {
@@ -1403,7 +1560,7 @@
      }
 
      void setAudioOutputDevice(const std::string &id) {
-@@ -4397,7 +4490,8 @@
+@@ -4397,7 +4495,8 @@
              if (const auto result = check(_createAudioDeviceModule(&_webrtcEnvironment.task_queue_factory()))) {
                  return result;
              }
@@ -1413,7 +1570,7 @@
              FakeAudioDeviceModule::Options options;
              options.num_channels = 1;
              return check(FakeAudioDeviceModule::Creator(nullptr, _externalAudioRecorder, options)(&_webrtcEnvironment.task_queue_factory()));
-@@ -4421,6 +4515,11 @@
+@@ -4421,6 +4520,15 @@
      std::function<std::shared_ptr<BroadcastPartTask>(std::function<void(int64_t)>)> _requestCurrentTime;
      std::function<std::shared_ptr<BroadcastPartTask>(int64_t, int64_t, std::function<void(BroadcastPart &&)>)> _requestAudioBroadcastPart;
      std::function<std::shared_ptr<BroadcastPartTask>(int64_t, int64_t, int32_t, VideoChannelDescription::Quality, std::function<void(BroadcastPart &&)>)> _requestVideoBroadcastPart;
@@ -1422,10 +1579,14 @@
 +    VideoQualityRecovery _recovery;
 +    ScreenSharingPerformance _performance;
 +    ScreenSharingStatsAccumulator _statsAccumulator;
++    ScreenCaptureStats _captureStats;
++    int64_t _captureStatsTime = 0;
++    uint64_t _captureStatsGeneration = 0;
++    std::string _configurationError;
      std::shared_ptr<VideoCaptureInterface> _videoCapture;
      std::shared_ptr<VideoSinkImpl> _videoCaptureSink;
      std::function<webrtc::scoped_refptr<webrtc::VideoTrackSourceInterface>()> _getVideoSource;
-@@ -4446,6 +4545,8 @@
+@@ -4446,6 +4554,8 @@
      std::unique_ptr<webrtc::RtcEventLogNull> _eventLog;
      webrtc::Environment _webrtcEnvironment;
      std::unique_ptr<webrtc::NetEqFactory> _netEqFactory;
@@ -1434,7 +1595,7 @@
      std::unique_ptr<webrtc::Call> _call;
      webrtc::LocalAudioSinkAdapter _audioSource;
      std::shared_ptr<AudioDeviceDataObserverShared> _audioDeviceDataObserverShared;
-@@ -4708,3 +4809,11 @@
+@@ -4708,3 +4818,11 @@
  }
 
  } // namespace tgcalls
@@ -1652,8 +1813,35 @@
  #include "tgcalls/platform/tdesktop/VideoCapturerInterfaceImpl.h"
 
  #include "tgcalls/platform/tdesktop/VideoCapturerTrackSource.h"
-@@ -34,28 +35,24 @@
- , _sink(GetSink(source))
+@@ -8,18 +9,19 @@
+ #endif // TGCALLS_DISABLE_DESKTOP_CAPTURE
+
+ #include "pc/video_track_source_proxy.h"
++#include <limits>
+
+ namespace tgcalls {
+ namespace {
+
+-std::shared_ptr<rtc::VideoSinkInterface<webrtc::VideoFrame>> GetSink(
++VideoCapturerTrackSource *GetTrackSource(
+ 	const rtc::scoped_refptr<
+ 		webrtc::VideoTrackSourceInterface> &nativeSource) {
+ 	const auto proxy = static_cast<webrtc::VideoTrackSourceProxy*>(
+ 		nativeSource.get());
+ 	const auto internal = static_cast<VideoCapturerTrackSource*>(
+ 		proxy->internal());
+-	return internal->sink();
++	return internal;
+ }
+
+ } // namespace
+@@ -31,34 +33,33 @@
+ 	std::shared_ptr<PlatformContext> platformContext,
+ 	std::pair<int, int> &outResolution)
+ : _source(source)
+-, _sink(GetSink(source))
++, _deviceId(deviceId)
++, _sink(GetTrackSource(source)->sink())
  , _stateUpdated(stateUpdated) {
  #ifdef TGCALLS_UWP_DESKTOP
 -	if (deviceId == "GraphicsCaptureItem")
@@ -1679,26 +1867,64 @@
  			source,
  			data);
  		_desktopCapturer->setOutput(_sink);
++        GetTrackSource(_source)->setCaptureFpsUpdated(_desktopCapturer->fpsUpdateCallback());
  		_desktopCapturer->start();
 -		outResolution = { 1280, 960 };
 +		outResolution = { data.aspectSize.width, data.aspectSize.height };
  	} else if (!ShouldBeDesktopCapture(deviceId))
  #endif // TGCALLS_UWP_DESKTOP
  	{
-@@ -96,6 +93,13 @@
- 	if (_cameraCapturer) {
- 		_cameraCapturer->setPreferredCaptureAspectRatio(aspectRatio);
- 	}
++        GetTrackSource(_source)->setSelectedFps(std::numeric_limits<int>::max());
+ 		_cameraCapturer = std::make_unique<VideoCameraCapturer>(_sink);
+ 		_cameraCapturer->setDeviceId(deviceId);
+ 		_cameraCapturer->setState(VideoState::Active);
+@@ -67,6 +68,22 @@
+ }
+
+ VideoCapturerInterfaceImpl::~VideoCapturerInterfaceImpl() {
++    GetTrackSource(_source)->setCaptureFpsUpdated(nullptr);
 +}
 +
++bool VideoCapturerInterfaceImpl::updateScreenCapture(const std::string &deviceId,
++        std::pair<int, int> &outResolution) {
++#ifndef TGCALLS_UWP_DESKTOP
++    if (_desktopCapturer && ShouldBeDesktopCapture(deviceId)
++            && ScreenSharingSourceId(deviceId) == ScreenSharingSourceId(_deviceId)) {
++        const auto data = DesktopCaptureDataForKey(deviceId);
++        _desktopCapturer->updateProfile(data);
++        _deviceId = deviceId;
++        outResolution = { data.aspectSize.width, data.aspectSize.height };
++        return true;
++    }
++#endif
++    return false;
+ }
+
+ void VideoCapturerInterfaceImpl::setState(VideoState state) {
+@@ -98,8 +115,23 @@
+ 	}
+ }
+
 +void VideoCapturerInterfaceImpl::getScreenCaptureStats(std::function<void(ScreenCaptureStats)> completion) {
 +#ifndef TGCALLS_UWP_DESKTOP
 +    if (_desktopCapturer) { _desktopCapturer->getStats(std::move(completion)); return; }
 +#endif
 +    completion({});
- }
-
++}
++
  void VideoCapturerInterfaceImpl::setUncroppedOutput(
+ 		std::shared_ptr<rtc::VideoSinkInterface<webrtc::VideoFrame>> sink) {
++#ifndef TGCALLS_UWP_DESKTOP
++    if (_desktopCapturer) {
++        _uncroppedSink = std::move(sink);
++        // Preview is not an encoder and must not override its FPS wants.
++        _desktopCapturer->setSecondaryOutput(_uncroppedSink);
++        return;
++    }
++#endif
+ 	if (_uncroppedSink != nullptr) {
+ 		_source->RemoveSink(_uncroppedSink.get());
+ 	}
 --- a/tgcalls/platform/uwp/UwpScreenCapturer.cpp
 +++ b/tgcalls/platform/uwp/UwpScreenCapturer.cpp
 @@ -16,9 +16,9 @@
@@ -1841,12 +2067,16 @@
          _threads->getNetworkThread()->BlockingCall([&]() {
              _outgoingVideoChannel->SetRtpTransport(rtpTransport);
          });
-@@ -579,14 +585,31 @@
+@@ -579,14 +585,40 @@
      }
 
      void setVideoCapture(std::shared_ptr<VideoCaptureInterface> videoCapture) {
 +        const auto resetScreen = bool(_videoCapture);
          _videoCapture = videoCapture;
++        ++_captureStatsGeneration;
++        _captureStats = {};
++        _captureStatsTime = 0;
++        _configurationError.clear();
 
          if (_videoCapture) {
              _outgoingVideoChannel->Enable(true);
@@ -1868,24 +2098,42 @@
 +                        encoding.max_framerate = profile.fps;
 +                        encoding.max_bitrate_bps = profile.maxBitrate;
 +                    }
-+                    channel->SetRtpSendParameters(_mainSsrc, params);
-+                    if (resetScreen) RecoverVideoAdaptation(channel, _mainSsrc);
++                    const auto error = channel->SetRtpSendParameters(_mainSsrc, params);
++                    if (!error.ok()) {
++                        _configurationError = error.message();
++                        RTC_LOG(LS_WARNING) << "FoxMes: failed to apply screen profile: " << error.message();
++                    } else if (resetScreen) {
++                        RecoverVideoAdaptation(channel, _mainSsrc);
++                    }
 +                }
              });
 
              const auto weak = std::weak_ptr<OutgoingVideoChannel>(shared_from_this());
-@@ -658,6 +681,46 @@
+@@ -658,6 +690,60 @@
          }
      }
 
 +    ScreenSharingStats sampleVideo(int bandwidth, ScreenBandwidthProbeState &probeState) {
 +        ScreenSharingStats result;
 +        if (!_videoCapture) { probeState.screenLimit = 0; return result; }
++        const auto generation = _captureStatsGeneration;
++        const auto weak = std::weak_ptr<OutgoingVideoChannel>(shared_from_this());
++        _videoCapture->getScreenCaptureStats([weak, generation, threads = _threads](ScreenCaptureStats stats) {
++            threads->getMediaThread()->PostTask([weak, generation, stats] {
++                if (const auto strong = weak.lock()) {
++                    if (strong->_captureStatsGeneration != generation) return;
++                    strong->_captureStats = stats;
++                    strong->_captureStatsTime = rtc::TimeMillis();
++                }
++            });
++        });
 +        _threads->getWorkerThread()->BlockingCall([&]() {
 +            const auto capture = GetVideoCaptureAssumingSameThread(_videoCapture.get());
 +            probeState.screenLimit = capture->isScreenCapture() ? capture->screenSharingProfile().maxBitrate : 0;
 +            auto channel = _outgoingVideoChannel->send_channel();
 +            result = ReadOutgoingVideoStats(channel, _statsAccumulator);
++            if (_captureStatsTime && rtc::TimeMillis() - _captureStatsTime <= 3000) result.capture = _captureStats;
++            result.configurationError = _configurationError;
 +            result.availableBitrate = bandwidth;
 +            const auto network = _call->GetStats();
 +            result.rttMs = network.rtt_ms;
@@ -1900,7 +2148,8 @@
 +                performanceChanged = false;
 +            }
 +            const auto action = performanceChanged ? VideoRecoveryAction::None
-+                : _recovery.update(bandwidth, result.width * result.height, result.fps, result.cpuLimited, result.inputFps);
++                : _recovery.update(bandwidth, result.width * result.height, result.fps, result.cpuLimited, result.capture.available ? result.capture.deliveredFps : 0,
++                    result.capture.available ? result.capture.changedFps : -1);
 +            if (action == VideoRecoveryAction::RefreshFrame) {
 +                channel->GenerateSendKeyFrame(_mainSsrc, {});
 +            } else if (action == VideoRecoveryAction::ResetAdaptation) {
@@ -1921,17 +2170,31 @@
      uint32_t ssrc() const {
          return _mainSsrc;
      }
-@@ -696,6 +759,9 @@
+@@ -696,6 +782,13 @@
  private:
      std::shared_ptr<Threads> _threads;
 
 +    VideoQualityRecovery _recovery;
 +    ScreenSharingPerformance _performance;
 +    ScreenSharingStatsAccumulator _statsAccumulator;
++    ScreenCaptureStats _captureStats;
++    int64_t _captureStatsTime = 0;
++    uint64_t _captureStatsGeneration = 0;
++    std::string _configurationError;
      uint32_t _mainSsrc = 0;
      webrtc::Call *_call = nullptr;
      ChannelManager *_channelManager = nullptr;
-@@ -1136,12 +1202,15 @@
+@@ -946,6 +1039,9 @@
+     _videoCapture(descriptor.videoCapture) {
+         webrtc::field_trial::InitFieldTrialsFromString(
+             "WebRTC-DataChannel-Dcsctp/Enabled/"
++#if defined(WEBRTC_WIN) || defined(WEBRTC_LINUX)
++            "WebRTC-VideoEncoderSettings/encoder_thread_limit:4/"
++#endif
+             "WebRTC-Audio-MinimizeResamplingOnMobile/Enabled/"
+             "WebRTC-Audio-iOS-Holding/Enabled/"
+             "WebRTC-IceFieldTrials/skip_relay_to_non_relay_connections:true/"
+@@ -1136,12 +1232,15 @@
          peerConnectionFactoryDependencies.audio_encoder_factory = webrtc::CreateAudioEncoderFactory<webrtc::AudioEncoderOpus, webrtc::AudioEncoderL16>();
          peerConnectionFactoryDependencies.audio_decoder_factory = webrtc::CreateAudioDecoderFactory<webrtc::AudioDecoderOpus, webrtc::AudioDecoderL16>();
 
@@ -1949,7 +2212,7 @@
          peerConnectionFactoryDependencies.audio_processing = builder.Create();
 
          _availableVideoFormats = peerConnectionFactoryDependencies.video_encoder_factory->GetSupportedFormats();
-@@ -1163,6 +1232,7 @@
+@@ -1163,6 +1262,7 @@
          _threads->getWorkerThread()->BlockingCall([&]() {
              webrtc::CallConfig callConfig(_webrtcEnvironment, _threads->getNetworkThread());
              callConfig.audio_state = _channelManager->media_engine()->voice().GetAudioState();
@@ -1957,7 +2220,7 @@
              _call = peerConnectionFactoryDependencies.media_factory->CreateCall(callConfig);
 
              SetAudioInputDeviceById(_audioDeviceModule.get(), _devicesConfig.audioInputId);
-@@ -1226,7 +1296,18 @@
+@@ -1226,7 +1326,18 @@
          }, webrtc::TimeDelta::Millis(delayMs));
      }
 
@@ -1976,7 +2239,7 @@
          const auto weak = std::weak_ptr<InstanceV2ImplInternal>(shared_from_this());
          _threads->getWorkerThread()->PostTask([weak]() {
              auto strong = weak.lock();
-@@ -1395,7 +1476,7 @@
+@@ -1395,7 +1506,7 @@
                              outgoingAudioContent.value(),
                              _threads
                          ));
@@ -1985,7 +2248,7 @@
                      }
                  }
              }
-@@ -2034,6 +2115,20 @@
+@@ -2034,6 +2145,20 @@
          }
      }
 
@@ -2006,7 +2269,7 @@
      void setRequestedVideoAspect(float aspect) {
      }
 
-@@ -2044,12 +2139,31 @@
+@@ -2044,12 +2169,31 @@
      void setMuteMicrophone(bool muteMicrophone) {
          if (_isMicrophoneMuted != muteMicrophone) {
              _isMicrophoneMuted = muteMicrophone;
@@ -2039,7 +2302,7 @@
          }
      }
 
-@@ -2164,6 +2278,19 @@
+@@ -2164,6 +2308,19 @@
          }
          if (_outgoingVideoChannel) {
              _outgoingVideoChannel->setMaxBitrate(1000 * 1024);
@@ -2059,7 +2322,7 @@
          }
      }
 
-@@ -2237,6 +2364,8 @@
+@@ -2237,6 +2394,8 @@
 
      std::unique_ptr<webrtc::RtcEventLogNull> _eventLog;
      std::unique_ptr<webrtc::TaskQueueFactory> _taskQueueFactory;
@@ -2068,7 +2331,7 @@
      std::unique_ptr<webrtc::Call> _call;
      webrtc::LocalAudioSinkAdapter _audioSource;
      webrtc::scoped_refptr<webrtc::AudioDeviceModule> _audioDeviceModule;
-@@ -2255,12 +2384,15 @@
+@@ -2255,12 +2414,15 @@
      absl::optional<std::string> _outgoingAudioChannelId;
      std::unique_ptr<OutgoingAudioChannel> _outgoingAudioChannel;
      bool _isMicrophoneMuted = false;
@@ -2084,7 +2347,7 @@
      std::shared_ptr<OutgoingVideoChannel> _outgoingScreencastChannel;
 
      bool _isBatteryLow = false;
-@@ -2314,6 +2446,12 @@
+@@ -2314,6 +2476,12 @@
      });
  }
 
@@ -2097,7 +2360,7 @@
  void InstanceV2Impl::setRequestedVideoAspect(float aspect) {
      _internal->perform([aspect](InstanceV2ImplInternal *internal) {
          internal->setRequestedVideoAspect(aspect);
-@@ -2332,6 +2470,18 @@
+@@ -2332,6 +2500,18 @@
      });
  }
 
@@ -2116,7 +2379,7 @@
  void InstanceV2Impl::setIncomingVideoOutput(std::weak_ptr<rtc::VideoSinkInterface<webrtc::VideoFrame>> sink) {
      _internal->perform([sink](InstanceV2ImplInternal *internal) {
          internal->setIncomingVideoOutput(sink);
-@@ -2372,13 +2522,7 @@
+@@ -2372,13 +2552,7 @@
  }
 
  std::vector<std::string> InstanceV2Impl::GetVersions() {
@@ -2131,7 +2394,7 @@
  }
 
  int InstanceV2Impl::GetConnectionMaxLayer() {
-@@ -2424,3 +2568,11 @@
+@@ -2424,3 +2598,11 @@
  }
 
  } // namespace tgcalls
@@ -2385,14 +2648,29 @@
  	virtual void setState(VideoState state) = 0;
 --- a/tgcalls/VideoCapturerInterface.h
 +++ b/tgcalls/VideoCapturerInterface.h
-@@ -20,6 +20,7 @@
+@@ -5,6 +5,7 @@
+
+ #include <memory>
+ #include <functional>
++#include <utility>
+
+ namespace rtc {
+ template <typename VideoFrameT>
+@@ -20,8 +21,13 @@
  class VideoCapturerInterface {
  public:
  	virtual ~VideoCapturerInterface() = default;
 +    virtual void getScreenCaptureStats(std::function<void(ScreenCaptureStats)> completion) { completion({}); }
 
- 	virtual void setState(VideoState state) = 0;
+-	virtual void setState(VideoState state) = 0;
++	// A profile change for the same desktop source must preserve its portal
++    // session. Unsupported backends keep the existing reconstruction path.
++    virtual bool updateScreenCapture(const std::string &deviceId,
++            std::pair<int, int> &outResolution) { return false; }
++    virtual void setState(VideoState state) = 0;
  	virtual void setPreferredCaptureAspectRatio(float aspectRatio) = 0;
+ 	virtual void setUncroppedOutput(std::shared_ptr<rtc::VideoSinkInterface<webrtc::VideoFrame>> sink) = 0;
+     virtual int getRotation() = 0;
 --- a/tgcalls/platform/darwin/VideoCapturerInterfaceImpl.h
 +++ b/tgcalls/platform/darwin/VideoCapturerInterfaceImpl.h
 @@ -22,6 +22,7 @@
@@ -2405,17 +2683,29 @@
      void setUncroppedOutput(std::shared_ptr<rtc::VideoSinkInterface<webrtc::VideoFrame>> sink) override;
 --- a/tgcalls/platform/tdesktop/VideoCapturerInterfaceImpl.h
 +++ b/tgcalls/platform/tdesktop/VideoCapturerInterfaceImpl.h
-@@ -27,6 +27,7 @@
+@@ -26,7 +26,10 @@
+ 		std::pair<int, int> &outResolution);
  	~VideoCapturerInterfaceImpl() override;
 
- 	void setState(VideoState state) override;
+-	void setState(VideoState state) override;
++	bool updateScreenCapture(const std::string &deviceId,
++        std::pair<int, int> &outResolution) override;
++    void setState(VideoState state) override;
 +    void getScreenCaptureStats(std::function<void(ScreenCaptureStats)> completion) override;
  	void setPreferredCaptureAspectRatio(float aspectRatio) override;
  	void setUncroppedOutput(std::shared_ptr<rtc::VideoSinkInterface<webrtc::VideoFrame>> sink) override;
  	int getRotation() override {
+@@ -37,6 +40,7 @@
+
+ private:
+ 	rtc::scoped_refptr<webrtc::VideoTrackSourceInterface> _source;
++    std::string _deviceId;
+ 	std::shared_ptr<rtc::VideoSinkInterface<webrtc::VideoFrame>> _sink;
+ #ifdef TGCALLS_UWP_DESKTOP
+ 	std::unique_ptr<UwpScreenCapturer> _screenCapturer;
 --- /dev/null
 +++ b/tgcalls/desktop_capturer/DesktopCaptureSchedule.h
-@@ -0,0 +1,39 @@
+@@ -0,0 +1,44 @@
 +#ifndef TGCALLS_DESKTOP_CAPTURE_SCHEDULE_H_
 +#define TGCALLS_DESKTOP_CAPTURE_SCHEDULE_H_
 +
@@ -2436,6 +2726,11 @@
 +        _frameIndex = 0;
 +    }
 +
++    void setFps(double fps, int64_t nowUs) {
++        _fps = std::max(1.0, fps);
++        reset(nowUs);
++    }
++
 +    int64_t next(int64_t nowUs) {
 +        // Keep at most the latest overdue slot. A slow capture or a long pause
 +        // must not create a backlog of captures replayed in a burst.
@@ -2447,7 +2742,7 @@
 +    }
 +
 +private:
-+    const double _fps;
++    double _fps;
 +    int64_t _startedUs = 0;
 +    int64_t _frameIndex = 0;
 +};
@@ -3561,7 +3856,7 @@
 +}
 --- /dev/null
 +++ b/tgcalls/ScreenSharingPerformance.h
-@@ -0,0 +1,121 @@
+@@ -0,0 +1,139 @@
 +#ifndef TGCALLS_SCREEN_SHARING_PERFORMANCE_H
 +#define TGCALLS_SCREEN_SHARING_PERFORMANCE_H
 +
@@ -3590,8 +3885,8 @@
 +    // it is not the process CPU percentage. Project usage to the candidate FPS
 +    // before trying it, then back off if that probe causes another restriction.
 +    bool update(int64_t now, const ScreenSharingStats &stats) {
-+        if (now < _notBefore || stats.encoderInputFps <= 0 || stats.fps <= 0
-+            || stats.encodeUsagePercent <= 0) {
++        if (now < _notBefore || (stats.encoderInputFps <= 0
++            && (!stats.capture.available || stats.capture.deliveredFps <= 0))) {
 +            _busySamples = _spareSamples = _probeHealthySamples = 0;
 +            return false;
 +        }
@@ -3604,13 +3899,27 @@
 +        }
 +        const auto hardware = stats.powerEfficientKnown && stats.powerEfficient;
 +        const auto budget = hardware ? 180.0 : 75.0;
-+        const auto projectedUsage = stats.encodeUsagePercent
-+            * double(_fps) / stats.encoderInputFps;
 +        const auto poorQuality = (stats.codec == "H264" || stats.codec == "H265")
 +            && stats.averageQp >= 39;
++        // An input estimator can itself have been throttled by WebRTC. Use
++        // fresh capture supply to distinguish that from a quiet screen or slow
++        // capture, and inspect encoded throughput even when usage looks low.
++        const auto supplied = stats.capture.available
++            ? std::min(double(_fps), stats.capture.deliveredFps)
++            : std::min(double(_fps), stats.encoderInputFps);
++        const auto projectedUsage = stats.encodeUsagePercent
++            * supplied / std::max(1.0, stats.encoderInputFps);
++        const auto moving = stats.capture.available
++            && stats.capture.changedFps >= supplied * 0.65;
++        const auto throughputLimited = moving && supplied > 1
++            && stats.fps < supplied * 0.75;
++        const auto serialOverload = !hardware && moving && stats.encodeMs > 0
++            && stats.encodeMs * supplied > 1050;
 +        const auto restricted = stats.cpuLimited
-+            && stats.encoderInputFps < _fps * 0.85;
-+        const auto overloaded = restricted || projectedUsage > budget;
++            && stats.encoderInputFps < _fps * 0.85
++            && (!stats.capture.available || moving);
++        const auto overloaded = restricted || throughputLimited || serialOverload
++            || (stats.encodeUsagePercent > 0 && projectedUsage > budget);
 +        if (_probing && !overloaded) {
 +            if (++_probeHealthySamples >= 20) {
 +                _probing = false;
@@ -3622,7 +3931,9 @@
 +            _spareSamples = 0;
 +            if (++_busySamples < 8) return false;
 +            _busySamples = 0;
-+            if (!_probing && restricted && projectedUsage < budget && !poorQuality) {
++            if (!_probing && restricted && !serialOverload
++                && stats.fps >= stats.encoderInputFps * 0.85
++                && stats.encodeUsagePercent > 0 && projectedUsage < budget && !poorQuality) {
 +                _probing = true;
 +                _probeHealthySamples = 0;
 +                _notBefore = now + 12000;
@@ -3639,8 +3950,10 @@
 +        _busySamples = 0;
 +        const auto higher = std::min(_maximumFps, nextHigher(_fps));
 +        const auto spare = higher > _fps && !stats.cpuLimited && !poorQuality
-+            && stats.encoderInputFps >= _fps * 0.9
-+            && stats.encodeUsagePercent * double(higher) / stats.encoderInputFps < budget;
++            && stats.encoderInputFps >= _fps * 0.9 && stats.fps >= _fps * 0.85
++            && stats.encodeUsagePercent > 0
++            && stats.encodeUsagePercent * double(higher) / stats.encoderInputFps < budget
++            && (hardware || stats.encodeMs <= 0 || stats.encodeMs * higher < 900);
 +        if (!spare) {
 +            _spareSamples = 0;
 +            return false;
@@ -3736,7 +4049,7 @@
 +#endif
 --- /dev/null
 +++ b/tgcalls/group/GroupScreenSharingParams.h
-@@ -0,0 +1,26 @@
+@@ -0,0 +1,55 @@
 +#ifndef TGCALLS_GROUP_SCREEN_SHARING_PARAMS_H
 +#define TGCALLS_GROUP_SCREEN_SHARING_PARAMS_H
 +
@@ -3758,6 +4071,35 @@
 +        encoding.scale_resolution_down_by = 1.0;
 +        encoding.min_bitrate_bps = i == 0 ? 300000 : 0;
 +        encoding.max_bitrate_bps = profile.maxBitrate;
++    }
++}
++
++// Keep negotiated SSRCs, but encode thumbnail layers at their actual display
++// size. Half of a 5K desktop is not a useful 100 kbps thumbnail.
++inline void ConfigureH264ScreenSharing(webrtc::RtpParameters &params,
++        const ScreenSharingProfile &profile, int constraint, int fps) {
++    for (auto i = size_t(0); i < params.encodings.size(); ++i) {
++        auto &encoding = params.encodings[i];
++        const auto full = i + 1 == params.encodings.size();
++        encoding.scale_resolution_down_by.reset();
++        encoding.requested_resolution.reset();
++        if (full) {
++            if (profile.width > 0 && profile.height > 0) {
++                encoding.requested_resolution = webrtc::Resolution{profile.width, profile.height};
++            }
++            encoding.min_bitrate_bps = params.encodings.size() > 1 ? 200000 : 0;
++            encoding.max_bitrate_bps = profile.maxBitrate - (params.encodings.size() > 2 ? 150000 : params.encodings.size() > 1 ? 100000 : 0);
++            encoding.max_framerate = fps;
++            encoding.active = params.encodings.size() == 1 ? constraint > 0 : constraint >= 720;
++        } else {
++            const auto small = params.encodings.size() > 2 && i == 0;
++            encoding.requested_resolution = small ? webrtc::Resolution{320,180} : webrtc::Resolution{640,360};
++            encoding.min_bitrate_bps = small ? 25000 : 50000;
++            encoding.max_bitrate_bps = small ? 50000 : 100000;
++            encoding.max_framerate = std::min(fps, 5);
++            // With two SSRCs this is also the lowest (180p viewer) layer.
++            encoding.active = constraint >= (i == 0 ? 180 : 360);
++        }
 +    }
 +}
 +
@@ -3889,3 +4231,791 @@
 +
 +} // namespace tgcalls
 +#endif
+--- /dev/null
++++ b/tgcalls/platform/tdesktop/DesktopH264Bitstream.h
+@@ -0,0 +1,67 @@
++#pragma once
++
++#include <cstddef>
++#include <cstdint>
++#include <vector>
++
++namespace tgcalls {
++
++inline bool H264AnnexB(const uint8_t *data, size_t size) {
++    return size >= 3 && !data[0] && !data[1]
++        && (data[2] == 1 || (size >= 4 && !data[2] && data[3] == 1));
++}
++
++// FFmpeg backends may return either Annex B or length-prefixed AVC. RTP's
++// H264 packetizer expects Annex B. Reject truncated lengths, never guess.
++inline bool H264ToAnnexB(const uint8_t *data, size_t size, int lengthBytes,
++        std::vector<uint8_t> &output) {
++    if (!data || !size) return false;
++    if (H264AnnexB(data, size)) {
++        output.assign(data, data + size);
++        return true;
++    }
++    if (lengthBytes < 1 || lengthBytes > 4) return false;
++    output.clear();
++    size_t pos = 0;
++    while (pos < size) {
++        if (size - pos < size_t(lengthBytes)) return false;
++        size_t length = 0;
++        for (int i = 0; i != lengthBytes; ++i) length = (length << 8) | data[pos++];
++        if (!length || length > size - pos) return false;
++        output.insert(output.end(), {0, 0, 0, 1});
++        output.insert(output.end(), data + pos, data + pos + length);
++        pos += length;
++    }
++    return !output.empty();
++}
++
++inline bool H264ParameterSets(const uint8_t *data, size_t size,
++        int &lengthBytes, std::vector<uint8_t> &output) {
++    if (!data || !size) return true;
++    if (H264AnnexB(data, size)) {
++        output.assign(data, data + size);
++        return true;
++    }
++    if (size < 7 || data[0] != 1) return false;
++    lengthBytes = (data[4] & 3) + 1;
++    size_t pos = 6;
++    const int spsCount = data[5] & 31;
++    output.clear();
++    for (int group = 0, count = spsCount; group != 2; ++group) {
++        for (int i = 0; i != count; ++i) {
++            if (size - pos < 2) return false;
++            const size_t length = (size_t(data[pos]) << 8) | data[pos + 1];
++            pos += 2;
++            if (!length || length > size - pos) return false;
++            output.insert(output.end(), {0, 0, 0, 1});
++            output.insert(output.end(), data + pos, data + pos + length);
++            pos += length;
++        }
++        if (!group) {
++            if (pos == size) return false;
++            count = data[pos++];
++        }
++    }
++    return true;
++}
++} // namespace tgcalls
+--- /dev/null
++++ b/tgcalls/platform/tdesktop/DesktopHardwareEncoder.cpp
+@@ -0,0 +1,509 @@
++#include "DesktopHardwareEncoder.h"
++#include "DesktopH264Bitstream.h"
++
++#include "api/video_codecs/h264_profile_level_id.h"
++#include "api/video_codecs/video_encoder_factory.h"
++#include "api/video_codecs/video_encoder_software_fallback_wrapper.h"
++#include "common_video/h264/h264_bitstream_parser.h"
++#include "common_video/h264/h264_common.h"
++#include "media/base/media_constants.h"
++#include "media/engine/internal_encoder_factory.h"
++#include "media/engine/simulcast_encoder_adapter.h"
++#include "modules/video_coding/include/video_codec_interface.h"
++#include "modules/video_coding/include/video_error_codes.h"
++#include "rtc_base/logging.h"
++#include "rtc_base/time_utils.h"
++#include "libyuv/convert.h"
++
++extern "C" {
++#include <libavcodec/avcodec.h>
++#include <libavutil/error.h>
++#include <libavutil/hwcontext.h>
++#include <libavutil/rational.h>
++#include <libavutil/opt.h>
++}
++
++#include <algorithm>
++#include <cmath>
++#include <deque>
++#include <string>
++#include <vector>
++
++#if defined(__linux__)
++#include <dirent.h>
++#endif
++
++namespace tgcalls {
++namespace {
++
++// Hardware drivers may ignore a requested profile. Never send such output
++// under incompatible negotiated SDP: request software fallback instead.
++bool CompatibleSps(const uint8_t *payload, size_t size,
++        const webrtc::CodecParameterMap &parameters) {
++    if (size < 4 || (payload[0] & 31) != 7) return false;
++    const auto requested = webrtc::ParseSdpForH264ProfileLevelId(parameters);
++    static constexpr char hex[] = "0123456789abcdef";
++    char id[7]{};
++    for (int i = 0; i != 3; ++i) {
++        id[i * 2] = hex[payload[i + 1] >> 4];
++        id[i * 2 + 1] = hex[payload[i + 1] & 15];
++    }
++    const auto actual = webrtc::ParseH264ProfileLevelId(id);
++    if (!actual || !requested) return false;
++    // As in upstream OpenH264, constrained baseline is valid when negotiating
++    // Main/High: those decoder profiles are supersets of constrained baseline.
++    return actual->profile == requested->profile
++        || actual->profile == webrtc::H264Profile::kProfileConstrainedBaseline;
++}
++
++struct Backend {
++    const char *name;
++    std::string device;
++};
++
++std::vector<Backend> HardwareBackends() {
++    std::vector<Backend> result;
++#if defined(_WIN32)
++    result.push_back({"h264_nvenc", {}});
++    result.push_back({"h264_mf", {}});
++#elif defined(__linux__)
++    result.push_back({"h264_nvenc", {}});
++    // Try every DRM render node: renderD128 may be a display GPU without a
++    // usable encoder, while another Intel/AMD device can encode this stream.
++    if (auto *directory = opendir("/dev/dri")) {
++        std::vector<std::string> devices;
++        while (auto *entry = readdir(directory)) {
++            const std::string name = entry->d_name;
++            if (name.compare(0, 7, "renderD") == 0) devices.push_back("/dev/dri/" + name);
++        }
++        closedir(directory);
++        std::sort(devices.begin(), devices.end());
++        for (auto &device : devices) result.push_back({"h264_vaapi", std::move(device)});
++    }
++#endif
++    result.erase(std::remove_if(result.begin(), result.end(), [](const Backend &b) {
++        return !avcodec_find_encoder_by_name(b.name);
++    }), result.end());
++    return result;
++}
++
++class HardwareH264Encoder final : public webrtc::VideoEncoder {
++public:
++    explicit HardwareH264Encoder(webrtc::SdpVideoFormat format)
++        : _format(std::move(format)) {}
++    ~HardwareH264Encoder() override { Release(); }
++
++    int InitEncode(const webrtc::VideoCodec *codec, const Settings &) override {
++        Release();
++        if (!codec || codec->codecType != webrtc::kVideoCodecH264
++                || !codec->width || !codec->height || !codec->maxFramerate
++                || (codec->width & 1) || (codec->height & 1)) {
++            return WEBRTC_VIDEO_CODEC_ERR_PARAMETER;
++        }
++        if (codec->numberOfSimulcastStreams > 1) {
++            return WEBRTC_VIDEO_CODEC_ERR_SIMULCAST_PARAMETERS_NOT_SUPPORTED;
++        }
++        const auto profile = webrtc::ParseSdpForH264ProfileLevelId(_format.parameters);
++        if (!profile || profile->profile == webrtc::H264Profile::kProfilePredictiveHigh444) {
++            return WEBRTC_VIDEO_CODEC_FALLBACK_SOFTWARE;
++        }
++        _codec = *codec;
++        _fps = codec->maxFramerate;
++        _bitrate = std::max<int64_t>(10000, int64_t(codec->startBitrate) * 1000);
++        _paused = false;
++        for (const auto &backend : HardwareBackends()) {
++            _backend = backend;
++            if (Open()) {
++                RTC_LOG(LS_INFO) << "Screen/video hardware encoder: " << _backend.name
++                    << " " << _backend.device;
++                return WEBRTC_VIDEO_CODEC_OK;
++            }
++            Close();
++        }
++        RTC_LOG(LS_INFO) << "No usable hardware H264 device; using WebRTC software fallback";
++        return WEBRTC_VIDEO_CODEC_FALLBACK_SOFTWARE;
++    }
++
++    int32_t RegisterEncodeCompleteCallback(webrtc::EncodedImageCallback *callback) override {
++        _callback = callback;
++        return WEBRTC_VIDEO_CODEC_OK;
++    }
++    int32_t Release() override {
++        Close();
++        _pending.clear();
++        _forceKey = true;
++        _failed = false;
++        _nextPts = 0;
++        return WEBRTC_VIDEO_CODEC_OK;
++    }
++
++    int32_t Encode(const webrtc::VideoFrame &frame,
++            const std::vector<webrtc::VideoFrameType> *types) override {
++        if (_failed) return WEBRTC_VIDEO_CODEC_FALLBACK_SOFTWARE;
++        if (!_context || !_callback) return WEBRTC_VIDEO_CODEC_UNINITIALIZED;
++        if (_paused) return WEBRTC_VIDEO_CODEC_OK;
++        if (frame.width() != _codec.width || frame.height() != _codec.height) {
++            return Fail("unexpected resolution");
++        }
++        const auto now = rtc::TimeMillis();
++        if (!_pending.empty() && (now - _pending.front().submitted > 500 || _pending.size() >= 8)) {
++            return Fail("hardware output stalled");
++        }
++        // NVENC reads live AVCodecContext rates. MF/VAAPI in FFmpeg 6.1 do
++        // not: reopen only for significant changes, not every BWE sample.
++        if (NeedsReopen(now)) {
++            Close();
++            for (size_t i = 0; i != _pending.size(); ++i) {
++                _callback->OnDroppedFrame(webrtc::EncodedImageCallback::DropReason::kDroppedByEncoder);
++            }
++            _pending.clear();
++            if (!Open()) return Fail("rate reconfiguration failed");
++            _forceKey = true;
++        }
++        const auto buffer = frame.video_frame_buffer()->ToI420();
++        if (!buffer || av_frame_make_writable(_software) < 0) return Fail("input allocation failed");
++        if (libyuv::I420ToNV12(buffer->DataY(), buffer->StrideY(),
++                buffer->DataU(), buffer->StrideU(), buffer->DataV(), buffer->StrideV(),
++                _software->data[0], _software->linesize[0],
++                _software->data[1], _software->linesize[1], frame.width(), frame.height()) != 0) {
++            return Fail("NV12 conversion failed");
++        }
++        bool key = _forceKey;
++        if (types) for (auto type : *types) key |= type == webrtc::VideoFrameType::kVideoFrameKey;
++        _software->pts = _nextPts;
++        _nextPts += std::max<int64_t>(1, std::llround(90000. / _fps));
++        _software->pict_type = key ? AV_PICTURE_TYPE_I : AV_PICTURE_TYPE_NONE;
++        AVFrame *input = _software;
++        if (_hardware) {
++            av_frame_unref(_hardware);
++            if (av_hwframe_get_buffer(_frames, _hardware, 0) < 0
++                    || av_hwframe_transfer_data(_hardware, _software, 0) < 0
++                    || av_frame_copy_props(_hardware, _software) < 0) {
++                return Fail("GPU upload failed");
++            }
++            input = _hardware;
++        }
++        int result = avcodec_send_frame(_context, input);
++        if (result == AVERROR(EAGAIN)) {
++            if (!Drain()) return Fail("output failed");
++            result = avcodec_send_frame(_context, input);
++        }
++        if (result < 0) return Fail("hardware rejected frame");
++        _pending.push_back({_software->pts, frame.timestamp(), frame.timestamp_us() / 1000,
++            frame.ntp_time_ms(), now, frame.rotation(), frame.color_space()});
++        _forceKey = false;
++        if (!Drain()) return Fail("invalid hardware output");
++        return WEBRTC_VIDEO_CODEC_OK;
++    }
++
++    void SetRates(const RateControlParameters &rates) override {
++        _paused = !rates.bitrate.get_sum_bps();
++        if (_paused || rates.framerate_fps <= 0) return;
++        _bitrate = rates.bitrate.get_sum_bps();
++        _fps = std::min<double>(_codec.maxFramerate, rates.framerate_fps);
++        if (_context && std::string(_backend.name) == "h264_nvenc") {
++            _context->bit_rate = _bitrate;
++            _context->rc_max_rate = _bitrate;
++            _context->rc_buffer_size = std::max<int64_t>(10000, _bitrate / 4);
++            _context->framerate = av_d2q(_fps, 1000);
++        }
++    }
++
++    EncoderInfo GetEncoderInfo() const override {
++        EncoderInfo info;
++        info.implementation_name = std::string("FFmpeg/") + (_context ? _backend.name : "hardware H264");
++        info.is_hardware_accelerated = _context != nullptr;
++        info.supports_simulcast = false;
++        info.supports_native_handle = false;
++        info.has_trusted_rate_controller = false;
++        info.requested_resolution_alignment = 2;
++        info.scaling_settings = ScalingSettings(24, 37);
++        return info;
++    }
++
++private:
++    struct Pending {
++        int64_t pts;
++        uint32_t rtp;
++        int64_t capture;
++        int64_t ntp;
++        int64_t submitted;
++        webrtc::VideoRotation rotation;
++        absl::optional<webrtc::ColorSpace> color;
++    };
++
++    bool Open() {
++        const auto *codec = avcodec_find_encoder_by_name(_backend.name);
++        if (!codec || !(_context = avcodec_alloc_context3(codec))) return false;
++        _context->width = _codec.width;
++        _context->height = _codec.height;
++        _context->time_base = {1, 90000};
++        _context->framerate = av_d2q(_fps, 1000);
++        _context->pix_fmt = AV_PIX_FMT_NV12;
++        _context->bit_rate = _bitrate;
++        _context->rc_max_rate = _bitrate;
++        _context->rc_buffer_size = std::max<int64_t>(10000, _bitrate / 4);
++        _context->gop_size = std::max(1, int(_fps * 2));
++        _context->max_b_frames = 0;
++        _context->profile = AV_PROFILE_H264_CONSTRAINED_BASELINE;
++        _context->flags |= AV_CODEC_FLAG_LOW_DELAY;
++        AVDictionary *options = nullptr;
++        const std::string name = _backend.name;
++        if (name == "h264_nvenc") {
++            av_dict_set(&options, "profile", "baseline", 0);
++            av_dict_set(&options, "preset", "p1", 0);
++            av_dict_set(&options, "tune", "ull", 0);
++            av_dict_set(&options, "rc", "cbr", 0);
++            av_dict_set(&options, "zerolatency", "1", 0);
++            av_dict_set(&options, "rc-lookahead", "0", 0);
++            av_dict_set(&options, "forced-idr", "1", 0);
++        } else if (name == "h264_mf") {
++            av_dict_set(&options, "hw_encoding", "1", 0);
++            av_dict_set(&options, "rate_control", "cbr", 0);
++            av_dict_set(&options, "scenario", _codec.mode == webrtc::VideoCodecMode::kScreensharing
++                ? "display_remoting" : "video_conference", 0);
++        } else if (name == "h264_vaapi") {
++            av_dict_set(&options, "rc_mode", "CBR", 0);
++            if (av_hwdevice_ctx_create(&_device, AV_HWDEVICE_TYPE_VAAPI,
++                    _backend.device.c_str(), nullptr, 0) < 0) {
++                av_dict_free(&options);
++                return false;
++            }
++            _frames = av_hwframe_ctx_alloc(_device);
++            if (!_frames) { av_dict_free(&options); return false; }
++            auto *frames = reinterpret_cast<AVHWFramesContext *>(_frames->data);
++            frames->format = AV_PIX_FMT_VAAPI;
++            frames->sw_format = AV_PIX_FMT_NV12;
++            frames->width = _codec.width;
++            frames->height = _codec.height;
++            frames->initial_pool_size = 4;
++            if (av_hwframe_ctx_init(_frames) < 0) { av_dict_free(&options); return false; }
++            _context->pix_fmt = AV_PIX_FMT_VAAPI;
++            _context->hw_frames_ctx = av_buffer_ref(_frames);
++            _hardware = av_frame_alloc();
++            if (!_hardware || !_context->hw_frames_ctx) { av_dict_free(&options); return false; }
++        }
++        const auto result = avcodec_open2(_context, codec, &options);
++        const bool unusedOptions = av_dict_count(options) != 0;
++        av_dict_free(&options);
++        if (result < 0 || unusedOptions) return false;
++        _software = av_frame_alloc();
++        _packet = av_packet_alloc();
++        if (!_software || !_packet) return false;
++        _software->format = AV_PIX_FMT_NV12;
++        _software->width = _codec.width;
++        _software->height = _codec.height;
++        if (av_frame_get_buffer(_software, 32) < 0) return false;
++        _headers.clear();
++        _lengthBytes = 4;
++        if (!H264ParameterSets(_context->extradata, _context->extradata_size, _lengthBytes, _headers)) return false;
++        _openedBitrate = _bitrate;
++        _openedFps = _fps;
++        _lastOpen = rtc::TimeMillis();
++        _parser = std::make_unique<webrtc::H264BitstreamParser>();
++        return true;
++    }
++
++    void Close() {
++        av_packet_free(&_packet);
++        av_frame_free(&_hardware);
++        av_frame_free(&_software);
++        avcodec_free_context(&_context);
++        av_buffer_unref(&_frames);
++        av_buffer_unref(&_device);
++    }
++    bool NeedsReopen(int64_t now) const {
++        if (std::string(_backend.name) == "h264_nvenc") {
++            // FFmpeg 6.1 reconfigures bitrate dynamically, but not frame rate.
++            return std::abs(_fps - _openedFps) > _openedFps * .1 && now - _lastOpen >= 1000;
++        }
++        const bool changed = std::abs(_bitrate - _openedBitrate) > _openedBitrate * .15
++            || std::abs(_fps - _openedFps) > _openedFps * .1;
++        return changed && (now - _lastOpen >= 1000 || _bitrate < _openedBitrate * .5);
++    }
++    int Fail(const char *reason) {
++        RTC_LOG(LS_WARNING) << _backend.name << ": " << reason << "; software fallback";
++        _failed = true;
++        return WEBRTC_VIDEO_CODEC_FALLBACK_SOFTWARE;
++    }
++    bool ValidateProfile(const std::vector<uint8_t> &bytes) const {
++        bool sps = false, pps = false;
++        for (const auto &nalu : webrtc::H264::FindNaluIndices(bytes.data(), bytes.size())) {
++            if (!nalu.payload_size) return false;
++            const auto *payload = bytes.data() + nalu.payload_start_offset;
++            if ((payload[0] & 31) == 7) {
++                if (!CompatibleSps(payload, nalu.payload_size, _format.parameters)) return false;
++                sps = true;
++            } else if ((payload[0] & 31) == 8) {
++                if (nalu.payload_size < 2) return false;
++                pps = true;
++            }
++        }
++        return sps && pps; // A new receiver must receive both parameter sets.
++    }
++    bool Drain() {
++        for (;;) {
++            const auto result = avcodec_receive_packet(_context, _packet);
++            if (result == AVERROR(EAGAIN) || result == AVERROR_EOF) return true;
++            if (result < 0) return false;
++            auto at = std::find_if(_pending.begin(), _pending.end(), [&](const Pending &p) {
++                return p.pts == _packet->pts;
++            });
++            if (at == _pending.end()) {
++                av_packet_unref(_packet);
++                return false; // Never associate output with another capture timestamp.
++            }
++            const auto meta = *at;
++            for (auto it = _pending.begin(); it != at; ++it) {
++                _callback->OnDroppedFrame(webrtc::EncodedImageCallback::DropReason::kDroppedByEncoder);
++            }
++            _pending.erase(_pending.begin(), std::next(at));
++            std::vector<uint8_t> bytes;
++            if (!H264ToAnnexB(_packet->data, _packet->size, _lengthBytes, bytes)) {
++                av_packet_unref(_packet);
++                return false;
++            }
++            bool key = false, sps = false, pps = false;
++            for (const auto &nalu : webrtc::H264::FindNaluIndices(bytes.data(), bytes.size())) {
++                if (!nalu.payload_size) { av_packet_unref(_packet); return false; }
++                const auto type = bytes[nalu.payload_start_offset] & 31;
++                key |= type == 5;
++                sps |= type == 7;
++                pps |= type == 8;
++            }
++            if (key && (!sps || !pps) && !_headers.empty()) bytes.insert(bytes.begin(), _headers.begin(), _headers.end());
++            if (key && !ValidateProfile(bytes)) { av_packet_unref(_packet); return false; }
++            _parser->ParseBitstream(bytes);
++            webrtc::EncodedImage image;
++            image.SetEncodedData(webrtc::EncodedImageBuffer::Create(bytes.data(), bytes.size()));
++            image.SetRtpTimestamp(meta.rtp);
++            image._encodedWidth = _codec.width;
++            image._encodedHeight = _codec.height;
++            image.capture_time_ms_ = meta.capture;
++            image.ntp_time_ms_ = meta.ntp;
++            image.rotation_ = meta.rotation;
++            image.content_type_ = _codec.mode == webrtc::VideoCodecMode::kScreensharing
++                ? webrtc::VideoContentType::SCREENSHARE : webrtc::VideoContentType::UNSPECIFIED;
++            image.SetColorSpace(meta.color);
++            image.SetFrameType(key ? webrtc::VideoFrameType::kVideoFrameKey : webrtc::VideoFrameType::kVideoFrameDelta);
++            image.qp_ = _parser->GetLastSliceQp().value_or(-1);
++            webrtc::CodecSpecificInfo info{};
++            info.codecType = webrtc::kVideoCodecH264;
++            info.codecSpecific.H264.packetization_mode = webrtc::H264PacketizationMode::NonInterleaved;
++            info.codecSpecific.H264.temporal_idx = webrtc::kNoTemporalIdx;
++            info.codecSpecific.H264.idr_frame = key;
++            _callback->OnEncodedImage(image, &info);
++            av_packet_unref(_packet);
++        }
++    }
++
++    webrtc::SdpVideoFormat _format;
++    webrtc::VideoCodec _codec{};
++    Backend _backend{"hardware H264", {}};
++    AVCodecContext *_context = nullptr;
++    AVFrame *_software = nullptr;
++    AVFrame *_hardware = nullptr;
++    AVPacket *_packet = nullptr;
++    AVBufferRef *_device = nullptr;
++    AVBufferRef *_frames = nullptr;
++    webrtc::EncodedImageCallback *_callback = nullptr;
++    std::unique_ptr<webrtc::H264BitstreamParser> _parser;
++    std::deque<Pending> _pending;
++    std::vector<uint8_t> _headers;
++    int _lengthBytes = 4;
++    int64_t _nextPts = 0, _lastOpen = 0, _bitrate = 0, _openedBitrate = 0;
++    double _fps = 0, _openedFps = 0;
++    bool _forceKey = true, _failed = false, _paused = false;
++};
++
++// Keep the outer SimulcastEncoderAdapter in per-layer mode even after a
++// hardware failure: OpenH264's internal simulcast does not honor each layer's
++// independent maxFramerate, so its small preview would otherwise run at 60.
++class SingleStreamEncoder final : public webrtc::VideoEncoder {
++public:
++    explicit SingleStreamEncoder(std::unique_ptr<webrtc::VideoEncoder> encoder)
++        : _encoder(std::move(encoder)) {}
++    int InitEncode(const webrtc::VideoCodec *codec, const Settings &settings) override {
++        if (codec && codec->numberOfSimulcastStreams > 1) {
++            return WEBRTC_VIDEO_CODEC_ERR_SIMULCAST_PARAMETERS_NOT_SUPPORTED;
++        }
++        return _encoder->InitEncode(codec, settings);
++    }
++    int32_t RegisterEncodeCompleteCallback(webrtc::EncodedImageCallback *callback) override {
++        return _encoder->RegisterEncodeCompleteCallback(callback);
++    }
++    int32_t Release() override { return _encoder->Release(); }
++    int32_t Encode(const webrtc::VideoFrame &frame,
++            const std::vector<webrtc::VideoFrameType> *types) override {
++        return _encoder->Encode(frame, types);
++    }
++    void SetRates(const RateControlParameters &parameters) override { _encoder->SetRates(parameters); }
++    void SetFecControllerOverride(webrtc::FecControllerOverride *controller) override {
++        _encoder->SetFecControllerOverride(controller);
++    }
++    void OnPacketLossRateUpdate(float loss) override { _encoder->OnPacketLossRateUpdate(loss); }
++    void OnRttUpdate(int64_t rtt) override { _encoder->OnRttUpdate(rtt); }
++    void OnLossNotification(const LossNotification &notification) override {
++        _encoder->OnLossNotification(notification);
++    }
++    EncoderInfo GetEncoderInfo() const override {
++        auto info = _encoder->GetEncoderInfo();
++        info.supports_simulcast = false;
++        return info;
++    }
++private:
++    std::unique_ptr<webrtc::VideoEncoder> _encoder;
++};
++
++class HardwareLeafFactory final : public webrtc::VideoEncoderFactory {
++public:
++    std::vector<webrtc::SdpVideoFormat> GetSupportedFormats() const override {
++        auto formats = _software.GetSupportedFormats();
++        formats.erase(std::remove_if(formats.begin(), formats.end(), [](const auto &format) {
++            return format.name == cricket::kVp8CodecName;
++        }), formats.end());
++        return formats;
++    }
++    CodecSupport QueryCodecSupport(const webrtc::SdpVideoFormat &format,
++            absl::optional<std::string> scalability) const override {
++        if (format.name == cricket::kVp8CodecName) return {};
++        // EncoderInfo reports hardware only after successful initialization.
++        // Registration of an FFmpeg encoder alone is not proof of a GPU.
++        return _software.QueryCodecSupport(format, scalability);
++    }
++    std::unique_ptr<webrtc::VideoEncoder> CreateVideoEncoder(const webrtc::SdpVideoFormat &format) override {
++        if (format.name == cricket::kVp8CodecName) return nullptr;
++        auto encoder = _software.CreateVideoEncoder(format);
++        if (!encoder || format.name != cricket::kH264CodecName) return encoder;
++        const auto mode = format.parameters.find("packetization-mode");
++        if (mode != format.parameters.end() && mode->second == "1"
++                && !HardwareBackends().empty()) {
++            encoder = webrtc::CreateVideoEncoderSoftwareFallbackWrapper(
++                std::move(encoder), std::make_unique<HardwareH264Encoder>(format));
++        }
++        return std::make_unique<SingleStreamEncoder>(std::move(encoder));
++    }
++private:
++    webrtc::InternalEncoderFactory _software;
++};
++
++class DesktopEncoderFactory final : public webrtc::VideoEncoderFactory {
++public:
++    std::vector<webrtc::SdpVideoFormat> GetSupportedFormats() const override { return _leaf.GetSupportedFormats(); }
++    CodecSupport QueryCodecSupport(const webrtc::SdpVideoFormat &format,
++            absl::optional<std::string> scalability) const override {
++        return _leaf.QueryCodecSupport(format, scalability);
++    }
++    std::unique_ptr<webrtc::VideoEncoder> CreateVideoEncoder(const webrtc::SdpVideoFormat &format) override {
++        if (!format.IsCodecInList(GetSupportedFormats())) return nullptr;
++        return std::make_unique<webrtc::SimulcastEncoderAdapter>(&_leaf, format);
++    }
++private:
++    HardwareLeafFactory _leaf;
++};
++} // namespace
++
++std::unique_ptr<webrtc::VideoEncoderFactory> MakeDesktopVideoEncoderFactory() {
++    return std::make_unique<DesktopEncoderFactory>();
++}
++} // namespace tgcalls
+--- /dev/null
++++ b/tgcalls/platform/tdesktop/DesktopHardwareEncoder.h
+@@ -0,0 +1,11 @@
++#pragma once
++
++#include <memory>
++
++namespace webrtc { class VideoEncoderFactory; }
++
++namespace tgcalls {
++// Hardware availability is established by opening a device at InitEncode;
++// every stream retains the ordinary WebRTC software encoder as fallback.
++std::unique_ptr<webrtc::VideoEncoderFactory> MakeDesktopVideoEncoderFactory();
++} // namespace tgcalls
+--- a/tgcalls/platform/tdesktop/DesktopInterface.cpp
++++ b/tgcalls/platform/tdesktop/DesktopInterface.cpp
+@@ -1,4 +1,5 @@
+ #include "DesktopInterface.h"
++#include "platform/tdesktop/DesktopHardwareEncoder.h"
+
+ #include "platform/tdesktop/VideoCapturerInterfaceImpl.h"
+ #include "platform/tdesktop/VideoCapturerTrackSource.h"
+@@ -6,6 +7,7 @@
+ #include "api/video_codecs/builtin_video_encoder_factory.h"
+ #include "api/video_codecs/builtin_video_decoder_factory.h"
+ #include "pc/video_track_source_proxy.h"
++#include <limits>
+
+ #if TGCALLS_UWP_DESKTOP
+ #include "modules/video_coding/codecs/h264/win/h264_mf_factory.h"
+@@ -17,7 +19,7 @@
+ #if TGCALLS_UWP_DESKTOP
+ 	return std::make_unique<webrtc::H264MFEncoderFactory>();
+ #else
+-	return webrtc::CreateBuiltinVideoEncoderFactory();
++	return MakeDesktopVideoEncoderFactory();
+ #endif
+ }
+
+@@ -39,10 +41,17 @@
+
+ bool DesktopInterface::supportsEncoding(const std::string &codecName) {
+ 	return (codecName == cricket::kH264CodecName)
+-		|| (codecName == cricket::kVp8CodecName);
++		|| (codecName == cricket::kVp9CodecName);
+ }
+
+ void DesktopInterface::adaptVideoSource(rtc::scoped_refptr<webrtc::VideoTrackSourceInterface> videoSource, int width, int height, int fps) {
++    if (!videoSource) return;
++    const auto proxy = static_cast<webrtc::VideoTrackSourceProxy*>(videoSource.get());
++    const auto internal = static_cast<VideoCapturerTrackSource*>(proxy->internal());
++    // Screen capture passes zero dimensions; camera adaptation keeps its
++    // existing capture rate and relies on the encoder's sink wants.
++    internal->setSelectedFps((width == 0 && height == 0)
++        ? fps : std::numeric_limits<int>::max());
+ }
+
+ std::unique_ptr<VideoCapturerInterface> DesktopInterface::makeVideoCapturer(rtc::scoped_refptr<webrtc::VideoTrackSourceInterface> source, std::string deviceId, std::function<void(VideoState)> stateUpdated, std::function<void(PlatformCaptureInfo)> captureInfoUpdated, std::shared_ptr<PlatformContext> platformContext, std::pair<int, int> &outResolution) {
+--- /dev/null
++++ b/tgcalls/platform/tdesktop/DesktopVideoFrameAdapter.h
+@@ -0,0 +1,86 @@
++#ifndef TGCALLS_DESKTOP_VIDEO_FRAME_ADAPTER_H_
++#define TGCALLS_DESKTOP_VIDEO_FRAME_ADAPTER_H_
++
++#include "media/base/video_broadcaster.h"
++#include "common_video/framerate_controller.h"
++#include <algorithm>
++#include <functional>
++#include <limits>
++#include <mutex>
++
++namespace tgcalls {
++
++// Apply the encoder's temporal restrictions without changing the resolution
++// selected by the user. Capture also receives this limit to avoid converting
++// frames that will immediately be discarded here.
++class DesktopVideoFrameAdapter final : public rtc::VideoBroadcaster {
++public:
++    void setSelectedFps(int fps) {
++        {
++            std::lock_guard<std::mutex> lock(_mutex);
++            _selectedFps = std::max(1, fps);
++        }
++        updateLimit();
++    }
++    void setCaptureFpsUpdated(std::function<void(int)> callback) {
++        {
++            std::lock_guard<std::mutex> lock(_mutex);
++            _captureFpsUpdated = std::move(callback);
++        }
++        notifyCapture();
++    }
++    void AddOrUpdateSink(rtc::VideoSinkInterface<webrtc::VideoFrame> *sink,
++            const rtc::VideoSinkWants &wants) override {
++        rtc::VideoBroadcaster::AddOrUpdateSink(sink, wants);
++        updateLimit();
++    }
++    void RemoveSink(rtc::VideoSinkInterface<webrtc::VideoFrame> *sink) override {
++        rtc::VideoBroadcaster::RemoveSink(sink);
++        updateLimit();
++    }
++    void OnFrame(const webrtc::VideoFrame &frame) override {
++        bool discard;
++        {
++            std::lock_guard<std::mutex> lock(_mutex);
++            discard = _framerate.ShouldDropFrame(frame.timestamp_us() * 1000);
++        }
++        if (discard) rtc::VideoBroadcaster::OnDiscardedFrame();
++        else rtc::VideoBroadcaster::OnFrame(frame);
++    }
++private:
++    void updateLimit() {
++        {
++            std::lock_guard<std::mutex> lock(_mutex);
++            const auto fps = std::max(0, std::min(_selectedFps, wants().max_framerate_fps));
++            if (fps == _effectiveFps) return;
++            _effectiveFps = fps;
++            _framerate.Reset();
++            _framerate.SetMaxFramerate(fps);
++        }
++        notifyCapture();
++    }
++    void notifyCapture() {
++        // Encoder and worker threads can update wants concurrently. Serialize
++        // notifications and read the newest value so an older notification
++        // cannot leave the capture scheduler running at a stale limit.
++        std::lock_guard<std::mutex> notificationLock(_notificationMutex);
++        std::function<void(int)> notify;
++        int fps;
++        {
++            std::lock_guard<std::mutex> lock(_mutex);
++            notify = _captureFpsUpdated;
++            fps = _effectiveFps;
++        }
++        // The callback only posts work, owns a weak renderer, and does not
++        // call back into the adapter.
++        if (notify) notify(fps);
++    }
++    std::mutex _mutex, _notificationMutex;
++    int _selectedFps = std::numeric_limits<int>::max();
++    int _effectiveFps = std::numeric_limits<int>::max();
++    webrtc::FramerateController _framerate;
++    std::function<void(int)> _captureFpsUpdated;
++};
++
++} // namespace tgcalls
++#endif
+--- a/tgcalls/platform/tdesktop/VideoCapturerTrackSource.cpp
++++ b/tgcalls/platform/tdesktop/VideoCapturerTrackSource.cpp
+@@ -1,10 +1,11 @@
+ #include "tgcalls/platform/tdesktop/VideoCapturerTrackSource.h"
++#include "tgcalls/platform/tdesktop/DesktopVideoFrameAdapter.h"
+
+ namespace tgcalls {
+
+ VideoCapturerTrackSource::VideoCapturerTrackSource()
+ : VideoTrackSource(/*remote=*/false)
+-, _broadcaster(std::make_shared<rtc::VideoBroadcaster>()) {
++, _broadcaster(std::make_shared<DesktopVideoFrameAdapter>()) {
+ }
+
+ auto VideoCapturerTrackSource::sink()
+@@ -12,6 +13,14 @@
+ 	return _broadcaster;
+ }
+
++void VideoCapturerTrackSource::setSelectedFps(int fps) {
++    _broadcaster->setSelectedFps(fps);
++}
++
++void VideoCapturerTrackSource::setCaptureFpsUpdated(std::function<void(int)> callback) {
++    _broadcaster->setCaptureFpsUpdated(std::move(callback));
++}
++
+ rtc::VideoSourceInterface<webrtc::VideoFrame> *VideoCapturerTrackSource::source() {
+ 	return _broadcaster.get();
+ }
+--- a/tgcalls/platform/tdesktop/VideoCapturerTrackSource.h
++++ b/tgcalls/platform/tdesktop/VideoCapturerTrackSource.h
+@@ -6,9 +6,11 @@
+ #include "media/base/video_broadcaster.h"
+
+ #include "VideoCameraCapturer.h"
++#include <functional>
+
+ namespace tgcalls {
+
++class DesktopVideoFrameAdapter;
+ class VideoCameraCapturer;
+ class DesktopCapturer;
+
+@@ -17,11 +19,13 @@
+ 	VideoCapturerTrackSource();
+
+ 	std::shared_ptr<rtc::VideoSinkInterface<webrtc::VideoFrame>> sink();
++	void setSelectedFps(int fps);
++	void setCaptureFpsUpdated(std::function<void(int)> callback);
+
+ private:
+ 	rtc::VideoSourceInterface<webrtc::VideoFrame> *source() override;
+
+-	std::shared_ptr<rtc::VideoBroadcaster> _broadcaster;
++	std::shared_ptr<DesktopVideoFrameAdapter> _broadcaster;
+
+ };
+

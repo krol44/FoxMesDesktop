@@ -669,10 +669,13 @@ cd FFmpeg
 	--enable-libopus \
 	--enable-libvpx \
 	--enable-vaapi \
+	--enable-encoder=h264_vaapi \
 	--enable-vdpau \
 	--enable-xlib \
 	--enable-libdrm \
 	--enable-ffnvcodec \
+	--enable-nvenc \
+	--enable-encoder=h264_nvenc \
 	--enable-nvdec \
 	--enable-cuvid \
 	--enable-protocol=file \
@@ -792,6 +795,8 @@ cd FFmpeg
 	--enable-muxer=opus \
 	--enable-muxer=wav
 make -j$(nproc)
+grep -q '#define CONFIG_H264_VAAPI_ENCODER 1' config_components.h
+grep -q '#define CONFIG_H264_NVENC_ENCODER 1' config_components.h
 make DESTDIR=/usr/src/ffmpeg-cache install
 cd ..
 rm -rf ffmpeg

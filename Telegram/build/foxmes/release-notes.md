@@ -1,7 +1,27 @@
-FoxMes Desktop 1.9.4. This is the first cross-platform FoxMes Desktop release for Windows x64, macOS 13+ on Apple silicon, and Linux x86_64.
+FoxMes Desktop 1.9.5. This is the first cross-platform FoxMes Desktop release for Windows x64, macOS 13+ on Apple silicon, and Linux x86_64.
 
-The macOS package is arm64-only and will not run on an Intel Mac.
+## Removing the quarantine
 
-The Windows and Linux artifacts are not code-signed. The macOS app is signed with FoxMes's own certificate but is not notarized by Apple. Windows SmartScreen and macOS Gatekeeper may show a warning. Verify the downloaded file against `SHA256SUMS` and check the GitHub build provenance before launching it.
+### macOS
 
-How to sign an application in different operating systems is written here – https://github.com/krol44/FoxMesDesktop?tab=readme-ov-file
+Copy `FoxMes.app` from the DMG to `Applications`, then run in Terminal:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/FoxMes.app"
+```
+
+### Windows
+
+Right-click the downloaded file, select **Properties**, enable **Unblock** and click **Apply**. Or in PowerShell, in the download folder:
+
+```powershell
+Unblock-File .\FoxMes-*-windows-x64-*
+```
+
+If SmartScreen still appears, select **More info → Run anyway**.
+
+### Linux
+
+```bash
+chmod +x FoxMes-*-linux-x86_64.AppImage
+```

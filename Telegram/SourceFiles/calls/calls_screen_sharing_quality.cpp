@@ -117,6 +117,9 @@ QString ScreenSharingQuality::statisticsText() const {
 	const auto resolution = [](int w, int h) { return QString::number(w) + u" × "_q + QString::number(h); };
 	const auto rate = [](int value) { return value < 0 ? u"—"_q : BitrateLabel(value); };
 	auto text = u"Mode: "_q + QualityLabel(_quality()) + u"\n\n"_q;
+	if (!s.configurationError.empty()) {
+		text += u"Quality configuration failed: "_q + QString::fromStdString(s.configurationError) + u"\n\n"_q;
+	}
 	if (c.available) {
 		text += (c.nativeCapture ? u"CAPTURE → NATIVE NV12\nScreenCaptureKit / CVPixelBuffer / IOSurface\n"_q : u"CAPTURE → CONVERSION\n"_q)
 			+ u"Source: "_q + resolution(c.sourceWidth, c.sourceHeight)
@@ -145,11 +148,11 @@ QString ScreenSharingQuality::statisticsText() const {
 		text += u"Capture measurements: unavailable / warming up\n\n"_q;
 	}
 	text += u"ENCODER\n"_q
-		+ u"Input / encoded FPS: "_q + number(s.encoderInputFps) + u" / "_q + QString::number(s.fps) + u"\n"_q
+		+ u"Stream input / largest live layer encoded FPS: "_q + number(s.encoderInputFps) + u" / "_q + QString::number(s.fps) + u"\n"_q
 		+ u"Encoded size: "_q + resolution(s.width, s.height) + u"\n"_q
 		+ u"Codec / encoder: "_q + QString::fromStdString(s.codec) + u" / "_q + QString::fromStdString(s.encoder) + u"\n"_q
 		+ u"Power efficient encoder: "_q + (s.powerEfficientKnown ? (s.powerEfficient ? u"yes"_q : u"no"_q) : u"unknown"_q) + u"\n"_q
-		+ u"Encode time / usage: "_q + QString::number(s.encodeMs) + u" ms / "_q + QString::number(s.encodeUsagePercent) + u"%\n"_q
+		+ u"Stream encode time / usage: "_q + QString::number(s.encodeMs) + u" ms / "_q + QString::number(s.encodeUsagePercent) + u"%\n"_q
 		+ u"Average QP: "_q + (s.averageQp < 0 ? u"—"_q : number(s.averageQp)) + u"\n"_q
 		+ u"Encoded / key frames: "_q + QString::number(s.encodedFrames) + u" / "_q + QString::number(s.keyFrames) + u"\n"_q
 		+ u"Limitation: "_q + QString::fromStdString(s.limitation) + u"\n\n"_q

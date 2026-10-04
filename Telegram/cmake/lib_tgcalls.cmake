@@ -225,6 +225,19 @@ PRIVATE
     RTC_ENABLE_VP9
 )
 
+# FFmpeg's hardware-only Media Foundation encoder is statically linked.
+if (WIN32)
+    target_link_libraries(lib_tgcalls PRIVATE mfuuid ole32 strmiids)
+endif()
+
+if (NOT APPLE)
+    target_sources(lib_tgcalls PRIVATE
+        ${tgcalls_loc}/platform/tdesktop/DesktopHardwareEncoder.h
+        ${tgcalls_loc}/platform/tdesktop/DesktopHardwareEncoder.cpp
+        ${tgcalls_loc}/platform/tdesktop/DesktopH264Bitstream.h
+    )
+endif()
+
 if (APPLE)
     target_sources(lib_tgcalls PRIVATE
         ${tgcalls_loc}/platform/darwin/MacScreenCapture.h

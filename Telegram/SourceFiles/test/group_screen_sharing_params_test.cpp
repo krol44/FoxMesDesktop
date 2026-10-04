@@ -32,5 +32,35 @@ int main() {
     params.encodings.resize(1);
     tgcalls::ConfigureVp9ScreenSharing(params, profile, 720);
     Require(params.encodings[0].max_bitrate_bps == 20000000);
-    std::cout << "VP9 group screen profile regression tests passed\n";
+    params.encodings.resize(2);
+    params.encodings[0].ssrc = 123;
+    params.encodings[1].ssrc = 125;
+    tgcalls::ConfigureH264ScreenSharing(params, profile, 720, 60);
+    Require(params.encodings[0].requested_resolution->height == 360);
+    Require(params.encodings[0].max_framerate == 5);
+    Require(params.encodings[1].requested_resolution->height == 1440);
+    Require(params.encodings[1].max_framerate == 60);
+    Require(params.encodings[0].active && params.encodings[1].active);
+    Require(!params.encodings[0].scale_resolution_down_by && !params.encodings[1].scale_resolution_down_by);
+    Require(params.encodings[0].ssrc == 123 && params.encodings[1].ssrc == 125);
+    tgcalls::ConfigureH264ScreenSharing(params, profile, 360, 30);
+    Require(params.encodings[0].active && !params.encodings[1].active);
+    tgcalls::ConfigureH264ScreenSharing(params, profile, 180, 30);
+    Require(params.encodings[0].active && !params.encodings[1].active);
+    tgcalls::ConfigureH264ScreenSharing(params, profile, 0, 60);
+    Require(!params.encodings[0].active && !params.encodings[1].active);
+    tgcalls::ConfigureH264ScreenSharing(params, tgcalls::ScreenSharingProfileForQuality(3), 720, 60);
+    Require(!params.encodings[1].requested_resolution);
+    params.encodings.resize(1);
+    tgcalls::ConfigureH264ScreenSharing(params, profile, 360, 30);
+    Require(params.encodings[0].active && params.encodings[0].max_framerate == 30);
+    tgcalls::ConfigureH264ScreenSharing(params, profile, 0, 30);
+    Require(!params.encodings[0].active);
+    params.encodings.resize(3);
+    tgcalls::ConfigureH264ScreenSharing(params, profile, 720, 60);
+    Require(params.encodings[0].requested_resolution->height == 180);
+    Require(params.encodings[1].requested_resolution->height == 360);
+    Require(*params.encodings[0].max_bitrate_bps + *params.encodings[1].max_bitrate_bps
+        + *params.encodings[2].max_bitrate_bps == profile.maxBitrate);
+    std::cout << "H264/VP9 group screen profile regression tests passed\n";
 }

@@ -84,6 +84,51 @@ int main() {
     stats.encodeUsagePercent = 210;
     Require(!Sample(policy, now, stats, 100), "must not reset forever at the FPS floor");
 
+    // Recorded Windows failure: usage understated the actual serial encoder
+    // cost and the output collapsed to 8 while capture continued near 60.
+    policy.reset(60, now);
+    stats = Healthy(8);
+    stats.encoderInputFps = 28;
+    stats.powerEfficient = false;
+    stats.encodeUsagePercent = 64;
+    stats.encodeMs = 81;
+    stats.capture.available = true;
+    stats.capture.deliveredFps = stats.capture.changedFps = 60;
+    Require(Sample(policy, now, stats, 20) && policy.fps() == 50,
+        "8 encoded FPS must lower a 60 FPS ceiling despite low usage");
+    Sample(policy, now, stats, 300);
+    Require(policy.fps() <= 15, "must continue lowering until the serial encoder can keep up");
+
+    policy.reset(60, now);
+    stats = Healthy(0);
+    stats.encoderInputFps = 0;
+    stats.capture.available = true;
+    stats.capture.deliveredFps = stats.capture.changedFps = 60;
+    Require(Sample(policy, now, stats, 20) && policy.fps() == 50,
+        "zero encoded frames with moving capture must not bypass adaptation");
+
+    policy.reset(60, now);
+    stats = Healthy(2);
+    stats.encoderInputFps = 60;
+    stats.capture.available = true;
+    stats.capture.deliveredFps = 60;
+    stats.capture.changedFps = 2;
+    Require(!Sample(policy, now, stats, 100), "static screen must not look like slow encoding");
+    stats.capture.deliveredFps = stats.capture.changedFps = 20;
+    stats.encoderInputFps = stats.fps = 20;
+    Require(!Sample(policy, now, stats, 100), "slow capture must not lower encoder performance ceiling");
+
+    auto recovery = tgcalls::VideoQualityRecovery();
+    recovery.update(20000000, 1920 * 1080, 60, false, 60, 60);
+    recovery.update(400000, 1920 * 1080, 8, false, 60, 60);
+    auto action = tgcalls::VideoRecoveryAction::None;
+    for (int i = 0; i != 8; ++i) action = recovery.update(20000000, 1920 * 1080, 8, false, 60, 60);
+    Require(action == tgcalls::VideoRecoveryAction::ResetAdaptation,
+        "low WebRTC input must not be accepted as network recovery");
+    for (int i = 0; i != 30; ++i) action = recovery.update(20000000, 1920 * 1080, 2, false, 60, 2);
+    Require(action == tgcalls::VideoRecoveryAction::RefreshFrame,
+        "quiet capture after bandwidth recovery only needs a keyframe");
+
     auto speed = tgcalls::ScreenEncodingSpeed();
     Require(!speed.update(0, 60, 24, 20000000, 24, false), "speed warm-up");
     const auto enable = speed.update(2000, 60, 24, 20000000, 24, false);

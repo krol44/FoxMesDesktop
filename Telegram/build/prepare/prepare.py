@@ -1218,9 +1218,11 @@ winarm:
 win:
 depends:patches/build_ffmpeg_win.sh
     bash --login -c "cp ../patches/build_ffmpeg_win.sh build_ffmpeg_win_foxmes.sh"
-    bash --login -c "sed -i -e 's/--disable-everything/--disable-everything --enable-demuxer=mpegts/' build_ffmpeg_win_foxmes.sh"
+    bash --login -c "sed -i -e 's/--disable-everything/--disable-everything --enable-demuxer=mpegts --enable-mediafoundation --enable-encoder=h264_mf --enable-nvenc --enable-encoder=h264_nvenc/' build_ffmpeg_win_foxmes.sh"
     bash --login -c "grep -q -e '--enable-demuxer=mpegts' build_ffmpeg_win_foxmes.sh"
     bash --login build_ffmpeg_win_foxmes.sh
+    bash --login -c "grep -q -e '#define CONFIG_H264_MF_ENCODER 1' config_components.h"
+    bash --login -c "grep -q -e '#define CONFIG_H264_NVENC_ENCODER 1' config_components.h"
 mac:
     export PKG_CONFIG_PATH=$USED_PREFIX/lib/pkgconfig
 
