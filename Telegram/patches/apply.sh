@@ -34,6 +34,7 @@ apply_one() {
 apply_one lib_ui-animated-icon-webm.patch Telegram/lib_ui
 apply_one lib_base-screen-capture-settings-mac.patch Telegram/lib_base
 apply_one lib_webrtc-screen-capture-permission-mac.patch Telegram/lib_webrtc
+apply_one lib_webrtc-system-audio.patch Telegram/lib_webrtc
 apply_one tgcalls-screen-share-quality.patch Telegram/ThirdParty/tgcalls
 apply_one tgcalls-call-recovery.patch Telegram/ThirdParty/tgcalls
 apply_one cmake-bzip2-stub.patch cmake

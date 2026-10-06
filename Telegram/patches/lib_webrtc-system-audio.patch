@@ -1,0 +1,1093 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index d3c786b..14ac9a2 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -52,6 +52,8 @@ PRIVATE
+     webrtc/platform/win/webrtc_environment_win.h
+     webrtc/platform/win/webrtc_loopback_adm_win.cpp
+     webrtc/platform/win/webrtc_loopback_adm_win.h
++    webrtc/platform/win/webrtc_system_audio_capture_win.cpp
++    webrtc/platform/win/webrtc_system_audio_capture_win.h
+     webrtc/platform/webrtc_platform_environment.h
+ 
+     webrtc/webrtc_pch.h
+@@ -96,3 +98,11 @@ if (APPLE)
+         "-framework CoreMedia"
+     )
+ endif()
++
++if (LINUX)
++    # PulseAudio's monitor API also serves PipeWire's PulseAudio compatibility
++    # server. Load libpulse dynamically; ALSA-only installations stay usable.
++    find_package(PkgConfig REQUIRED)
++    pkg_check_modules(FOXMES_PULSE REQUIRED libpulse)
++    target_include_directories(lib_webrtc PRIVATE ${FOXMES_PULSE_INCLUDE_DIRS})
++endif()
+diff --git a/webrtc/details/webrtc_openal_adm.cpp b/webrtc/details/webrtc_openal_adm.cpp
+index 4962d89..388dd59 100644
+--- a/webrtc/details/webrtc_openal_adm.cpp
++++ b/webrtc/details/webrtc_openal_adm.cpp
+@@ -26,6 +26,7 @@
+ #include "webrtc/platform/win/webrtc_loopback_adm_win.h"
+ #elif defined WEBRTC_LINUX
+ #include "webrtc/platform/linux/webrtc_loopback_adm_linux.h"
++#include "webrtc/platform/linux/webrtc_loopback_capture_linux.h"
+ #endif // WEBRTC_WIN || WEBRTC_LINUX
+ 
+ #ifdef WEBRTC_LINUX
+diff --git a/webrtc/platform/linux/webrtc_loopback_adm_linux.cpp b/webrtc/platform/linux/webrtc_loopback_adm_linux.cpp
+index 62fa3cb..22be25b 100644
+--- a/webrtc/platform/linux/webrtc_loopback_adm_linux.cpp
++++ b/webrtc/platform/linux/webrtc_loopback_adm_linux.cpp
+@@ -1,125 +1,361 @@
+-// This file is part of Desktop App Toolkit,
+-// a set of libraries for developing nice desktop applications.
+-//
+-// For license and copyright information please follow this link:
+-// https://github.com/desktop-app/legal/blob/master/LEGAL
+-//
+ #include "webrtc/platform/linux/webrtc_loopback_adm_linux.h"
+-
+-#include <al.h>
+-#include <alc.h>
++#include "webrtc/platform/linux/webrtc_system_audio_capture_linux.h"
+ 
+ #include <algorithm>
+-#include <cctype>
+-#include <string>
+-#include <vector>
++#include <array>
++#include <cstring>
+ 
+ namespace Webrtc::details {
+ namespace {
++constexpr auto kSampleRate = 48000;
++constexpr auto kChannels = 2;
++constexpr auto kSamples = 480;
++void SetStringToArray(const std::string &string, char *array, int size) {
++    const auto length = std::min(int(string.size()), size - 1);
++    memcpy(array, string.data(), length);
++    array[length] = 0;
++}
++} // namespace
++
++AudioDeviceLoopbackLinux::AudioDeviceLoopbackLinux(
++		webrtc::TaskQueueFactory *taskQueueFactory)
++: _audioDeviceBuffer(taskQueueFactory) {
++}
++
++AudioDeviceLoopbackLinux::~AudioDeviceLoopbackLinux() {
++	Terminate();
++}
++
++int32_t AudioDeviceLoopbackLinux::ActiveAudioLayer(
++		AudioLayer *audioLayer) const {
++	*audioLayer = kPlatformDefaultAudio;
++	return 0;
++}
++
++int32_t AudioDeviceLoopbackLinux::RegisterAudioCallback(
++		webrtc::AudioTransport *audioCallback) {
++	return _audioDeviceBuffer.RegisterAudioCallback(audioCallback);
++}
+ 
+-[[nodiscard]] std::string ToLower(std::string value) {
+-	for (auto &ch : value) {
+-		ch = char(std::tolower(static_cast<unsigned char>(ch)));
++int32_t AudioDeviceLoopbackLinux::Init() {
++	if (_initialized) {
++		return 0;
+ 	}
+-	return value;
++	_initialized = true;
++	return 0;
++}
++
++int32_t AudioDeviceLoopbackLinux::Terminate() {
++	StopRecording();
++	_initialized = false;
++	return 0;
++}
++
++bool AudioDeviceLoopbackLinux::Initialized() const {
++	return _initialized;
++}
++
++int32_t AudioDeviceLoopbackLinux::InitSpeaker() {
++	return -1;
++}
++
++int32_t AudioDeviceLoopbackLinux::InitMicrophone() {
++	_microphoneInitialized = true;
++	return 0;
++}
++
++bool AudioDeviceLoopbackLinux::SpeakerIsInitialized() const {
++	return false;
++}
++
++bool AudioDeviceLoopbackLinux::MicrophoneIsInitialized() const {
++	return _microphoneInitialized;
++}
++
++int32_t AudioDeviceLoopbackLinux::SpeakerVolumeIsAvailable(bool *available) {
++	if (available) *available = false;
++	return 0;
++}
++
++int32_t AudioDeviceLoopbackLinux::SetSpeakerVolume(uint32_t volume) {
++	return -1;
++}
++
++int32_t AudioDeviceLoopbackLinux::SpeakerVolume(uint32_t *volume) const {
++	return -1;
+ }
+ 
+-[[nodiscard]] std::string TrimOpenALPrefix(std::string value) {
+-	constexpr auto kPrefix = "OpenAL Soft on ";
+-	constexpr auto kPrefixSize = sizeof(kPrefix) - 1;
+-	if (value.rfind(kPrefix, 0) == 0) {
+-		return value.substr(kPrefixSize);
++int32_t AudioDeviceLoopbackLinux::MaxSpeakerVolume(
++		uint32_t *maxVolume) const {
++	return -1;
++}
++
++int32_t AudioDeviceLoopbackLinux::MinSpeakerVolume(
++		uint32_t *minVolume) const {
++	return -1;
++}
++
++int32_t AudioDeviceLoopbackLinux::SpeakerMuteIsAvailable(bool *available) {
++	if (available) *available = false;
++	return 0;
++}
++
++int32_t AudioDeviceLoopbackLinux::SetSpeakerMute(bool enable) {
++	return -1;
++}
++
++int32_t AudioDeviceLoopbackLinux::SpeakerMute(bool *enabled) const {
++	if (enabled) *enabled = false;
++	return 0;
++}
++
++int32_t AudioDeviceLoopbackLinux::MicrophoneMuteIsAvailable(bool *available) {
++	if (available) *available = false;
++	return 0;
++}
++
++int32_t AudioDeviceLoopbackLinux::SetMicrophoneMute(bool enable) {
++	return -1;
++}
++
++int32_t AudioDeviceLoopbackLinux::MicrophoneMute(bool *enabled) const {
++	if (enabled) *enabled = false;
++	return 0;
++}
++
++int32_t AudioDeviceLoopbackLinux::StereoRecordingIsAvailable(
++		bool *available) const {
++	if (available) *available = true;
++	return 0;
++}
++
++int32_t AudioDeviceLoopbackLinux::SetStereoRecording(bool enable) {
++    if (_recordingInitialized) return -1;
++    _stereo = enable;
++    return 0;
++}
++
++int32_t AudioDeviceLoopbackLinux::StereoRecording(bool *enabled) const {
++	if (enabled) *enabled = _stereo;
++	return 0;
++}
++
++int32_t AudioDeviceLoopbackLinux::StereoPlayoutIsAvailable(
++		bool *available) const {
++	if (available) *available = true;
++	return 0;
++}
++
++int32_t AudioDeviceLoopbackLinux::SetStereoPlayout(bool enable) {
++	return enable ? 0 : -1;
++}
++
++int32_t AudioDeviceLoopbackLinux::StereoPlayout(bool *enabled) const {
++	if (enabled) *enabled = true;
++	return 0;
++}
++
++int32_t AudioDeviceLoopbackLinux::MicrophoneVolumeIsAvailable(
++		bool *available) {
++	if (available) *available = false;
++	return 0;
++}
++
++int32_t AudioDeviceLoopbackLinux::SetMicrophoneVolume(uint32_t volume) {
++	return -1;
++}
++
++int32_t AudioDeviceLoopbackLinux::MicrophoneVolume(uint32_t *volume) const {
++	return -1;
++}
++
++int32_t AudioDeviceLoopbackLinux::MaxMicrophoneVolume(
++		uint32_t *maxVolume) const {
++	return -1;
++}
++
++int32_t AudioDeviceLoopbackLinux::MinMicrophoneVolume(
++		uint32_t *minVolume) const {
++	return -1;
++}
++
++int16_t AudioDeviceLoopbackLinux::PlayoutDevices() {
++	return 0;
++}
++
++int32_t AudioDeviceLoopbackLinux::SetPlayoutDevice(uint16_t index) {
++	return -1;
++}
++
++int32_t AudioDeviceLoopbackLinux::SetPlayoutDevice(
++		WindowsDeviceType /*device*/) {
++	return -1;
++}
++
++int32_t AudioDeviceLoopbackLinux::PlayoutDeviceName(
++		uint16_t index,
++		char name[webrtc::kAdmMaxDeviceNameSize],
++		char guid[webrtc::kAdmMaxGuidSize]) {
++	return -1;
++}
++
++int32_t AudioDeviceLoopbackLinux::RecordingDeviceName(
++		uint16_t index,
++		char name[webrtc::kAdmMaxDeviceNameSize],
++		char guid[webrtc::kAdmMaxGuidSize]) {
++	if (index != 0) {
++		return -1;
+ 	}
+-	return value;
+-}
+-
+-[[nodiscard]] bool LooksLikeLoopbackDevice(
+-		const std::string &name,
+-		const std::string &id) {
+-	const auto lowerName = ToLower(name);
+-	const auto lowerId = ToLower(id);
+-	return (lowerName.find("monitor") != std::string::npos)
+-		|| (lowerId.find("monitor") != std::string::npos)
+-		|| (lowerName.find("loopback") != std::string::npos)
+-		|| (lowerId.find("loopback") != std::string::npos)
+-		|| (lowerName.find("stereo mix") != std::string::npos)
+-		|| (lowerName.find("what u hear") != std::string::npos);
+-}
+-
+-[[nodiscard]] std::vector<std::string> FindLoopbackCaptureDeviceIdsOpenAL() {
+-	auto result = std::vector<std::string>();
+-	const auto pushUnique = [&](const std::string &id) {
+-		if (id.empty()
+-			|| std::find(begin(result), end(result), id) != end(result)) {
+-			return;
+-		}
+-		result.push_back(id);
+-	};
+-
+-	auto all = std::vector<std::string>();
+-	if (const auto devices = alcGetString(nullptr, ALC_CAPTURE_DEVICE_SPECIFIER)
+-		; devices) {
+-		for (auto i = devices; *i != 0;) {
+-			const auto id = std::string(i);
+-			if (LooksLikeLoopbackDevice(id, id)) {
+-				all.push_back(id);
+-			}
+-			i += id.size() + 1;
+-		}
++	SetStringToArray(
++		"System Audio",
++		name,
++		webrtc::kAdmMaxDeviceNameSize);
++	SetStringToArray(
++		"linux_output_monitor",
++		guid,
++		webrtc::kAdmMaxGuidSize);
++	return 0;
++}
++
++int16_t AudioDeviceLoopbackLinux::RecordingDevices() {
++	return IsSupported() ? 1 : 0;
++}
++
++int32_t AudioDeviceLoopbackLinux::SetRecordingDevice(uint16_t index) {
++	return (index == 0) ? 0 : -1;
++}
++
++int32_t AudioDeviceLoopbackLinux::SetRecordingDevice(
++		WindowsDeviceType device) {
++	return 0;
++}
++
++int32_t AudioDeviceLoopbackLinux::PlayoutIsAvailable(bool *available) {
++	if (available) *available = false;
++	return 0;
++}
++
++int32_t AudioDeviceLoopbackLinux::RecordingIsAvailable(bool *available) {
++	if (available) *available = IsSupported();
++	return 0;
++}
++
++int32_t AudioDeviceLoopbackLinux::InitPlayout() {
++	return -1;
++}
++
++int32_t AudioDeviceLoopbackLinux::InitRecording() {
++	if (!_initialized || !IsSupported()) {
++		return -1;
+ 	}
+-	if (all.empty()) {
+-		return result;
++	if (_recordingInitialized) {
++		return 0;
+ 	}
++	_recordingInitialized = true;
++	_audioDeviceBuffer.SetRecordingSampleRate(kSampleRate);
++	_audioDeviceBuffer.SetRecordingChannels(_stereo ? kChannels : 1);
+ 
+-	if (const auto defaultCapture = alcGetString(
+-			nullptr,
+-			ALC_CAPTURE_DEFAULT_DEVICE_SPECIFIER);
+-		defaultCapture
+-		&& LooksLikeLoopbackDevice(defaultCapture, defaultCapture)) {
+-		pushUnique(defaultCapture);
+-	}
++    _capture = std::make_unique<SystemAudioCaptureLinux>([this](std::vector<uint8_t> &&samples) {
++        if (samples.size() != kSamples * kChannels * sizeof(int16_t)) return;
++        // AudioDeviceBuffer consumes one 10 ms frame synchronously.
++        if (_stereo) {
++            _audioDeviceBuffer.SetRecordedBuffer(samples.data(), kSamples);
++        } else {
++            std::array<int16_t, kSamples> mono;
++            for (auto i = 0; i != kSamples; ++i) {
++                int16_t left, right;
++                memcpy(&left, samples.data() + i * 4, 2);
++                memcpy(&right, samples.data() + i * 4 + 2, 2);
++                mono[i] = (int(left) + int(right)) / 2;
++            }
++            _audioDeviceBuffer.SetRecordedBuffer(mono.data(), kSamples);
++        }
++        _audioDeviceBuffer.DeliverRecordedData();
++    });
++	return 0;
++}
+ 
+-	const auto playbackName = [&] {
+-		const auto defaultPlayback = alcGetString(
+-			nullptr,
+-			ALC_DEFAULT_ALL_DEVICES_SPECIFIER);
+-		return defaultPlayback
+-			? ToLower(TrimOpenALPrefix(defaultPlayback))
+-			: std::string();
+-	}();
+-	if (!playbackName.empty()) {
+-		for (const auto &id : all) {
+-			if (ToLower(id).find(playbackName) != std::string::npos) {
+-				pushUnique(id);
+-			}
+-		}
++int32_t AudioDeviceLoopbackLinux::StartRecording() {
++	if (!_recordingInitialized) {
++		return -1;
+ 	}
+-	for (const auto &id : all) {
+-		pushUnique(id);
++	if (_recording) {
++		return 0;
+ 	}
+-	return result;
++	_recording = true;
++	_audioDeviceBuffer.StartRecording();
++	_capture->start();
++	return 0;
+ }
+ 
+-} // namespace
++int32_t AudioDeviceLoopbackLinux::StopRecording() {
++	if (!_recording) {
++		_recordingInitialized = false;
++		return 0;
++	}
++	_recording = false;
++	_capture->stop();
++	_capture.reset();
++	_audioDeviceBuffer.StopRecording();
++	_recordingInitialized = false;
++	return 0;
++}
+ 
+-AudioDeviceLoopbackLinux::AudioDeviceLoopbackLinux(
+-		webrtc::TaskQueueFactory *taskQueueFactory)
+-: AudioDeviceOpenAL(taskQueueFactory) {
+-	setLoopbackCaptureDeviceIds(LoopbackCaptureDeviceIds());
++bool AudioDeviceLoopbackLinux::RecordingIsInitialized() const {
++	return _recordingInitialized;
+ }
+ 
+-bool AudioDeviceLoopbackLinux::IsSupported() {
+-	return !LoopbackCaptureDeviceIds().empty();
++bool AudioDeviceLoopbackLinux::Recording() const {
++	return _recording;
+ }
+ 
+-std::vector<QString> AudioDeviceLoopbackLinux::LoopbackCaptureDeviceIds() {
+-	const auto ids = FindLoopbackCaptureDeviceIdsOpenAL();
+-	auto result = std::vector<QString>();
+-	result.reserve(ids.size());
+-	for (const auto &id : ids) {
+-		result.push_back(QString::fromUtf8(id.c_str()));
+-	}
+-	return result;
++bool AudioDeviceLoopbackLinux::PlayoutIsInitialized() const {
++	return false;
++}
++
++int32_t AudioDeviceLoopbackLinux::StartPlayout() {
++	return -1;
++}
++
++int32_t AudioDeviceLoopbackLinux::StopPlayout() {
++	return -1;
++}
++
++bool AudioDeviceLoopbackLinux::Playing() const {
++	return false;
++}
++
++int32_t AudioDeviceLoopbackLinux::PlayoutDelay(uint16_t *delayMS) const {
++	if (delayMS) *delayMS = 0;
++	return 0;
++}
++
++bool AudioDeviceLoopbackLinux::BuiltInAECIsAvailable() const {
++	return false;
++}
++
++bool AudioDeviceLoopbackLinux::BuiltInAGCIsAvailable() const {
++	return false;
++}
++
++bool AudioDeviceLoopbackLinux::BuiltInNSIsAvailable() const {
++	return false;
++}
++
++int32_t AudioDeviceLoopbackLinux::EnableBuiltInAEC(bool enable) {
++	return -1;
++}
++
++int32_t AudioDeviceLoopbackLinux::EnableBuiltInAGC(bool enable) {
++	return -1;
++}
++
++int32_t AudioDeviceLoopbackLinux::EnableBuiltInNS(bool enable) {
++	return -1;
++}
++
++bool AudioDeviceLoopbackLinux::IsSupported() {
++	return SystemAudioCaptureLinux::IsSupported();
+ }
+ 
+ } // namespace Webrtc::details
+diff --git a/webrtc/platform/linux/webrtc_loopback_adm_linux.h b/webrtc/platform/linux/webrtc_loopback_adm_linux.h
+index 369bd5f..c75b9f1 100644
+--- a/webrtc/platform/linux/webrtc_loopback_adm_linux.h
++++ b/webrtc/platform/linux/webrtc_loopback_adm_linux.h
+@@ -6,19 +6,127 @@
+ //
+ #pragma once
+ 
+-#include "webrtc/details/webrtc_openal_adm.h"
+-#include "webrtc/platform/linux/webrtc_loopback_capture_linux.h"
++#include <modules/audio_device/include/audio_device.h>
++#include <modules/audio_device/audio_device_buffer.h>
++
++#include "webrtc/webrtc_system_audio_capture.h"
++
++#include <memory>
+ 
+ namespace Webrtc::details {
+ 
+-class AudioDeviceLoopbackLinux : public AudioDeviceOpenAL {
++class AudioDeviceLoopbackLinux : public webrtc::AudioDeviceModule {
+ public:
+-	explicit AudioDeviceLoopbackLinux(webrtc::TaskQueueFactory *taskQueueFactory);
++	explicit AudioDeviceLoopbackLinux(
++		webrtc::TaskQueueFactory *taskQueueFactory);
++	~AudioDeviceLoopbackLinux();
++
++	int32_t ActiveAudioLayer(AudioLayer *audioLayer) const override;
++	int32_t RegisterAudioCallback(
++		webrtc::AudioTransport *audioCallback) override;
++
++	// Main initialization and termination.
++	int32_t Init() override;
++	int32_t Terminate() override;
++	bool Initialized() const override;
++
++	// Device enumeration.
++	int16_t PlayoutDevices() override;
++	int16_t RecordingDevices() override;
++	int32_t PlayoutDeviceName(
++		uint16_t index,
++		char name[webrtc::kAdmMaxDeviceNameSize],
++		char guid[webrtc::kAdmMaxGuidSize]) override;
++	int32_t RecordingDeviceName(
++		uint16_t index,
++		char name[webrtc::kAdmMaxDeviceNameSize],
++		char guid[webrtc::kAdmMaxGuidSize]) override;
++
++	// Device selection.
++	int32_t SetPlayoutDevice(uint16_t index) override;
++	int32_t SetPlayoutDevice(WindowsDeviceType device) override;
++	int32_t SetRecordingDevice(uint16_t index) override;
++	int32_t SetRecordingDevice(WindowsDeviceType device) override;
++
++	// Audio transport initialization.
++	int32_t PlayoutIsAvailable(bool *available) override;
++	int32_t InitPlayout() override;
++	bool PlayoutIsInitialized() const override;
++	int32_t RecordingIsAvailable(bool *available) override;
++	int32_t InitRecording() override;
++	bool RecordingIsInitialized() const override;
++
++	// Audio transport control.
++	int32_t StartPlayout() override;
++	int32_t StopPlayout() override;
++	bool Playing() const override;
++	int32_t StartRecording() override;
++	int32_t StopRecording() override;
++	bool Recording() const override;
++
++	// Audio mixer initialization.
++	int32_t InitSpeaker() override;
++	bool SpeakerIsInitialized() const override;
++	int32_t InitMicrophone() override;
++	bool MicrophoneIsInitialized() const override;
++
++	// Speaker volume controls.
++	int32_t SpeakerVolumeIsAvailable(bool *available) override;
++	int32_t SetSpeakerVolume(uint32_t volume) override;
++	int32_t SpeakerVolume(uint32_t *volume) const override;
++	int32_t MaxSpeakerVolume(uint32_t *maxVolume) const override;
++	int32_t MinSpeakerVolume(uint32_t *minVolume) const override;
++
++	// Microphone volume controls.
++	int32_t MicrophoneVolumeIsAvailable(bool *available) override;
++	int32_t SetMicrophoneVolume(uint32_t volume) override;
++	int32_t MicrophoneVolume(uint32_t *volume) const override;
++	int32_t MaxMicrophoneVolume(uint32_t *maxVolume) const override;
++	int32_t MinMicrophoneVolume(uint32_t *minVolume) const override;
++
++	// Microphone mute control.
++	int32_t MicrophoneMuteIsAvailable(bool *available) override;
++	int32_t SetMicrophoneMute(bool enable) override;
++	int32_t MicrophoneMute(bool *enabled) const override;
++
++	// Speaker mute control.
++	int32_t SpeakerMuteIsAvailable(bool *available) override;
++	int32_t SetSpeakerMute(bool enable) override;
++	int32_t SpeakerMute(bool *enabled) const override;
++
++	// Stereo support.
++	int32_t StereoPlayoutIsAvailable(bool *available) const override;
++	int32_t SetStereoPlayout(bool enable) override;
++	int32_t StereoPlayout(bool *enabled) const override;
++	int32_t StereoRecordingIsAvailable(bool *available) const override;
++	int32_t SetStereoRecording(bool enable) override;
++	int32_t StereoRecording(bool *enabled) const override;
++
++	// Delay information and control.
++	int32_t PlayoutDelay(uint16_t *delayMS) const override;
++
++	// Only supported on Android.
++	bool BuiltInAECIsAvailable() const override;
++	bool BuiltInAGCIsAvailable() const override;
++	bool BuiltInNSIsAvailable() const override;
++
++	int32_t EnableBuiltInAEC(bool enable) override;
++	int32_t EnableBuiltInAGC(bool enable) override;
++	int32_t EnableBuiltInNS(bool enable) override;
+ 
+ 	[[nodiscard]] static bool IsSupported();
+ 
+ private:
+-	[[nodiscard]] static std::vector<QString> LoopbackCaptureDeviceIds();
++	webrtc::AudioDeviceBuffer _audioDeviceBuffer;
++
++	std::unique_ptr<SystemAudioCapture> _capture;
++	bool _stereo = true;
++
++	bool _initialized = false;
++	bool _microphoneInitialized = false;
++	bool _recordingInitialized = false;
++	bool _recording = false;
++
+ };
+ 
+ } // namespace Webrtc::details
+diff --git a/webrtc/platform/linux/webrtc_loopback_capture_linux.cpp b/webrtc/platform/linux/webrtc_loopback_capture_linux.cpp
+index c0ab1f9..85cb503 100644
+--- a/webrtc/platform/linux/webrtc_loopback_capture_linux.cpp
++++ b/webrtc/platform/linux/webrtc_loopback_capture_linux.cpp
+@@ -53,8 +53,6 @@ struct FarEnd {
+ 
+ std::atomic<int> LoopbackCaptureRefCount = 0;
+ FarEnd LoopbackFarEnd;
+-std::mutex LoopbackCaptureSamplesCallbackMutex;
+-std::function<void(std::vector<uint8_t> &&)> LoopbackCaptureSamplesCallback;
+ 
+ } // namespace
+ 
+@@ -105,22 +103,6 @@ void LoopbackCapturePushFarEndLinux(
+ 		(index + 1) % kFarEndFramesCount,
+ 		std::memory_order_relaxed);
+ 
+-	auto callback = std::function<void(std::vector<uint8_t> &&)>();
+-	{
+-		const auto guard = std::lock_guard(LoopbackCaptureSamplesCallbackMutex);
+-		callback = LoopbackCaptureSamplesCallback;
+-	}
+-	if (callback) {
+-		auto copy = std::vector<uint8_t>(samples.size());
+-		memcpy(copy.data(), samples.constData(), samples.size());
+-		callback(std::move(copy));
+-	}
+-}
+-
+-void SetLoopbackCaptureSamplesCallbackLinux(
+-		std::function<void(std::vector<uint8_t> &&samples)> callback) {
+-	const auto guard = std::lock_guard(LoopbackCaptureSamplesCallbackMutex);
+-	LoopbackCaptureSamplesCallback = std::move(callback);
+ }
+ 
+ std::optional<crl::time> LoopbackCaptureTakeFarEndLinux(
+diff --git a/webrtc/platform/linux/webrtc_loopback_capture_linux.h b/webrtc/platform/linux/webrtc_loopback_capture_linux.h
+index 372a8c8..45ca4a2 100644
+--- a/webrtc/platform/linux/webrtc_loopback_capture_linux.h
++++ b/webrtc/platform/linux/webrtc_loopback_capture_linux.h
+@@ -31,9 +31,6 @@ void LoopbackCapturePushFarEndLinux(
+ 	int frequency,
+ 	int channels);
+ 
+-void SetLoopbackCaptureSamplesCallbackLinux(
+-	std::function<void(std::vector<uint8_t> &&samples)> callback);
+-
+ [[nodiscard]] std::optional<crl::time> LoopbackCaptureTakeFarEndLinux(
+ 	webrtc::AudioFrame &to,
+ 	crl::time nearEndWhen);
+diff --git a/webrtc/platform/linux/webrtc_system_audio_capture_linux.cpp b/webrtc/platform/linux/webrtc_system_audio_capture_linux.cpp
+index f9910ed..80bfc9c 100644
+--- a/webrtc/platform/linux/webrtc_system_audio_capture_linux.cpp
++++ b/webrtc/platform/linux/webrtc_system_audio_capture_linux.cpp
+@@ -1,47 +1,214 @@
+-// This file is part of Desktop App Toolkit,
+-// a set of libraries for developing nice desktop applications.
+-//
+-// For license and copyright information please follow this link:
+-// https://github.com/desktop-app/legal/blob/master/LEGAL
+-//
+ #include "webrtc/platform/linux/webrtc_system_audio_capture_linux.h"
+-
+-#include "webrtc/platform/linux/webrtc_loopback_adm_linux.h"
+ #include "webrtc/platform/linux/webrtc_loopback_capture_linux.h"
+ 
++#include <QtCore/QLibrary>
++#include <pulse/pulseaudio.h>
++#include <api/audio/audio_frame.h>
++#include <modules/audio_processing/include/audio_processing.h>
++#include <modules/audio_processing/include/audio_frame_proxies.h>
++#include <rtc_base/logging.h>
++
++#include <algorithm>
++#include <cstring>
+ #include <utility>
+ 
+ namespace Webrtc::details {
++namespace {
++
++// Resolve the typed public API at runtime. The application still runs on an
++// ALSA-only machine; capture works with PulseAudio or PipeWire's pulse server.
++#define FOXMES_PULSE_FUNCTIONS(X) \
++    X(pa_threaded_mainloop_new) X(pa_threaded_mainloop_free) \
++    X(pa_threaded_mainloop_start) X(pa_threaded_mainloop_stop) \
++    X(pa_threaded_mainloop_lock) X(pa_threaded_mainloop_unlock) \
++    X(pa_threaded_mainloop_get_api) X(pa_context_new) X(pa_context_unref) \
++    X(pa_context_connect) X(pa_context_disconnect) X(pa_context_get_state) \
++    X(pa_context_set_state_callback) X(pa_stream_new) X(pa_stream_unref) \
++    X(pa_stream_connect_record) X(pa_stream_disconnect) X(pa_stream_get_state) \
++    X(pa_stream_set_state_callback) X(pa_stream_set_read_callback) \
++    X(pa_stream_peek) X(pa_stream_drop) X(pa_stream_get_latency)
+ 
+-SystemAudioCaptureLinux::SystemAudioCaptureLinux(
+-		SystemAudioSamplesCallback callback)
+-: _callback(std::move(callback)) {
++struct PulseApi {
++    QLibrary library{ QStringLiteral("libpulse.so.0") };
++#define DECLARE(name) decltype(&::name) name = nullptr;
++    FOXMES_PULSE_FUNCTIONS(DECLARE)
++#undef DECLARE
++    bool available = false;
++    PulseApi() {
++        if (!library.load()) return;
++        auto complete = true;
++#define RESOLVE(name) name = reinterpret_cast<decltype(name)>(library.resolve(#name)); complete = complete && (name != nullptr);
++        FOXMES_PULSE_FUNCTIONS(RESOLVE)
++#undef RESOLVE
++        available = complete;
++    }
++};
++#undef FOXMES_PULSE_FUNCTIONS
++
++PulseApi &Pulse() {
++    static auto api = PulseApi();
++    return api;
+ }
++constexpr auto kRate = 48000;
++constexpr auto kChannels = 2;
++constexpr auto kSamples = 480;
++constexpr auto kFrameBytes = kSamples * kChannels * sizeof(int16_t);
++
++} // namespace
+ 
+-SystemAudioCaptureLinux::~SystemAudioCaptureLinux() {
+-	stop();
++struct SystemAudioCaptureLinux::State {
++    explicit State(SystemAudioSamplesCallback callback)
++    : callback(std::move(callback)) {
++        for (auto frame : { &captured, &rendered }) {
++            frame->sample_rate_hz_ = kRate;
++            frame->num_channels_ = kChannels;
++            frame->samples_per_channel_ = kSamples;
++        }
++        processing = webrtc::AudioProcessingBuilder().Create();
++        if (processing) {
++            auto config = webrtc::AudioProcessing::Config();
++            config.echo_canceller.enabled = true;
++            config.echo_canceller.mobile_mode = true;
++            processing->ApplyConfig(config);
++        }
++    }
++
++    static void ContextChanged(pa_context *context, void *userdata) {
++        auto &self = *static_cast<State*>(userdata);
++        auto &api = Pulse();
++        const auto state = api.pa_context_get_state(context);
++        if (state == PA_CONTEXT_FAILED || state == PA_CONTEXT_TERMINATED) {
++            RTC_LOG(LS_ERROR) << "FoxMes: PulseAudio system-audio connection closed";
++            return;
++        }
++        if (state != PA_CONTEXT_READY || self.stream) return;
++        const auto spec = pa_sample_spec{ PA_SAMPLE_S16LE, kRate, kChannels };
++        self.stream = api.pa_stream_new(context, "FoxMes system audio", &spec, nullptr);
++        if (!self.stream) return;
++        api.pa_stream_set_state_callback(self.stream, StreamChanged, &self);
++        api.pa_stream_set_read_callback(self.stream, Read, &self);
++        // Never use the default recording source (microphone). This symbolic
++        // monitor selects the default output and is understood by both servers.
++        const auto buffer = pa_buffer_attr{ uint32_t(-1), uint32_t(-1),
++            uint32_t(-1), uint32_t(-1), uint32_t(kFrameBytes) };
++        if (api.pa_stream_connect_record(self.stream, "@DEFAULT_MONITOR@", &buffer,
++                PA_STREAM_ADJUST_LATENCY) < 0) {
++            RTC_LOG(LS_ERROR) << "FoxMes: could not open the output monitor";
++        }
++    }
++    static void StreamChanged(pa_stream *stream, void*) {
++        if (Pulse().pa_stream_get_state(stream) == PA_STREAM_FAILED) {
++            RTC_LOG(LS_ERROR) << "FoxMes: output monitor capture failed";
++        }
++    }
++    static void Read(pa_stream *stream, size_t, void *userdata) {
++        auto &self = *static_cast<State*>(userdata);
++        auto &api = Pulse();
++        const void *data = nullptr;
++        size_t size = 0;
++        if (api.pa_stream_peek(stream, &data, &size) < 0 || size == 0) return;
++        // PulseAudio holes represent silence, not a missing microphone buffer.
++        if (size > kRate * kChannels * sizeof(int16_t)) {
++            self.pending.clear();
++            api.pa_stream_drop(stream);
++            return;
++        }
++        const auto oldSize = self.pending.size();
++        self.pending.resize(oldSize + size, 0);
++        if (data) memcpy(self.pending.data() + oldSize, data, size);
++        api.pa_stream_drop(stream);
++        pa_usec_t latency = 0;
++        int negative = 0;
++        if (api.pa_stream_get_latency(stream, &latency, &negative) < 0 || negative) latency = 0;
++        size_t offset = 0;
++        while (offset + kFrameBytes <= self.pending.size()) {
++            auto out = std::vector<uint8_t>(kFrameBytes);
++            memcpy(out.data(), self.pending.data() + offset, kFrameBytes);
++            // The monitor includes incoming call playback. Use it as an AEC
++            // reference; it must never itself be sent as "system audio".
++            const auto delay = LoopbackCaptureTakeFarEndLinux(self.rendered,
++                crl::now() - std::min<int64_t>(latency / 1000, 1000));
++            if (delay && self.processing) {
++                self.processing->set_stream_delay_ms(*delay);
++                webrtc::ProcessReverseAudioFrame(self.processing.get(), &self.rendered);
++                memcpy(self.captured.mutable_data(), out.data(), kFrameBytes);
++                webrtc::ProcessAudioFrame(self.processing.get(), &self.captured);
++                memcpy(out.data(), self.captured.data(), kFrameBytes);
++            }
++            self.callback(std::move(out));
++            offset += kFrameBytes;
++        }
++        self.pending.erase(self.pending.begin(), self.pending.begin() + offset);
++    }
++
++    SystemAudioSamplesCallback callback;
++    pa_threaded_mainloop *loop = nullptr;
++    pa_context *context = nullptr;
++    pa_stream *stream = nullptr;
++    bool loopStarted = false;
++    bool active = false;
++    std::vector<uint8_t> pending;
++    rtc::scoped_refptr<webrtc::AudioProcessing> processing;
++    webrtc::AudioFrame captured, rendered;
++};
++
++SystemAudioCaptureLinux::SystemAudioCaptureLinux(SystemAudioSamplesCallback callback)
++: _state(std::make_unique<State>(std::move(callback))) {
+ }
++SystemAudioCaptureLinux::~SystemAudioCaptureLinux() { stop(); }
+ 
+ void SystemAudioCaptureLinux::start() {
+-	if (_started) {
+-		return;
+-	}
+-	_started = true;
+-	SetLoopbackCaptureSamplesCallbackLinux(_callback);
+-	SetLoopbackCaptureActiveLinux(true);
++    auto &api = Pulse();
++    if (_state->loop || !api.available) return;
++    _state->loop = api.pa_threaded_mainloop_new();
++    if (!_state->loop) return;
++    _state->context = api.pa_context_new(api.pa_threaded_mainloop_get_api(_state->loop), "FoxMes");
++    if (!_state->context || api.pa_threaded_mainloop_start(_state->loop) < 0) {
++        stop();
++        return;
++    }
++    _state->loopStarted = true;
++    SetLoopbackCaptureActiveLinux(true);
++    _state->active = true;
++    api.pa_threaded_mainloop_lock(_state->loop);
++    api.pa_context_set_state_callback(_state->context, State::ContextChanged, _state.get());
++    const auto result = api.pa_context_connect(_state->context, nullptr, PA_CONTEXT_NOAUTOSPAWN, nullptr);
++    api.pa_threaded_mainloop_unlock(_state->loop);
++    if (result < 0) {
++        RTC_LOG(LS_ERROR) << "FoxMes: no PulseAudio/PipeWire audio server";
++        stop();
++    }
+ }
+ 
+ void SystemAudioCaptureLinux::stop() {
+-	if (!_started) {
+-		return;
+-	}
+-	_started = false;
+-	SetLoopbackCaptureSamplesCallbackLinux(nullptr);
+-	SetLoopbackCaptureActiveLinux(false);
++    auto &api = Pulse();
++    if (!_state->loop) return;
++    if (_state->loopStarted) api.pa_threaded_mainloop_lock(_state->loop);
++    if (_state->stream) {
++        api.pa_stream_set_read_callback(_state->stream, nullptr, nullptr);
++        api.pa_stream_set_state_callback(_state->stream, nullptr, nullptr);
++        api.pa_stream_disconnect(_state->stream);
++        api.pa_stream_unref(_state->stream);
++        _state->stream = nullptr;
++    }
++    if (_state->context) {
++        api.pa_context_set_state_callback(_state->context, nullptr, nullptr);
++        api.pa_context_disconnect(_state->context);
++        api.pa_context_unref(_state->context);
++        _state->context = nullptr;
++    }
++    if (_state->loopStarted) {
++        api.pa_threaded_mainloop_unlock(_state->loop);
++        api.pa_threaded_mainloop_stop(_state->loop);
++    }
++    api.pa_threaded_mainloop_free(_state->loop);
++    _state->loop = nullptr;
++    _state->loopStarted = false;
++    if (_state->active) SetLoopbackCaptureActiveLinux(false);
++    _state->active = false;
++    _state->pending.clear();
+ }
+ 
+-bool SystemAudioCaptureLinux::IsSupported() {
+-	return AudioDeviceLoopbackLinux::IsSupported();
+-}
++bool SystemAudioCaptureLinux::IsSupported() { return Pulse().available; }
+ 
+ } // namespace Webrtc::details
+diff --git a/webrtc/platform/linux/webrtc_system_audio_capture_linux.h b/webrtc/platform/linux/webrtc_system_audio_capture_linux.h
+index 2f7b162..33e7a41 100644
+--- a/webrtc/platform/linux/webrtc_system_audio_capture_linux.h
++++ b/webrtc/platform/linux/webrtc_system_audio_capture_linux.h
+@@ -21,8 +21,8 @@ public:
+ 	[[nodiscard]] static bool IsSupported();
+ 
+ private:
+-	SystemAudioSamplesCallback _callback;
+-	bool _started = false;
++	struct State;
++	std::unique_ptr<State> _state;
+ };
+ 
+ } // namespace Webrtc::details
+diff --git a/webrtc/platform/win/webrtc_system_audio_capture_win.cpp b/webrtc/platform/win/webrtc_system_audio_capture_win.cpp
+new file mode 100644
+index 0000000..ed32ce1
+--- /dev/null
++++ b/webrtc/platform/win/webrtc_system_audio_capture_win.cpp
+@@ -0,0 +1,74 @@
++#include "webrtc/platform/win/webrtc_system_audio_capture_win.h"
++#include "webrtc/platform/win/webrtc_loopback_adm_win.h"
++
++#include <api/make_ref_counted.h>
++#include <api/task_queue/default_task_queue_factory.h>
++#include <modules/audio_device/include/audio_device_defines.h>
++#include <rtc_base/logging.h>
++
++#include <cstring>
++
++namespace Webrtc::details {
++
++struct SystemAudioCaptureWin::State : webrtc::AudioTransport {
++    explicit State(SystemAudioSamplesCallback callback)
++    : callback(std::move(callback))
++    , queues(webrtc::CreateDefaultTaskQueueFactory())
++    , device(rtc::make_ref_counted<AudioDeviceLoopbackWin>(queues.get())) {
++    }
++
++    int32_t RecordedDataIsAvailable(const void *samples, size_t count,
++            size_t bytes, size_t channels, uint32_t rate, uint32_t delay,
++            int32_t drift, uint32_t level, bool key, uint32_t &newLevel) override {
++        newLevel = level;
++        if (rate != 48000 || channels != 2 || bytes != sizeof(int16_t) * channels) return -1;
++        auto data = std::vector<uint8_t>(count * channels * sizeof(int16_t));
++        memcpy(data.data(), samples, data.size());
++        callback(std::move(data));
++        return 0;
++    }
++    int32_t NeedMorePlayData(size_t count, size_t bytes, size_t channels,
++            uint32_t rate, void *samples, size_t &out,
++            int64_t *elapsed, int64_t *ntp) override {
++        memset(samples, 0, count * bytes);
++        out = count;
++        if (elapsed) *elapsed = -1;
++        if (ntp) *ntp = -1;
++        return 0;
++    }
++    void PullRenderData(int bits, int rate, size_t channels, size_t count,
++            void *samples, int64_t *elapsed, int64_t *ntp) override {
++        memset(samples, 0, count * channels * bits / 8);
++        if (elapsed) *elapsed = -1;
++        if (ntp) *ntp = -1;
++    }
++    SystemAudioSamplesCallback callback;
++    std::unique_ptr<webrtc::TaskQueueFactory> queues;
++    rtc::scoped_refptr<AudioDeviceLoopbackWin> device;
++    bool started = false;
++};
++
++SystemAudioCaptureWin::SystemAudioCaptureWin(SystemAudioSamplesCallback callback)
++: _state(std::make_unique<State>(std::move(callback))) {
++}
++SystemAudioCaptureWin::~SystemAudioCaptureWin() { stop(); }
++void SystemAudioCaptureWin::start() {
++    if (_state->started) return;
++    auto &device = _state->device;
++    if (device->Init() != 0 || device->RegisterAudioCallback(_state.get()) != 0
++        || device->InitRecording() != 0 || device->StartRecording() != 0) {
++        RTC_LOG(LS_ERROR) << "FoxMes: WASAPI system audio could not start";
++        device->Terminate();
++        device->RegisterAudioCallback(nullptr);
++        return;
++    }
++    _state->started = true;
++}
++void SystemAudioCaptureWin::stop() {
++    _state->device->StopRecording();
++    _state->device->RegisterAudioCallback(nullptr);
++    _state->device->Terminate();
++    _state->started = false;
++}
++
++} // namespace Webrtc::details
+diff --git a/webrtc/platform/win/webrtc_system_audio_capture_win.h b/webrtc/platform/win/webrtc_system_audio_capture_win.h
+new file mode 100644
+index 0000000..1e2b82b
+--- /dev/null
++++ b/webrtc/platform/win/webrtc_system_audio_capture_win.h
+@@ -0,0 +1,20 @@
++#pragma once
++
++#include "webrtc/webrtc_system_audio_capture.h"
++
++namespace Webrtc::details {
++
++// Uses the same WASAPI loopback recorder (including far-end suppression)
++// as group screen sharing, without creating a second microphone device.
++class SystemAudioCaptureWin final : public SystemAudioCapture {
++public:
++    explicit SystemAudioCaptureWin(SystemAudioSamplesCallback callback);
++    ~SystemAudioCaptureWin() override;
++    void start() override;
++    void stop() override;
++private:
++    struct State;
++    std::unique_ptr<State> _state;
++};
++
++} // namespace Webrtc::details
+diff --git a/webrtc/webrtc_system_audio_capture.cpp b/webrtc/webrtc_system_audio_capture.cpp
+index b7b8c80..128a24a 100644
+--- a/webrtc/webrtc_system_audio_capture.cpp
++++ b/webrtc/webrtc_system_audio_capture.cpp
+@@ -6,7 +6,9 @@
+ //
+ #include "webrtc/webrtc_system_audio_capture.h"
+ 
+-#ifdef WEBRTC_LINUX
++#ifdef WEBRTC_WIN
++#include "webrtc/platform/win/webrtc_system_audio_capture_win.h"
++#elif defined WEBRTC_LINUX
+ #include "webrtc/platform/linux/webrtc_system_audio_capture_linux.h"
+ #elif defined WEBRTC_MAC // WEBRTC_LINUX
+ #include "webrtc/platform/mac/webrtc_system_audio_capture_mac.h"
+@@ -17,7 +19,9 @@
+ namespace Webrtc {
+ 
+ bool SystemAudioCaptureSupported() {
+-#ifdef WEBRTC_LINUX
++#ifdef WEBRTC_WIN
++    return true;
++#elif defined WEBRTC_LINUX
+ 	return details::SystemAudioCaptureLinux::IsSupported();
+ #elif defined WEBRTC_MAC // WEBRTC_LINUX
+ 	return details::SystemAudioCaptureMac::IsSupported();
+@@ -28,7 +32,9 @@ bool SystemAudioCaptureSupported() {
+ 
+ std::unique_ptr<SystemAudioCapture> CreateSystemAudioCapture(
+ 		SystemAudioSamplesCallback callback) {
+-#ifdef WEBRTC_LINUX
++#ifdef WEBRTC_WIN
++    return std::make_unique<details::SystemAudioCaptureWin>(std::move(callback));
++#elif defined WEBRTC_LINUX
+ 	if (!details::SystemAudioCaptureLinux::IsSupported()) {
+ 		return nullptr;
+ 	}

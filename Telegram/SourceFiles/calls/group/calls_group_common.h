@@ -77,6 +77,7 @@ struct StartConferenceInfo {
 	std::shared_ptr<tgcalls::VideoCaptureInterface> videoCapture;
 	QString videoCaptureScreenId;
 	int screenSharingQuality = 0;
+	bool screenWithAudio = false;
 };
 
 struct ConferencePanelMigration {

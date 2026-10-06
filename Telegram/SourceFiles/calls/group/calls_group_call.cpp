@@ -718,7 +718,10 @@ void GroupCall::processConferenceStart(StartConferenceInfo conference) {
 	const auto weak = base::make_weak(this);
 	if (!conference.videoCaptureScreenId.isEmpty()) {
 		_screenCapture = std::move(conference.videoCapture);
+		_screenCaptureMigrated = true;
 		_screenDeviceId = conference.videoCaptureScreenId;
+		_screenWithAudio = conference.screenWithAudio
+			&& Webrtc::LoopbackAudioCaptureSupported();
 		_screenCapture->setOnFatalError([=] {
 			crl::on_main(weak, [=] {
 				emitShareScreenError(Error::ScreenFailed);
@@ -950,6 +953,7 @@ void GroupCall::toggleScreenSharing(
 		return;
 	}
 	const auto changed = (_screenDeviceId != *uniqueId);
+	if (changed) _screenCaptureMigrated = false;
 	const auto wasSharing = isSharingScreen();
 	_screenDeviceId = *uniqueId;
 	_screenWithAudio = withAudio && Webrtc::LoopbackAudioCaptureSupported();
@@ -2948,11 +2952,14 @@ void GroupCall::setupOutgoingVideo() {
 						}
 					});
 				});
-			} else {
+			} else if (!_screenCaptureMigrated) {
 				_screenCapture->switchToDevice(
 					tgcalls::ScreenSharingDeviceId(_screenDeviceId.toStdString(), _screenSharingQuality),
 					true);
 			}
+			// Preserve the running native session only on the initial handoff.
+			// Subsequent starts still apply a newly selected source / quality.
+			_screenCaptureMigrated = false;
 			if (_screenInstance) {
 				_screenInstance->setVideoCapture(_screenCapture);
 			}

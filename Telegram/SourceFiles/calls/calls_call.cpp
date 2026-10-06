@@ -477,6 +477,7 @@ StartConferenceInfo Call::migrateConferenceInfo(StartConferenceInfo extend) {
 	extend.videoCapture = isSharingVideo() ? _videoCapture : nullptr;
 	extend.videoCaptureScreenId = screenSharingDeviceId();
 	extend.screenSharingQuality = _screenSharingQuality;
+	extend.screenWithAudio = _screenWithAudio;
 	return extend;
 }
 

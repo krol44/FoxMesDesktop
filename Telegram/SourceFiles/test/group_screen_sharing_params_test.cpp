@@ -1,4 +1,8 @@
 #include "tgcalls/group/GroupScreenSharingParams.h"
+#include "modules/video_coding/include/video_codec_initializer.h"
+#include "modules/video_coding/svc/svc_rate_allocator.h"
+#include "modules/video_coding/svc/scalability_mode_util.h"
+#include "api/video_codecs/video_encoder.h"
 #include <cstdlib>
 #include <iostream>
 
@@ -62,5 +66,39 @@ int main() {
     Require(params.encodings[1].requested_resolution->height == 360);
     Require(*params.encodings[0].max_bitrate_bps + *params.encodings[1].max_bitrate_bps
         + *params.encodings[2].max_bitrate_bps == profile.maxBitrate);
+    // Check the effective codec and allocator, not merely RTP parameter values.
+    // The legacy two-spatial-layer setup used to cap this at 5 FPS / 250 kbps.
+    params.encodings.resize(1);
+    tgcalls::ConfigureVp9ScreenSharing(params, profile, 720);
+    Require(params.encodings[0].scalability_mode == "L1T1");
+    webrtc::VideoEncoderConfig config;
+    config.codec_type = webrtc::kVideoCodecVP9;
+    config.content_type = webrtc::VideoEncoderConfig::ContentType::kScreen;
+    config.number_of_streams = 1;
+    config.max_bitrate_bps = *params.encodings[0].max_bitrate_bps;
+    config.simulcast_layers.resize(1);
+    config.simulcast_layers[0].active = true;
+    auto vp9 = webrtc::VideoEncoder::GetDefaultVp9Settings();
+    vp9.numberOfSpatialLayers = 1;
+    vp9.numberOfTemporalLayers = 1;
+    vp9.flexibleMode = true;
+    config.encoder_specific_settings = new rtc::RefCountedObject<webrtc::VideoEncoderConfig::Vp9EncoderSpecificSettings>(vp9);
+    webrtc::VideoStream stream;
+    stream.width = 2560;
+    stream.height = 1440;
+    stream.max_framerate = 60;
+    stream.min_bitrate_bps = *params.encodings[0].min_bitrate_bps;
+    stream.target_bitrate_bps = stream.max_bitrate_bps = config.max_bitrate_bps;
+    stream.max_qp = 56;
+    stream.active = true;
+    stream.scalability_mode = webrtc::ScalabilityModeFromString(*params.encodings[0].scalability_mode);
+    webrtc::VideoCodec codec;
+    Require(webrtc::VideoCodecInitializer::SetupCodec(config, {stream}, &codec));
+    Require(codec.VP9()->numberOfSpatialLayers == 1);
+    Require(codec.spatialLayers[0].maxFramerate == 60);
+    Require(codec.spatialLayers[0].maxBitrate == profile.maxBitrate / 1000);
+    webrtc::SvcRateAllocator allocator(codec);
+    const auto allocation = allocator.Allocate(webrtc::VideoBitrateAllocationParameters(2800000u, 60u));
+    Require(allocation.get_sum_bps() == 2800000);
     std::cout << "H264/VP9 group screen profile regression tests passed\n";
 }

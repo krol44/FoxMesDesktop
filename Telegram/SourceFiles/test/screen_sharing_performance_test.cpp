@@ -96,6 +96,16 @@ int main() {
     Require(!Sample(policy, now, stats, 100) && policy.fps() == 60,
         "bitrate-constrained frame drops without CPU evidence must not lower selected FPS");
 
+    policy.reset(60, now);
+    stats.codec = "VP9";
+    stats.averageQp = 208;
+    stats.powerEfficient = false;
+    stats.encodeUsagePercent = 67;
+    stats.fps = 4;
+    stats.encodeMs = 16;
+    Require(!Sample(policy, now, stats, 100) && policy.fps() == 60,
+        "coarse VP9 rate-limited frames must not be mistaken for CPU overload");
+
     policy.reset(5, now);
     stats = Healthy(5);
     stats.cpuLimited = true;

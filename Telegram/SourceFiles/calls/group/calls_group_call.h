@@ -768,6 +768,7 @@ private:
 	rpl::variable<Webrtc::VideoState> _screenState;
 	rpl::variable<bool> _isSharingScreen = false;
 	QString _screenDeviceId;
+	bool _screenCaptureMigrated = false;
 	int _screenSharingQuality = 0;
 	bool _screenWithAudio = false;
 

@@ -53,8 +53,8 @@ constexpr auto kCallResendMaxDelayMs = 4'000;
 
 constexpr auto kLaneHeader = "x-fxl-lane";
 
-constexpr auto kUploadPath = "/chat/upload/";
-constexpr auto kUploadChunkPath = "/chat/uploadChunk/";
+constexpr auto kUploadPath = "/upload/";
+constexpr auto kUploadChunkPath = "/uploadChunk/";
 
 void RememberLane(
         const std::shared_ptr<UploadLane> &lane,
