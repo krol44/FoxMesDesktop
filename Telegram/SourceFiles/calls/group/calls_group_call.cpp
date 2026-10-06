@@ -711,10 +711,12 @@ GroupCall::GroupCall(
 }
 
 void GroupCall::processConferenceStart(StartConferenceInfo conference) {
+	// Every migrated participant needs video capability synchronized, including
+	// those who did not have an active capture in the private call.
+	fillActiveVideoEndpoints();
 	if (!conference.videoCapture) {
 		return;
 	}
-	fillActiveVideoEndpoints();
 	const auto weak = base::make_weak(this);
 	if (!conference.videoCaptureScreenId.isEmpty()) {
 		_screenCapture = std::move(conference.videoCapture);
@@ -2120,10 +2122,15 @@ void GroupCall::applyMeInCallLocally() {
 		: participant
 		? participant->raisedHandRating
 		: FindLocalRaisedHandRating(real->participants());
+	// This is server capability, not the panel's asynchronously updated state.
+	// Preserve it when applying local mute/volume/join updates.
+	const auto videoJoined = participant
+		? participant->videoJoined
+		: _videoIsWorking.current();
 	const auto flags = (canSelfUnmute ? Flag::f_can_self_unmute : Flag(0))
 		| (lastActive ? Flag::f_active_date : Flag(0))
 		| (_joinState.ssrc ? Flag(0) : Flag::f_left)
-		| (_videoIsWorking.current() ? Flag::f_video_joined : Flag(0))
+		| (videoJoined ? Flag::f_video_joined : Flag(0))
 		| Flag::f_self
 		| Flag::f_volume // Without flag the volume is reset to 100%.
 		| Flag::f_volume_by_admin // Self volume can only be set by admin.
