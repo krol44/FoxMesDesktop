@@ -12,6 +12,7 @@ include(lib_ui/cmake/generate_styles.cmake)
 include(cmake/generate_numbers.cmake)
 
 set(style_files
+    custom_backend/foxmes_appearance.style
     ui/td_common.style
     ui/filter_icons.style
     ui/menu_icons.style

@@ -1,4 +1,5 @@
 #include "custom_backend/native_runtime.h"
+#include "custom_backend/native_appearance_adapter.h"
 
 #include "custom_backend/native_gifs_adapter.h"
 #include "custom_backend/native_reactions_adapter.h"
@@ -298,7 +299,24 @@ void RememberUser(Main::Session *session, const QJsonObject &user) {
     const auto id = SessionUserId(session);
     if (id <= 0 || user.isEmpty()) return;
     auto &context = EnsureContext(id);
-    context.user = user;
+    auto incoming = user;
+    if (incoming.value(u"peer_appearance"_q).isObject()) {
+        if (!incoming.contains(u"event_seq"_q)) {
+            for (const auto &key : { u"capabilities"_q, u"prompts"_q,
+                    u"can_create_group"_q, u"can_create_channel"_q,
+                    u"group_members_max"_q, u"channel_members_max"_q }) {
+                if (!incoming.contains(key) && context.user.contains(key)) {
+                    incoming.insert(key, context.user.value(key));
+                }
+            }
+        }
+        const auto previous = context.user.value(u"peer_appearance"_q).toObject();
+        if (previous.value(u"revision"_q).toVariant().toLongLong()
+                > incoming.value(u"peer_appearance"_q).toObject().value(u"revision"_q).toVariant().toLongLong()) {
+            incoming.insert(u"peer_appearance"_q, previous);
+        }
+    }
+    context.user = incoming;
     context.client->setMeId(id);
     SaveContext(id);
 }
@@ -427,6 +445,7 @@ void AttachSession(Main::Session *session) {
     }
     if (gBridges.find(session) == gBridges.end()) {
         gBridges.emplace(session, std::make_unique<NativeBridge>(session));
+        Appearance::Load(session);
 		gBridgeChanges.fire_copy(session);
     }
 }

@@ -21,6 +21,7 @@ This file is part of FoxMes Desktop.
 #include "main/main_session.h"
 #include "mtproto/details/mtproto_serialized_request.h"
 #include "settings/settings_common.h"
+#include "ui/boxes/confirm_box.h"
 #include "ui/controls/userpic_button.h"
 #include "ui/layers/generic_box.h"
 #include "ui/text/text.h"
@@ -223,7 +224,20 @@ void AddPhotoButtons(
 		return HasOwnPhoto(user);
 	}) | rpl::distinct_until_changed());
 	resetButton->setClickedCallback([=] {
-		SaveFields(user, QJsonObject{ { u"photo_file_id"_q, 0 } }, nullptr);
+		window->show(Ui::MakeConfirmBox({
+			.text = tr::lng_profile_photo_reset_sure(
+				tr::now,
+				lt_user,
+				user->shortName()),
+			.confirmed = [=](Fn<void()> close) {
+				SaveFields(
+					user,
+					QJsonObject{ { u"photo_file_id"_q, 0 } },
+					nullptr);
+				close();
+			},
+			.confirmText = tr::lng_profile_photo_reset_button(tr::now),
+		}));
 	});
 
 	Ui::AddSkip(inner);

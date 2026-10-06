@@ -1,4 +1,5 @@
 #include "custom_backend/native_bridge.h"
+#include "custom_backend/native_appearance_adapter.h"
 
 #include "api/api_text_entities.h"
 #include "apiwrap.h"
@@ -1435,6 +1436,7 @@ void NativeBridge::clearPendingSend(qint64 localId) {
 }
 
 void NativeBridge::ensureUser(const QJsonObject &user, bool contact) {
+    Appearance::Apply(_session, user);
     const auto id = user.value("id").toVariant().toLongLong();
     if (id <= 0) return;
     const auto data = _session->data().user(UserId(id));

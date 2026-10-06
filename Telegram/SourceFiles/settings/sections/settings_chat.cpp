@@ -2747,7 +2747,7 @@ void SetupThemeSettings(
 		} });
 	}
 
-	if (!CustomBackend::Enabled()) {
+	{
 		AddPeerColorButton(
 			container,
 			controller->uiShow(),

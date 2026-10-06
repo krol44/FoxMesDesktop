@@ -121,6 +121,14 @@ public:
 		const FullReplyTo &replyTo);
 
 private:
+	void paintNative(
+		Painter &p,
+		not_null<const Element*> view,
+		const Ui::ChatPaintContext &context,
+		int x,
+		int y,
+		int w,
+		bool inBubble) const;
 	[[nodiscard]] Ui::Text::GeometryDescriptor textGeometry(
 		int available,
 		int firstLineSkip,

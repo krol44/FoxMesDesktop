@@ -205,7 +205,9 @@ struct Target {
 		MTP_int(int32(audio)));
 }
 
-[[nodiscard]] MTPGroupCallParticipant ParseParticipant(const QJsonObject &data) {
+[[nodiscard]] MTPGroupCallParticipant ParseParticipant(
+		const QJsonObject &data,
+		bool versioned) {
 	using Flag = MTPDgroupCallParticipant::Flag;
 	auto flags = MTPDgroupCallParticipant::Flags();
 	const auto set = [&](const char *key, Flag flag) {
@@ -217,7 +219,9 @@ struct Target {
 	set("left", Flag::f_left);
 	set("can_self_unmute", Flag::f_can_self_unmute);
 	set("just_joined", Flag::f_just_joined);
-	set("versioned", Flag::f_versioned);
+	if (versioned) {
+		set("versioned", Flag::f_versioned);
+	}
 	set("self", Flag::f_self);
 	set("video_joined", Flag::f_video_joined);
 	const auto activeDate = data.value("active_date").toInt();
@@ -257,11 +261,12 @@ struct Target {
 }
 
 [[nodiscard]] MTPVector<MTPGroupCallParticipant> ParseParticipants(
-		const QJsonArray &list) {
+		const QJsonArray &list,
+		bool versioned = true) {
 	auto result = QVector<MTPGroupCallParticipant>();
 	result.reserve(list.size());
 	for (const auto &entry : list) {
-		result.push_back(ParseParticipant(entry.toObject()));
+		result.push_back(ParseParticipant(entry.toObject(), versioned));
 	}
 	return MTP_vector<MTPGroupCallParticipant>(std::move(result));
 }
@@ -304,7 +309,10 @@ void EnsureUsers(Main::Session *session, const QJsonObject &data) {
 		MTP_dataJSON(MTP_bytes(data.value("params").toString().toUtf8()))));
 	list.push_back(MTP_updateGroupCallParticipants(
 		input,
-		ParseParticipants(data.value("participants").toArray()),
+		// Joining returns a snapshot at the call's current version. The call
+		// metadata above (or an earlier event) may already have set that version;
+		// marking this as an increment would discard our video_joined capability.
+		ParseParticipants(data.value("participants").toArray(), false),
 		MTP_int(data.value("version").toInt())));
 	for (const auto key : { "chain_blocks", "broadcast_blocks" }) {
 		const auto blocks = data.value(QLatin1String(key)).toObject();

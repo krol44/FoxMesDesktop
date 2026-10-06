@@ -20,8 +20,8 @@ concurrency:
 
 env:
   FOXMES_DEPS_REVISION: '1'
-  FOXMES_VERSION: 1.9.8
-  FOXMES_VERSION_CODE: '1009008'
+  FOXMES_VERSION: 1.9.9
+  FOXMES_VERSION_CODE: '1009009'
 
 jobs:
   validate:
@@ -347,7 +347,7 @@ jobs:
         run: |
           desktop-file-validate out/FoxMes.AppDir/usr/share/applications/ing.foxtail.FoxMes.desktop
           appstreamcli validate --no-net out/FoxMes.AppDir/usr/share/metainfo/ing.foxtail.FoxMes.metainfo.xml
-          artifacts/linux/FoxMes-1.9.8-linux-x86_64.AppImage --appimage-extract >/dev/null
+          artifacts/linux/FoxMes-1.9.9-linux-x86_64.AppImage --appimage-extract >/dev/null
           ldd out/FoxMes.AppDir/usr/bin/FoxMes | tee /tmp/foxmes-ldd.txt
           ! grep -q 'not found' /tmp/foxmes-ldd.txt
       - name: Upload Linux packages

@@ -2,6 +2,7 @@
 This file is part of FoxMes Desktop.
 */
 #include "custom_backend/native_mtp_router.h"
+#include "custom_backend/native_appearance_adapter.h"
 
 #include "base/unixtime.h"
 #include "core/application.h"
@@ -94,7 +95,8 @@ QString ErrorType(
 }
 
 bool Intercepts(const SerializedRequest &request) {
-	return Conferences::Intercepts(request)
+	return Appearance::Intercepts(request)
+		|| Conferences::Intercepts(request)
 		|| Contacts::Intercepts(request)
 		|| TopicChannels::Intercepts(request)
 		|| Channels::Intercepts(request);
@@ -104,7 +106,9 @@ void Intercept(
 		not_null<MTP::Instance*> instance,
 		mtpRequestId requestId,
 		const SerializedRequest &request) {
-	if (Conferences::Intercepts(request)) {
+	if (Appearance::Intercepts(request)) {
+		Appearance::Intercept(instance, requestId, request);
+	} else if (Conferences::Intercepts(request)) {
 		Conferences::Intercept(instance, requestId, request);
 	} else if (Contacts::Intercepts(request)) {
 		Contacts::Intercept(instance, requestId, request);

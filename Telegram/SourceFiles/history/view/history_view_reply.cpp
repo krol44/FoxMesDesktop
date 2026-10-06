@@ -9,6 +9,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "core/click_handler_types.h"
 #include "core/ui_integration.h"
+#include "custom_backend/native_appearance_adapter.h"
+#include "custom_backend/native_runtime.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "data/data_channel.h"
 #include "data/data_document.h"
@@ -804,6 +806,27 @@ QSize Reply::countMultilineOptimalSize(
 }
 
 void Reply::paint(
+		Painter &p,
+		not_null<const Element*> view,
+		const Ui::ChatPaintContext &context,
+		int x,
+		int y,
+		int w,
+		bool inBubble) const {
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Appearance::PaintReply(
+			_colorPeer,
+			context,
+			inBubble,
+			[&](const Ui::ChatPaintContext &styled) {
+				paintNative(p, view, styled, x, y, w, inBubble);
+			});
+		return;
+	}
+	paintNative(p, view, context, x, y, w, inBubble);
+}
+
+void Reply::paintNative(
 		Painter &p,
 		not_null<const Element*> view,
 		const Ui::ChatPaintContext &context,

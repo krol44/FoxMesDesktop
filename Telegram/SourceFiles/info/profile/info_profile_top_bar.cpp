@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/profile/info_profile_top_bar.h"
 
 #include "custom_backend/native_runtime.h"
+#include "custom_backend/native_appearance_adapter.h"
 #include "api/api_peer_colors.h"
 #include "api/api_peer_photo.h"
 #include "api/api_user_privacy.h"
@@ -3874,41 +3875,49 @@ void TopBar::updateStoryOutline(std::optional<QColor> edgeColor) {
 }
 
 void TopBar::paintStoryOutline(QPainter &p, const QRect &geometry) {
-	if (!_hasStories || _storySegments.empty()) {
+	const auto nativePaint = [&] {
+		if (!_hasStories || _storySegments.empty()) {
+			return;
+		}
+		auto hq = PainterHighQualityEnabler(p);
+
+		const auto progress = _progress.current();
+		const auto alpha = std::clamp(
+			(progress - kStoryOutlineFadeEnd) / kStoryOutlineFadeRange,
+			0.,
+			1.);
+		if (alpha <= 0.) {
+			return;
+		}
+
+		p.setOpacity(alpha);
+		const auto outlineWidth = style::ConvertFloatScale(4.0);
+		const auto padding = style::ConvertFloatScale(3.0);
+		const auto outlineRect = QRectF(geometry).adjusted(
+			-padding - outlineWidth / 2,
+			-padding - outlineWidth / 2,
+			padding + outlineWidth / 2,
+			padding + outlineWidth / 2);
+
+		Ui::PaintOutlineSegments(p, outlineRect, _storySegments);
+
+		if (_hasLiveStories) {
+			const auto outline = _edgeColor.current().value_or(
+				_solidBg.value_or(st::boxDividerBg->c));
+			Ui::PaintLiveBadge(
+				p,
+				geometry.x(),
+				geometry.y() + outlineWidth + padding,
+				geometry.width(),
+				outline);
+		}
+	};
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Appearance::PaintProfileOutline(_peer, p, geometry,
+			_progress.current(), _hasStories && !_storySegments.empty(), nativePaint);
 		return;
 	}
-	auto hq = PainterHighQualityEnabler(p);
-
-	const auto progress = _progress.current();
-	const auto alpha = std::clamp(
-		(progress - kStoryOutlineFadeEnd) / kStoryOutlineFadeRange,
-		0.,
-		1.);
-	if (alpha <= 0.) {
-		return;
-	}
-
-	p.setOpacity(alpha);
-	const auto outlineWidth = style::ConvertFloatScale(4.0);
-	const auto padding = style::ConvertFloatScale(3.0);
-	const auto outlineRect = QRectF(geometry).adjusted(
-		-padding - outlineWidth / 2,
-		-padding - outlineWidth / 2,
-		padding + outlineWidth / 2,
-		padding + outlineWidth / 2);
-
-	Ui::PaintOutlineSegments(p, outlineRect, _storySegments);
-
-	if (_hasLiveStories) {
-		const auto outline = _edgeColor.current().value_or(
-			_solidBg.value_or(st::boxDividerBg->c));
-		Ui::PaintLiveBadge(
-			p,
-			geometry.x(),
-			geometry.y() + outlineWidth + padding,
-			geometry.width(),
-			outline);
-	}
+	nativePaint();
 }
 
 void TopBar::bindStatus() {

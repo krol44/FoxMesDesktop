@@ -1,4 +1,4 @@
-FoxMes Desktop 1.9.8. This is the first cross-platform FoxMes Desktop release for Windows x64, macOS 13+ on Apple silicon, and Linux x86_64.
+FoxMes Desktop 1.9.9. This is the first cross-platform FoxMes Desktop release for Windows x64, macOS 13+ on Apple silicon, and Linux x86_64.
 
 ## Removing the quarantine
 

@@ -166,6 +166,8 @@ PRIVATE
     custom_backend/topic_channel_links.h
     custom_backend/topic_channels_prompt.cpp
     custom_backend/topic_channels_prompt.h
+    custom_backend/native_appearance_adapter.cpp
+    custom_backend/native_appearance_adapter.h
     custom_backend/native_mtp_router.cpp
     custom_backend/native_mtp_router.h
     custom_backend/native_contacts_adapter.cpp

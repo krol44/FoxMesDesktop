@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/transfer_gift_box.h"
 #include "chat_helpers/compose/compose_show.h"
 #include "core/ui_integration.h"
+#include "custom_backend/native_runtime.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "data/stickers/data_stickers.h"
 #include "data/data_changes.h"
@@ -1981,7 +1982,7 @@ void EditPeerColorSection(
 			Ui::AddSkip(container);
 			appendProfileSettings(container, channel);
 		}
-	} else if (peer->isSelf()) {
+	} else if (peer->isSelf() && !CustomBackend::Enabled()) {
 		Ui::AddSkip(container, st::settingsColorSampleSkip);
 
 		const auto session = &peer->session();
@@ -2263,7 +2264,7 @@ void EditPeerProfileColorSection(
 		}
 	}, button->lifetime());
 
-	if (peer->isSelf()) {
+	if (peer->isSelf() && !CustomBackend::Enabled()) {
 		Ui::AddSkip(container, st::settingsColorSampleSkip);
 
 		const auto session = &peer->session();
