@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/sections/settings_main.h"
 
 #include "custom_backend/native_runtime.h"
+#include "custom_backend/native_folders_adapter.h"
 #include "settings/settings_common_session.h"
 
 #include "api/api_cloud_password.h"
@@ -195,9 +196,9 @@ Cover::Cover(
 	initViewers();
 	setupChildGeometry();
 
-	_userpic->setVideoAllowed(true);
+	_userpic->setVideoAllowed(!CustomBackend::Enabled());
 	_userpic->switchChangePhotoOverlay(
-		_user->isSelf() && !CustomBackend::DisableWhile,
+		_user->isSelf(),
 		[=](
 			Ui::UserpicButton::ChosenImage chosen) {
 		auto &image = chosen.image;
@@ -372,7 +373,7 @@ void BuildSectionButtons(SectionBuilder &builder) {
 	const auto controller = builder.controller();
 	const auto showOther = builder.showOther();
 
-	if (!session->supportMode() && !CustomBackend::Enabled()) {
+	if (!session->supportMode()) {
 		builder.addSectionButton({
 			.title = tr::lng_settings_my_account(),
 			.targetSection = InformationId(),
@@ -396,11 +397,15 @@ void BuildSectionButtons(SectionBuilder &builder) {
 			.keywords = { u"security"_q, u"passcode"_q, u"password"_q, u"2fa"_q },
 		});
 
+	}
+
+	if (!CustomBackend::Enabled() || CustomBackend::Folders::Supported(session)) {
 		const auto preload = [=] {
 			session->data().chatsFilters().requestSuggested();
 		};
 		const auto hasFilters = session->data().chatsFilters().has()
-			|| session->settings().dialogsFiltersEnabled();
+			|| session->settings().dialogsFiltersEnabled()
+            || (CustomBackend::Enabled() && CustomBackend::Folders::Supported(session));
 
 		auto shownProducer = hasFilters
 			? rpl::single(true) | rpl::type_erased
@@ -682,7 +687,7 @@ void Main::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
 			Core::App().domain().addActivated(MTP::Environment{});
 		}, &st::menuIconAddAccount);
 	}
-	if (!controller()->session().supportMode() && !CustomBackend::Enabled()) {
+	if (!controller()->session().supportMode()) {
 		addAction(
 			tr::lng_settings_information(tr::now),
 			[=] { showOther(InformationId()); },

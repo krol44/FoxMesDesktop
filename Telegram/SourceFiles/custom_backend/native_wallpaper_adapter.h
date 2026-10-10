@@ -19,7 +19,12 @@ namespace Window {
 class SessionController;
 }
 
+namespace rpl {
+class lifetime;
+}
+
 namespace CustomBackend::Wallpapers {
+QJsonObject StateFromPaper(not_null<Main::Session*> session, const Data::WallPaper &paper);
 
 
 void RequestGallery(not_null<Main::Session*> session, Fn<void()> done);
@@ -39,6 +44,7 @@ void SaveDefault(
 	not_null<Main::Session*> session,
 	const Data::WallPaper &paper);
 void ResetForPeer(not_null<PeerData*> peer);
+void RevertForPeer(not_null<PeerData*> peer);
 void SetNoneForPeer(not_null<PeerData*> peer);
 
 [[nodiscard]] Data::WallPaper NoBackgroundPaper();
@@ -49,7 +55,13 @@ void SetNoneForPeer(not_null<PeerData*> peer);
 	PeerData *forPeer,
 	const Data::WallPaper &paper);
 
+void ApplyDefault(not_null<Main::Session*> session, const QJsonObject &state);
+MTPWallPaper NativePaper(not_null<Main::Session*> session, const QJsonObject &state);
 void RequestDefault(not_null<Main::Session*> session);
+void ApplyNightMode(not_null<Window::SessionController*> controller, bool night);
+void ToggleSystemNightMode(not_null<Window::SessionController*> controller);
+void CheckSystemNightMode();
+void ObserveNightMode(Fn<void(bool)> changed, rpl::lifetime &lifetime);
 
 void ApplyForPeer(not_null<PeerData*> peer, const QJsonObject &wallpaper);
 

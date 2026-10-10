@@ -148,16 +148,30 @@ public:
     explicit NativeBridge(Main::Session *session);
     ~NativeBridge() override;
 
+    void applyProfilePhotos(const QJsonObject &state, bool reset);
+    void requestProfilePhotos(not_null<UserData*> user, PhotoId afterId);
+    void changeProfilePhoto(PhotoId id, bool remove, Fn<void()> done = nullptr);
+    void uploadProfilePhoto(QImage &&image, Fn<void()> done, Fn<void()> failed = nullptr);
+    void applyAppearanceResult(qint64 chatId, const QJsonObject &result);
     void reloadChats();
+    void hydrateFolderChats(Fn<void(QJsonDocument, bool)> done);
     void loadContacts();
-    using HistoryLoaded = std::function<void()>;
-    using HistoryFailed = std::function<void(const MTP::Error &)>;
-    void loadHistory(
+    struct HistoryQuery {
+        MsgId offsetId = 0;
+        int addOffset = 0;
+        int limit = 0;
+    };
+    using HistoryAnswer = std::function<void(QVector<MTPMessage>)>;
+    using HistoryError = std::function<void(const QString &)>;
+    void requestHistoryMessages(
+        not_null<History*> history,
+        HistoryQuery query,
+        HistoryAnswer done,
+        HistoryError fail);
+    void requestHistorySlice(
         History *history,
-        qint64 aroundId = 0,
-        Data::LoadDirection direction = Data::LoadDirection::Before,
-        HistoryLoaded done = {},
-        HistoryFailed failed = {});
+        qint64 messageId,
+        Data::LoadDirection direction);
     void sendMessage(
         Api::MessageToSend &&message,
         std::optional<MsgId> localMessageId);
@@ -423,12 +437,10 @@ private:
     void applyChatSettingsPatch(const QJsonObject &data);
     void loadCachedChats();
     void finishInitialLoadIfReady();
-    void loadHistoryOf(
-        History *history,
-        qint64 aroundId,
-        Data::LoadDirection direction,
-        HistoryLoaded done,
-        HistoryFailed failed,
+    void resolveHistoryChat(
+        not_null<History*> history,
+        Fn<void(qint64)> ready,
+        HistoryError fail,
         bool chatsReloaded);
     void runAfterChatsReload(bool listLoaded);
     HistoryItem *applyMessage(
@@ -513,7 +525,8 @@ private:
 		qint64 readThroughId,
 		TimeId readAt,
 		int unreadCount,
-		qint64 stateRevision);
+		qint64 stateRevision,
+		qint64 firstUnreadId = 0);
 	void applyReceiptSnapshot(History *history, qint64 chatId, const QJsonObject &receiptState);
 	void loadReadJournal();
 	void persistReadJournal() const;
@@ -532,11 +545,25 @@ private:
 	void updatePresence();
 	void applyPresence(const QJsonObject &data);
     void ensureChat(History *history, std::function<void(qint64)> done);
-    void loadHistoryPage(
+    void fetchHistoryMessages(
+        not_null<History*> history,
+        qint64 chatId,
+        HistoryQuery query,
+        HistoryAnswer done,
+        HistoryError fail,
+        int attempt);
+    [[nodiscard]] QVector<MTPMessage> registerHistoryPage(
+        not_null<History*> history,
+        qint64 chatId,
+        const QJsonObject &response);
+    void sendHistorySliceRequest(
         History *history,
-        qint64 aroundId,
-        Data::LoadDirection direction,
-        HistoryLoaded done = {});
+        HistoryLoadKey key,
+        int attempt);
+    void applyHistorySlice(
+        History *history,
+        const HistoryLoadKey &key,
+        const QJsonObject &response);
     void deferMessageEvent(const QString &type, const QJsonObject &data);
     void drainDeferredMessageEvents();
     [[nodiscard]] std::optional<PreparedMessage> prepareServiceMessage(
@@ -621,7 +648,6 @@ private:
     std::unordered_set<MessageKey, MessageKeyHash> _seenMessages;
 	std::unordered_map<qint64, std::vector<std::function<void()>>>
 		_messageDataCallbacks;
-	std::unordered_set<qint64> _loadedChats;
 	std::unordered_set<qint64> _pinnedSyncedChats;
 	std::unordered_map<qint64, std::vector<qint64>> _pinnedIds;
 	std::unordered_map<qint64, qint64> _pinRevisions;
@@ -631,13 +657,14 @@ private:
 		QJsonObject data;
 	};
 	std::vector<DeferredMessageEvent> _deferredMessageEvents;
-	std::unordered_map<HistoryLoadKey, std::vector<std::function<void()>>, HistoryLoadKeyHash>
-		_loadingChats;
-	std::unordered_map<qint64, qint64> _nextHistoryBefore;
+	std::unordered_set<HistoryLoadKey, HistoryLoadKeyHash> _historySliceRequests;
 	std::unordered_map<uint64_t, std::vector<std::function<void(qint64)>>> _pendingChatCallbacks;
 	std::unordered_map<qint64, PendingSendRequest> _pendingSends;
 	std::unordered_map<QString, qint64> _pendingSendNonceToLocalId;
 	std::unordered_map<qint64, QString> _avatarIds;
+	std::unordered_map<qint64, qint64> _profilePhotosRevision;
+	base::flat_set<qint64> _profilePhotoRequests;
+	bool _profilePhotoSaving = false;
 	std::unordered_map<qint64, ContactView> _contactViews;
 	std::unordered_map<qint64, std::unordered_map<qint64, qint64>>
 		_presenceObservedAt;
@@ -654,6 +681,7 @@ private:
 		qint64 readThroughId = 0;
 		qint64 stateRevision = 0;
 		TimeId readAt = 0;
+		qint64 snapshotTopId = 0;
 	};
 	std::unordered_map<MessageKey, AppliedReadState, MessageKeyHash>
 		_appliedReadStates;
@@ -668,6 +696,8 @@ private:
 	QTimer _readRetryTimer;
 	bool _readJournalPaused = false;
 	std::unordered_map<uint64_t, uint64_t> _draftSaveGenerations;
+    std::unordered_map<qint64, qint64> _themeRevisionByChat;
+    std::unordered_map<qint64, qint64> _wallpaperRevisionByChat;
 	std::unordered_map<qint64, qint64> _draftRevisionByChat;
 	struct ReactionReplaceState {
 		std::vector<DocumentId> desired;

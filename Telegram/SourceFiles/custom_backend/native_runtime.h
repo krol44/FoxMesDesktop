@@ -102,10 +102,13 @@ void MarkEphemeralViewed(
 	const base::flat_set<not_null<HistoryItem*>> &items);
 
 [[nodiscard]] bool EphemeralMediaSupported(Main::Session *session);
+void RequestProfilePhotos(not_null<UserData*> user, PhotoId afterId);
+void ChangeProfilePhoto(not_null<Main::Session*> session, PhotoId id, bool remove, Fn<void()> done = nullptr);
 void UploadPeerPhoto(
 	not_null<PeerData*> peer,
 	QImage &&image,
-	std::function<void()> done);
+	std::function<void()> done,
+    std::function<void()> failed = {});
 void UploadPeerVideoPhoto(
 	not_null<PeerData*> peer,
 	QImage &&cover,

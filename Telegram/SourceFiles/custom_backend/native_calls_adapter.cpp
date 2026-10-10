@@ -8,6 +8,7 @@ This file is part of FoxMes Desktop.
 #include "calls/calls_instance.h"
 #include "core/application.h"
 #include "custom_backend/api_client.h"
+#include "custom_backend/error_alerts.h"
 #include "custom_backend/native_bridge.h"
 #include "custom_backend/native_runtime.h"
 #include "base/flat_map.h"
@@ -252,18 +253,17 @@ namespace {
 	} else if (status == 404) {
 		return QString();
 	} else if (code == u"call_busy"_q) {
-		return code;
+		return ErrorDisplayText(code, status);
 	} else if (code == u"call_version_mismatch"_q) {
 		return u"PARTICIPANT_VERSION_OUTDATED"_q;
 	} else if (code == u"call_peer_unsupported"_q) {
 		return u"PARTICIPANT_VERSION_OUTDATED"_q;
 	} else if (code == u"call_peer_offline"_q) {
-		const auto message = doc.object().value("message").toString();
-		return message.isEmpty() ? code : message;
+		return ErrorDisplayText(code, status);
 	} else if (code == u"call_peer_refuses"_q) {
 		return u"USER_PRIVACY_RESTRICTED"_q;
 	}
-	return error;
+	return ErrorDisplayText(code.isEmpty() ? error : code, status);
 }
 
 [[nodiscard]] ApiClient *ClientOrNull(Main::Session *session) {

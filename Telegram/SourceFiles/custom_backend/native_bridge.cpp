@@ -1,5 +1,6 @@
 #include "custom_backend/native_bridge.h"
 #include "custom_backend/native_appearance_adapter.h"
+#include "custom_backend/native_folders_adapter.h"
 
 #include "api/api_text_entities.h"
 #include "apiwrap.h"
@@ -10,10 +11,12 @@
 
 #include "custom_backend/api_client.h"
 #include "custom_backend/native_calls_adapter.h"
+#include "custom_backend/native_chat_request_adapter.h"
 #include "custom_backend/native_community.h"
 #include "custom_backend/native_conference_adapter.h"
 #include "custom_backend/native_delete_adapter.h"
 #include "custom_backend/native_reactions_adapter.h"
+#include "custom_backend/native_stickers_adapter.h"
 #include "custom_backend/native_runtime.h"
 #include "custom_backend/native_scheduled_adapter.h"
 #include "custom_backend/native_streaming_loader.h"
@@ -34,6 +37,7 @@
 #include "data/data_chat_participant_status.h"
 #include "data/data_changes.h"
 #include "data/data_document.h"
+#include "data/data_cloud_themes.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "data/data_document_media.h"
 #include "data/data_folder.h"
@@ -61,6 +65,8 @@
 #include "media/media_video_encode.h"
 #include "storage/localimageloader.h"
 #include "storage/storage_facade.h"
+#include "storage/storage_user_photos.h"
+#include "ui/toast/toast.h"
 #include "storage/storage_account.h"
 #include "storage/storage_shared_media.h"
 #include "ui/effects/thanos_effect.h"
@@ -155,6 +161,9 @@ constexpr auto kDeliveredBatchDelayMs = 400;
 constexpr auto kPinnedOrderSettleMs = 150;
 
 constexpr auto kSlowHistoryPage = crl::time(700);
+constexpr auto kHistoryPageLimit = 100;
+constexpr auto kHistoryRetryDelay = crl::time(1000);
+constexpr auto kHistoryRetryMaxDelay = crl::time(16000);
 
 constexpr auto kReactionUsageRefreshDelayMs = 10 * 1000;
 
@@ -1450,9 +1459,12 @@ void NativeBridge::ensureUser(const QJsonObject &user, bool contact) {
     }
     data->addFlags(UserDataFlag::CanPinMessages);
     EnsureBarSettingsKnown(data);
-    if (contact && id != client().meId()) {
-        data->setIsContact(true);
+    if (user.contains("is_contact")) {
+        data->setIsContact(user.value("is_contact").toBool() && id != client().meId());
+    } else if (contact && id != client().meId()) {
+        data->setIsContact(ChatRequests::CountsAsContact(_session, id));
     }
+    ChatRequests::RememberUser(_session, user);
 	// "blocked" rides only on payloads built for this account, so its
 	// presence also marks the contact fields as stated.
 	if (user.contains(u"blocked"_q)) {
@@ -1471,30 +1483,44 @@ void NativeBridge::ensureUser(const QJsonObject &user, bool contact) {
 				Data::PeerUpdate::Flag::FullInfo);
 		}
 	}
-	const auto avatarId = user.value("avatar_id").toString().trimmed();
+	const auto incomingRevision = user.value("photos_revision").toVariant().toLongLong();
+    if (incomingRevision < _profilePhotosRevision[id]) return;
+    _profilePhotosRevision[id] = incomingRevision;
+    const auto avatarId = user.value("avatar_id").toString().trimmed();
 	const auto avatarUrl = user.value("avatar_url").toString().trimmed();
 	const auto revision = avatarId.isEmpty() ? avatarUrl : avatarId;
+	const auto stablePhotoId = user.value("current_profile_photo_id").toString().toULongLong();
+	const auto photoId = avatarUrl.isEmpty()
+		? PhotoId()
+		: stablePhotoId ? stablePhotoId : AvatarPhotoId(revision);
+	const auto avatarKey = avatarUrl + '\n' + revision;
 	const auto previous = _avatarIds.find(id);
-	if (previous != _avatarIds.end() && previous->second == revision) {
+	if (previous != _avatarIds.end()
+		&& previous->second == avatarKey
+		&& data->userpicPhotoId() == photoId) {
 		return;
 	}
-	_avatarIds[id] = revision;
+	_avatarIds[id] = avatarKey;
 	if (avatarUrl.isEmpty()) {
 		data->setUserpic(PhotoId(), ImageLocation(), false);
 	} else {
-		const auto photoId = AvatarPhotoId(revision);
+		const auto photo = _session->data().photo(photoId);
+		photo->setRemoteLocation(0, photoId, QByteArray());
+		if (!photo->date()) {
+			photo->setFields(base::unixtime::now(), false);
+		}
+		UpdateRemotePhotoImages(
+			photo,
+			avatarUrl,
+			kUnknownPhotoSide,
+			kUnknownPhotoSide,
+			false);
 		data->setUserpic(
 			photoId,
 			ImageLocation(
 				DownloadLocation{ PlainUrlLocation{ avatarUrl } },
 				160,
 				160),
-			false);
-		UpdateRemotePhotoImages(
-			_session->data().photo(photoId),
-			avatarUrl,
-			kUnknownPhotoSide,
-			kUnknownPhotoSide,
 			false);
 	}
 	_session->changes().peerUpdated(
@@ -1505,6 +1531,133 @@ void NativeBridge::ensureUser(const QJsonObject &user, bool contact) {
 NativeBridge::ContactView NativeBridge::contactView(qint64 userId) const {
 	const auto i = _contactViews.find(userId);
 	return (i == _contactViews.end()) ? ContactView() : i->second;
+}
+
+
+void NativeBridge::applyProfilePhotos(const QJsonObject &state, bool reset) {
+    const auto user = state.value("user").toObject();
+    const auto userId = user.value("id").toVariant().toLongLong();
+    const auto revision = state.value("photos_revision").toVariant().toLongLong();
+    if (revision < _profilePhotosRevision[userId]) return;
+    _profilePhotosRevision[userId] = revision;
+    ensureUser(user, true);
+    if (userId == qint64(peerToUser(_session->userPeerId()).bare)) {
+        auto remembered = CurrentUser(_session);
+        for (auto i = user.begin(); i != user.end(); ++i) {
+            remembered.insert(i.key(), i.value());
+        }
+        for (const auto &key : { u"avatar_url"_q, u"avatar_id"_q,
+                u"current_profile_photo_id"_q, u"photos_revision"_q }) {
+            if (!user.contains(key)) remembered.remove(key);
+        }
+        RememberUser(_session, remembered);
+    }
+    auto ids = std::vector<PhotoId>();
+    for (const auto &value : state.value("photos").toArray()) {
+        const auto item = value.toObject();
+        const auto id = item.value("id").toString().toULongLong();
+        if (!id) continue;
+        const auto photo = _session->data().photo(id);
+        photo->setRemoteLocation(0, id, QByteArray());
+        photo->setFields(base::unixtime::now(), false);
+        UpdateRemotePhotoImages(photo, item.value("url").toString(),
+            item.value("width").toInt(640), item.value("height").toInt(640), true,
+            item.value("file_unique_id").toString());
+        ids.push_back(id);
+    }
+    const auto bare = UserId(userId);
+    if (reset) _session->storage().remove(Storage::UserPhotosRemoveAfter(bare, PhotoId(0)));
+    _session->storage().add(Storage::UserPhotosAddSlice(bare, std::move(ids), state.value("count").toInt()));
+}
+
+void NativeBridge::requestProfilePhotos(not_null<UserData*> user, PhotoId afterId) {
+    const auto id = qint64(peerToUser(user->id).bare);
+    if (!_profilePhotoRequests.insert(id).second) return;
+    const auto weak = QPointer<NativeBridge>(this);
+    client().profilePhotos(id, afterId, [weak, id, afterId](QJsonDocument doc, QString error, int) {
+        if (!weak) return;
+        weak->_profilePhotoRequests.erase(id);
+        if (!error.isEmpty() || !doc.isObject()) return;
+        weak->applyProfilePhotos(doc.object(), !afterId);
+    });
+}
+
+void NativeBridge::changeProfilePhoto(PhotoId id, bool remove, Fn<void()> done) {
+    if (_profilePhotoSaving || !id) return;
+    _profilePhotoSaving = true;
+    const auto weak = QPointer<NativeBridge>(this);
+    const auto userId = qint64(peerToUser(_session->userPeerId()).bare);
+    client().changeProfilePhoto(id, remove, _profilePhotosRevision[userId],
+        [weak, done](QJsonDocument doc, QString error, int) {
+            if (!weak) return;
+            weak->_profilePhotoSaving = false;
+            if (!error.isEmpty() || !doc.isObject()) {
+                weak->requestProfilePhotos(weak->_session->user(), 0);
+                Ui::Toast::Show(u"Could not update the photo."_q);
+                return;
+            }
+            weak->applyProfilePhotos(doc.object(), true);
+            if (done) done();
+        });
+}
+
+void NativeBridge::uploadProfilePhoto(QImage &&image, Fn<void()> done, Fn<void()> failed) {
+    const auto userId = qint64(peerToUser(_session->userPeerId()).bare);
+    // The upstream preview assigns a temporary photo ID without a PhotoData.
+    ensureUser(CurrentUser(_session), false);
+    if (_profilePhotoSaving) {
+        QTimer::singleShot(0, this, [failed] { if (failed) failed(); });
+        return;
+    }
+    _profilePhotoSaving = true;
+    auto bytes = QByteArray();
+    auto buffer = QBuffer(&bytes);
+    if (!buffer.open(QIODevice::WriteOnly) || !image.save(&buffer, "JPEG", 87)) {
+        _profilePhotoSaving = false;
+        LOG(("FoxMes: profile photo JPEG encoding failed, user %1").arg(userId));
+        QTimer::singleShot(0, this, [failed] {
+            if (failed) failed();
+            Ui::Toast::Show(u"Could not prepare the photo."_q);
+        });
+        return;
+    }
+    LOG(("FoxMes: profile photo upload started, user %1, bytes %2"
+        ).arg(userId).arg(bytes.size()));
+    const auto weak = QPointer<NativeBridge>(this);
+    client().uploadData(u"avatar.jpg"_q, bytes, u"image/jpeg"_q, UploadTarget(), false,
+        [weak, userId, done, failed](QJsonDocument doc, QString error, int status) {
+            if (!weak) return;
+            const auto uploaded = doc.object().value("data").toObject();
+            LOG(("FoxMes: profile photo upload response, user %1, HTTP %2, file %3, photo %4, revision %5"
+                ).arg(userId).arg(status)
+                .arg(uploaded.value("id").toVariant().toLongLong())
+                .arg(uploaded.value("profile_photo_id").toString())
+                .arg(uploaded.value("photos_revision").toVariant().toLongLong()));
+            if (!error.isEmpty() || !doc.object().value("ok").toBool()) {
+                weak->_profilePhotoSaving = false;
+                LOG(("FoxMes: profile photo upload failed (%1, %2)").arg(status).arg(error));
+                weak->requestProfilePhotos(weak->_session->user(), 0);
+                if (failed) failed();
+                Ui::Toast::Show(error.isEmpty() ? u"Could not upload the photo."_q : error);
+                return;
+            }
+            weak->client().profilePhotos(userId, 0,
+                [weak, userId, done, failed](QJsonDocument doc, QString error, int status) {
+                    if (!weak) return;
+                    weak->_profilePhotoSaving = false;
+                    LOG(("FoxMes: profile photo gallery response, user %1, HTTP %2, count %3, revision %4"
+                        ).arg(userId).arg(status).arg(doc.object().value("count").toInt())
+                        .arg(doc.object().value("photos_revision").toVariant().toLongLong()));
+                    if (!error.isEmpty() || !doc.isObject()) {
+                        if (failed) failed();
+                        Ui::Toast::Show(u"Photo uploaded, but could not refresh the profile."_q);
+                        weak->refreshSelf();
+                        return;
+                    }
+                    weak->applyProfilePhotos(doc.object(), true);
+                    if (done) done();
+                });
+        }, {}, u"avatar"_q);
 }
 
 void NativeBridge::refreshSelf() {
@@ -1535,6 +1688,7 @@ void NativeBridge::refreshSelf() {
 			}
 		}
 		weak->offerTopicChannels();
+        Folders::Refresh(weak->_session);
 	});
 }
 
@@ -1593,6 +1747,8 @@ void NativeBridge::loadContacts() {
 }
 
 void NativeBridge::refreshReactionsCatalog() {
+    Reactions::RequestFavorite(_session);
+    Stickers::RequestFavorites(_session);
     if (_reactionsCatalogLoading) {
         return;
     }
@@ -1634,16 +1790,14 @@ void NativeBridge::refreshReactionsCatalog() {
                 .category = reaction.value("category").toString(),
             });
         }
-        if (!values.empty()) {
-            Reactions::SetAvailableCatalog(weak->_session, values);
-            const auto maxSelected = object.value("max_selected").toInt();
-            if (maxSelected > 0) {
-                Reactions::SetMaxSelectedReactions(
-                    weak->_session,
-                    maxSelected);
-            }
-            weak->scheduleReactionsRefresh();
+        Reactions::SetAvailableCatalog(weak->_session, values);
+        const auto maxSelected = object.value("max_selected").toInt();
+        if (maxSelected > 0) {
+            Reactions::SetMaxSelectedReactions(
+                weak->_session,
+                maxSelected);
         }
+        weak->scheduleReactionsRefresh();
     });
 }
 
@@ -1702,6 +1856,15 @@ PeerData *NativeBridge::peerForChat(const QJsonObject &chat) {
     }
 
     const auto members = chat.value("members").toArray();
+    if (type == u"direct"_q) {
+        for (const auto &entry : members) {
+            const auto id = entry.toObject().value("id").toVariant().toLongLong();
+            if (id > 0 && id != client().meId()) {
+                ChatRequests::Apply(_session, id, chatId, chat.value("request"));
+                break;
+            }
+        }
+    }
     for (const auto &entry : members) {
         if (entry.isObject()) ensureUser(entry.toObject(), true);
     }
@@ -2149,8 +2312,12 @@ void NativeBridge::applyChatConfig(PeerData *peer, const QJsonObject &chat) {
         peer,
         chatId,
         chat.value("notification_settings").toObject());
-    Wallpapers::ApplyForPeer(peer, chat.value("wallpaper").toObject());
-    ChatThemes::ApplyForPeer(peer, chat.value("theme_emoticon").toString());
+    if (chat.value("appearance").isObject()) {
+        applyAppearanceResult(chatId, chat.value("appearance").toObject());
+    } else {
+        Wallpapers::ApplyForPeer(peer, chat.value("wallpaper").toObject());
+        ChatThemes::ApplyForPeer(peer, chat.value("theme_emoticon").toString());
+    }
     if (const auto group = peer->asChat()) {
         auto flags = ChatDataFlags();
         if (chat.value("owner_id").toVariant().toLongLong() == client().meId()) {
@@ -2325,6 +2492,18 @@ void NativeBridge::reloadChats() {
     });
 }
 
+void NativeBridge::hydrateFolderChats(Fn<void(QJsonDocument, bool)> done) {
+    const auto weak = QPointer<NativeBridge>(this);
+    client().chatsLight([weak, done](QJsonDocument doc, QString error, int status) {
+        if (!weak) return;
+        if (!error.isEmpty() || status != 200 || !doc.isArray()) { done({}, false); return; }
+        weak->applyChats(doc);
+        SaveChatsCache(weak->_session, doc.toJson(QJsonDocument::Compact));
+        weak->_session->data().sendHistoryChangeNotifications();
+        done(doc, true);
+    });
+}
+
 void NativeBridge::runAfterChatsReload(bool listLoaded) {
     for (auto &callback : base::take(_afterChatsReload)) {
         callback(listLoaded);
@@ -2375,18 +2554,20 @@ void NativeBridge::applyChats(const QJsonDocument &doc) {
         history->setChatListTimeId(date);
         history->setUnreadCount(chat.value("unread_count").toInt());
         applyReceiptSnapshot(history, chatId, chat.value("receipt_state").toObject());
+        if (history->peer->isSelf()) {
+            _appliedReadStates[SeenKey(chatId, client().meId())].snapshotTopId =
+                last.value("id").toVariant().toLongLong();
+        }
         if (!last.isEmpty()) {
-            if (!_bottomLoadedChats.contains(chatId) && history->loadedAtBottom()) {
-                history->setNotLoadedAtBottom();
-            }
             const auto lastId = last.value("id").toVariant().toLongLong();
-            applyMessage(history, last, false, NewMessageType::Existing);
+            applyMessage(history, last, false, NewMessageType::Last);
             if (lastId > 0 && lastId <= INT32_MAX) {
                 history->applyDialogTopMessage(MsgId(int32(lastId)));
             }
         }
         history->updateChatListExistence();
     }
+    ChatRequests::ListApplied(_session);
     rebuildPinnedOrder();
 	updatePresence();
 	drainDeferredMessageEvents();
@@ -2549,10 +2730,11 @@ void NativeBridge::removeChat(qint64 chatId) {
         return;
     }
     _chatByPeer.erase(peer);
+    if (peerIsUser(peerId)) {
+        ChatRequests::Forget(_session, qint64(peerToUser(peerId).bare));
+    }
     _pinnedRanks.erase(chatId);
     _bottomLoadedChats.erase(chatId);
-    _loadedChats.erase(chatId);
-    _nextHistoryBefore.erase(chatId);
     const auto preview = _communityChats.find(chatId);
     const auto keepPreview = (preview != _communityChats.end())
         && TopicChannels::IsTopicChannel(preview->second);
@@ -2657,7 +2839,7 @@ void NativeBridge::ensureChat(History *history, std::function<void(qint64)> done
     }
     const auto otherId = qint64(peerToUser(history->peer->id).bare);
     const auto weak = QPointer<NativeBridge>(this);
-	client().createDirect(otherId, [weak, history, peerKey](
+	client().directChat(otherId, [weak, history, peerKey](
             QJsonDocument doc,
             QString error,
             int) mutable {
@@ -3144,7 +3326,7 @@ HistoryItem *NativeBridge::applyMessage(
 
     const auto id = MsgId(int32(messageId));
     if (const auto existing = _session->data().message(history->peer, id)) {
-        const auto attachExisting = (type == NewMessageType::Unread)
+        const auto attachExisting = (type != NewMessageType::Existing)
             && !existing->mainView();
         if (!replaceExisting && !attachExisting) {
             if (pendingLocal && pendingLocal != existing) {
@@ -3213,6 +3395,19 @@ HistoryItem *NativeBridge::applyMessage(
         item = pendingLocal;
     } else {
         const auto own = isOwnMessage(history, message);
+        const auto savedReminder = own && history->peer->isSelf()
+            && message.value("from_scheduled").toBool();
+        const auto readState = _appliedReadStates.find(SeenKey(chatId, client().meId()));
+        const auto alreadyAccounted = savedReminder
+            && readState != _appliedReadStates.end()
+            && messageId <= qMax(readState->second.snapshotTopId, readState->second.readThroughId);
+        // Ordinary self messages must not advance the inbox past unread reminders.
+        const auto messageType = (type == NewMessageType::Unread)
+            && own
+            && history->peer->isSelf()
+            && (!savedReminder || alreadyAccounted)
+            ? NewMessageType::Existing
+            : type;
         const auto unreadBefore = history->unreadCountKnown()
             ? std::optional<int>(history->unreadCount())
             : std::nullopt;
@@ -3220,8 +3415,8 @@ HistoryItem *NativeBridge::applyMessage(
             id,
             prepared->mtp,
             MessageFlags(),
-            type);
-        if (own && unreadBefore && history->unreadCountKnown()
+            messageType);
+        if (own && (!savedReminder || alreadyAccounted) && unreadBefore && history->unreadCountKnown()
             && history->unreadCount() != *unreadBefore) {
             history->setUnreadCount(*unreadBefore);
         }
@@ -3511,279 +3706,321 @@ void NativeBridge::removeMessageFrom(
     _session->data().sendHistoryChangeNotifications();
 }
 
-void NativeBridge::loadHistory(
-        History *history,
-        qint64 aroundId,
-        Data::LoadDirection direction,
-        HistoryLoaded done,
-        HistoryFailed failed) {
-    loadHistoryOf(
-        history,
-        aroundId,
-        direction,
-        std::move(done),
-        std::move(failed),
-        false);
-}
-
-void NativeBridge::loadHistoryOf(
-        History *history,
-        qint64 aroundId,
-        Data::LoadDirection direction,
-        HistoryLoaded done,
-        HistoryFailed failed,
-        bool chatsReloaded) {
-    const auto chatId = historyChatIdFor(history);
-    if (!chatId) {
-        if (!history) {
-            if (done) done();
-            return;
-        }
-        const auto weak = QPointer<NativeBridge>(this);
-        if (history->peer->isUser()) {
-			ensureChat(history, [=](qint64 chatId) {
-				if (!weak) return;
-				if (chatId <= 0) {
-					if (done) done();
-					return;
-				}
-				weak->loadHistoryOf(history, aroundId, direction, done, failed, chatsReloaded);
-            });
-            return;
-        }
-        if (!chatsReloaded) {
-            _afterChatsReload.push_back([=](bool listLoaded) {
-                if (!weak) {
-                    return;
-                } else if (!listLoaded) {
-                    if (done) done();
-                    return;
-                }
-                weak->loadHistoryOf(history, aroundId, direction, done, failed, true);
-            });
-            reloadChats();
-            return;
-        }
-        if (failed) {
-            failed(MTP::Error::Local(
-                u"CHANNEL_PRIVATE"_q,
-                u"not a chat of this account"_q));
-        } else if (done) {
-            done();
-        }
-        return;
-    }
-    if (!history->folderKnown()) history->clearFolder();
-	if (chatIdFor(history)) {
-		syncPinnedMessages(history, chatId);
-	}
-	loadHistoryPage(history, aroundId, direction, std::move(done));
-}
-
-void NativeBridge::loadHistoryPage(
-		History *history,
-		qint64 aroundId,
-		Data::LoadDirection direction,
-		HistoryLoaded done) {
-	const auto chatId = historyChatIdFor(history);
-	if (!chatId) {
-		if (done) done();
-		return;
-	}
-	auto requestDirection = direction;
-	auto requestAroundId = aroundId;
-	const auto wantsTail = (aroundId == ShowAtTheEndMsgId.bare)
-		|| (aroundId >= (ServerMaxMsgId.bare - 1));
-	const auto openAtEnd = wantsTail
-		&& (requestDirection == Data::LoadDirection::Around);
-	if (wantsTail) {
-		requestAroundId = 0;
-	}
-	if (openAtEnd) {
-		requestDirection = Data::LoadDirection::Before;
-	} else if (requestDirection == Data::LoadDirection::Before
-		&& requestAroundId <= 0) {
-		if (const auto i = _nextHistoryBefore.find(chatId); i != _nextHistoryBefore.end()) {
-			requestAroundId = i->second;
-		} else if (_loadedChats.find(chatId) != _loadedChats.end()) {
-			if (done) done();
+void NativeBridge::requestHistoryMessages(
+		not_null<History*> history,
+		HistoryQuery query,
+		HistoryAnswer done,
+		HistoryError fail) {
+	resolveHistoryChat(history, [=](qint64 chatId) {
+		if (chatId <= 0) {
+			done({});
 			return;
 		}
-	}
-	const auto loadingKey = HistoryLoadKey{
-		chatId,
-		requestAroundId,
-		requestDirection,
-		openAtEnd,
-	};
-	if (auto it = _loadingChats.find(loadingKey); it != _loadingChats.end()) {
-		it->second.push_back(std::move(done));
+		if (!history->folderKnown()) {
+			history->clearFolder();
+		}
+		if (chatIdFor(history)) {
+			syncPinnedMessages(history, chatId);
+		}
+		fetchHistoryMessages(history, chatId, query, done, fail, 0);
+	}, fail, false);
+}
+
+void NativeBridge::resolveHistoryChat(
+		not_null<History*> history,
+		Fn<void(qint64)> ready,
+		HistoryError fail,
+		bool chatsReloaded) {
+	if (const auto chatId = historyChatIdFor(history)) {
+		ready(chatId);
 		return;
 	}
-	_loadingChats.emplace(loadingKey, std::vector<HistoryLoaded>{});
+	const auto weak = QPointer<NativeBridge>(this);
+	if (history->peer->isUser()) {
+		ensureChat(history, [=](qint64 chatId) {
+			if (weak) {
+				ready(chatId);
+			}
+		});
+		return;
+	} else if (chatsReloaded) {
+		fail(u"CHANNEL_PRIVATE"_q);
+		return;
+	}
+	_afterChatsReload.push_back([=](bool listLoaded) {
+		if (!weak) {
+			return;
+		} else if (listLoaded) {
+			weak->resolveHistoryChat(history, ready, fail, true);
+			return;
+		}
+		QTimer::singleShot(int(kHistoryRetryDelay), weak.data(), [=] {
+			weak->resolveHistoryChat(history, ready, fail, false);
+		});
+	});
+	reloadChats();
+}
 
+void NativeBridge::fetchHistoryMessages(
+		not_null<History*> history,
+		qint64 chatId,
+		HistoryQuery query,
+		HistoryAnswer done,
+		HistoryError fail,
+		int attempt) {
+	const auto limit = std::clamp(query.limit, 1, kHistoryPageLimit);
+	const auto newer = (query.offsetId > 0)
+		? std::clamp(-query.addOffset, 0, limit)
+		: 0;
+	auto anchor = qint64(0);
+	auto direction = Data::LoadDirection::Before;
+	if (query.offsetId > 0) {
+		anchor = query.offsetId.bare;
+		if (newer == limit) {
+			direction = Data::LoadDirection::After;
+			--anchor;
+		} else if (newer > 0) {
+			direction = Data::LoadDirection::Around;
+		}
+		if (anchor <= 0) {
+			anchor = 1;
+			direction = Data::LoadDirection::Around;
+		}
+	}
 	const auto weak = QPointer<NativeBridge>(this);
 	const auto requested = crl::now();
-	client().messages(chatId, requestAroundId, 80, requestDirection, [=, done = std::move(done)](QJsonDocument doc, QString error, int) mutable {
-		const auto received = crl::now();
-		auto completed = false;
-		auto completeAll = [&]() mutable {
-			if (std::exchange(completed, true)) return;
-			if (const auto total = crl::now() - requested
-				; total >= kSlowHistoryPage) {
-				LOG(("FoxMes: slow history page for chat %1: %2 ms "
-					"(server %3 ms, %4 items)"
-					).arg(chatId
-					).arg(total
-					).arg(received - requested
-					).arg(doc.object().value("items").toArray().size()));
-			}
-			if (weak) {
-				if (auto it = weak->_loadingChats.find(loadingKey); it != weak->_loadingChats.end()) {
-					auto waiters = std::move(it->second);
-					weak->_loadingChats.erase(it);
-					for (auto &waiter : waiters) {
-						waiter();
-					}
-				}
-			}
-			if (done) done();
-		};
-		if (!weak || !history) {
-			completeAll();
+	client().messages(chatId, anchor, limit, direction, [=](
+			QJsonDocument doc,
+			QString error,
+			int status) {
+		if (!weak) {
 			return;
 		}
-		if (!error.isEmpty() || !doc.isObject()) {
-			completeAll();
+		if (!error.isEmpty() && (IsTransportFailure(status) || status == 429)) {
+			const auto delay = std::min(
+				kHistoryRetryMaxDelay,
+				kHistoryRetryDelay << std::min(attempt, 4));
+			LOG(("FoxMes: history page for chat %1 failed with %2, "
+				"retry in %3 ms"
+				).arg(chatId
+				).arg(status
+				).arg(delay));
+			QTimer::singleShot(int(delay), weak.data(), [=] {
+				weak->fetchHistoryMessages(
+					history,
+					chatId,
+					query,
+					done,
+					fail,
+					attempt + 1);
+			});
 			return;
 		}
 		const auto response = doc.object();
-
-		auto older = QVector<MTPMessage>();
-		auto newer = QVector<MTPMessage>();
-		auto applied = base::flat_map<MsgId, QJsonObject>();
-		for (const auto &entry : response.value("items").toArray()) {
-			if (!entry.isObject()) continue;
-			const auto message = entry.toObject();
-			const auto messageId = message.value("id").toVariant().toLongLong();
-			if (messageId <= 0) continue;
-			if (messageId > INT32_MAX) {
-				LOG(("FoxMes: message id %1 in chat %2 exceeds MsgId range, "
-					"message skipped").arg(messageId).arg(chatId));
-				continue;
-			}
-			const auto clientNonce = message.value("client_nonce").toString().trimmed();
-			if (!clientNonce.isEmpty()
-				&& weak->_pendingSendNonceToLocalId.contains(clientNonce)) {
-				weak->applyMessage(history, message, false);
-				continue;
-			}
-			auto prepared = weak->prepareMessage(history, message);
-			if (!prepared) continue;
-			const auto id = prepared->messageId;
-			const auto belongsToOlder = openAtEnd
-				|| (id.bare <= MsgId(requestAroundId));
-			(belongsToOlder ? older : newer).push_back(
-				std::move(prepared->mtp));
-			applied.emplace(id, message);
-			weak->_seenMessages.emplace(SeenKey(chatId, messageId));
-		}
-		if (!response.contains("has_more_before")
+		if (!error.isEmpty()
+			|| !doc.isObject()
+			|| !response.contains("has_more_before")
 			|| !response.contains("has_more_after")) {
-			LOG(("FoxMes: history page for chat %1 has no directional flags"
-				).arg(chatId));
-			completeAll();
+			LOG(("FoxMes: history page for chat %1 failed with %2: %3"
+				).arg(chatId
+				).arg(status
+				).arg(error.isEmpty()
+					? u"no directional flags"_q
+					: error));
+			fail((status == 403 || status == 404)
+				? u"CHANNEL_PRIVATE"_q
+				: u"HISTORY_LOAD_FAILED"_q);
 			return;
 		}
-		const auto hasMoreBefore = response.value("has_more_before").toBool();
-		const auto hasMoreAfter = response.value("has_more_after").toBool();
-		const auto nextBefore = response.value("next_before").toVariant().toLongLong();
-		const auto beforeExhausted = !hasMoreBefore;
-		const auto afterExhausted = openAtEnd || !hasMoreAfter;
-		const auto reverse = [](QVector<MTPMessage> &list) {
-			std::reverse(list.begin(), list.end());
-		};
-		if (openAtEnd) {
-			history->addNewerSlice(QVector<MTPMessage>());
-			reverse(older);
-			history->addOlderSlice(older);
-		} else {
-			if (!older.isEmpty() || beforeExhausted) {
-				reverse(older);
-				history->addOlderSlice(older);
-			}
-			if (!newer.isEmpty() || afterExhausted) {
-				reverse(newer);
-				history->addNewerSlice(newer);
-			}
-		}
-		if (afterExhausted) {
+		auto messages = weak->registerHistoryPage(history, chatId, response);
+		if (!anchor
+			|| (direction != Data::LoadDirection::Before
+				&& !response.value("has_more_after").toBool())) {
 			weak->_bottomLoadedChats.insert(chatId);
 		}
+		if (const auto total = crl::now() - requested
+			; total >= kSlowHistoryPage) {
+			LOG(("FoxMes: slow history page for chat %1: %2 ms, %3 items"
+				).arg(chatId
+				).arg(total
+				).arg(messages.size()));
+		}
+		done(std::move(messages));
+	});
+}
 
-		std::vector<MsgId> messageIds;
-		messageIds.reserve(applied.size());
-		MsgId firstId = 0;
-		MsgId lastId = 0;
-		for (const auto &[id, message] : applied) {
-			const auto item = weak->_session->data().message(history->peer, id);
-			if (!item) continue;
-			weak->applyMessagePayloadState(item, message);
-			messageIds.push_back(id);
-			if (!firstId || id < firstId) firstId = id;
-			if (id > lastId) lastId = id;
+QVector<MTPMessage> NativeBridge::registerHistoryPage(
+		not_null<History*> history,
+		qint64 chatId,
+		const QJsonObject &response) {
+	auto result = QVector<MTPMessage>();
+	for (const auto &entry : response.value("items").toArray()) {
+		const auto message = entry.toObject();
+		const auto messageId = message.value("id").toVariant().toLongLong();
+		if (messageId <= 0) {
+			continue;
+		} else if (messageId > INT32_MAX) {
+			LOG(("FoxMes: message id %1 in chat %2 exceeds MsgId range, "
+				"message skipped").arg(messageId).arg(chatId));
+			continue;
 		}
+		const auto clientNonce = message.value("client_nonce").toString().trimmed();
+		if (!clientNonce.isEmpty()
+			&& _pendingSendNonceToLocalId.contains(clientNonce)) {
+			applyMessage(history, message, false);
+			continue;
+		}
+		auto prepared = prepareMessage(history, message);
+		if (!prepared) {
+			continue;
+		}
+		auto item = _session->data().message(
+			history->peer,
+			prepared->messageId);
+		if (!item) {
+			item = history->addNewMessage(
+				prepared->messageId,
+				prepared->mtp,
+				MessageFlags(),
+				NewMessageType::Existing);
+		}
+		applyMessagePayloadState(item, message);
+		_seenMessages.emplace(SeenKey(chatId, messageId));
+		result.push_back(std::move(prepared->mtp));
+	}
+	std::reverse(result.begin(), result.end());
+	_session->data().sendHistoryChangeNotifications();
+	return result;
+}
 
-		if (!messageIds.empty()) {
-			auto range = MsgRange{ firstId, lastId };
-			switch (requestDirection) {
-			case Data::LoadDirection::Before:
-				range.till = (requestAroundId > 0)
-					? qMax(range.till, MsgId(requestAroundId))
-					: ServerMaxMsgId;
-				break;
-			case Data::LoadDirection::After:
-				if (requestAroundId > 0) {
-					range.from = qMin(range.from, MsgId(requestAroundId));
-				}
-				if (!hasMoreAfter) {
-					range.till = ServerMaxMsgId;
-				}
-				break;
-			case Data::LoadDirection::Around:
-				if (requestAroundId > 0) {
-					range.from = qMin(range.from, MsgId(requestAroundId));
-					range.till = qMax(range.till, MsgId(requestAroundId));
-				}
-				if (!hasMoreAfter) {
-					range.till = ServerMaxMsgId;
-				}
-				break;
-			}
-			if (openAtEnd) {
-				range.till = ServerMaxMsgId;
-			}
-			if (!hasMoreBefore && requestDirection != Data::LoadDirection::After) {
-				range.from = 0;
-			}
-			history->messages().addSlice(std::move(messageIds), range, {});
-		} else if (openAtEnd
-			&& requestDirection == Data::LoadDirection::Before
-			&& requestAroundId <= 0) {
-			history->messages().addSlice({}, MsgRange{ 0, ServerMaxMsgId }, {});
+void NativeBridge::requestHistorySlice(
+		History *history,
+		qint64 messageId,
+		Data::LoadDirection direction) {
+	const auto chatId = historyChatIdFor(history);
+	if (!chatId) {
+		return;
+	}
+	const auto tail = (messageId <= 0)
+		|| (messageId >= (ServerMaxMsgId.bare - 1));
+	const auto key = HistoryLoadKey{
+		chatId,
+		tail ? 0 : messageId,
+		tail ? Data::LoadDirection::Before : direction,
+		tail,
+	};
+	if (!_historySliceRequests.emplace(key).second) {
+		return;
+	}
+	sendHistorySliceRequest(history, key, 0);
+}
+
+void NativeBridge::sendHistorySliceRequest(
+		History *history,
+		HistoryLoadKey key,
+		int attempt) {
+	const auto weak = QPointer<NativeBridge>(this);
+	client().messages(
+		key.chatId,
+		key.aroundId,
+		kHistoryPageLimit,
+		key.direction,
+		[=](QJsonDocument doc, QString error, int status) {
+		if (!weak) {
+			return;
 		}
-		if (requestDirection == Data::LoadDirection::Before && hasMoreBefore && nextBefore > 0) {
-			weak->_nextHistoryBefore[chatId] = nextBefore;
-		} else {
-			weak->_nextHistoryBefore.erase(chatId);
-			if (requestDirection == Data::LoadDirection::Before) {
-				weak->_loadedChats.insert(chatId);
-				history->markLoadedAtTop();
-			}
+		if (!error.isEmpty() && (IsTransportFailure(status) || status == 429)) {
+			const auto delay = std::min(
+				kHistoryRetryMaxDelay,
+				kHistoryRetryDelay << std::min(attempt, 4));
+			QTimer::singleShot(int(delay), weak.data(), [=] {
+				weak->sendHistorySliceRequest(history, key, attempt + 1);
+			});
+			return;
 		}
-		weak->_session->data().sendHistoryChangeNotifications();
-		completeAll();
-    });
+		weak->_historySliceRequests.erase(key);
+		const auto response = doc.object();
+		if (!error.isEmpty()) {
+			LOG(("FoxMes: history slice for chat %1 failed with %2: %3"
+				).arg(key.chatId
+				).arg(status
+				).arg(error));
+			if (status == 403 || status == 404) {
+				history->owner().notifyHistoryAccessLost(history);
+			}
+			return;
+		} else if (!doc.isObject()
+			|| !response.contains("has_more_before")
+			|| !response.contains("has_more_after")) {
+			LOG(("FoxMes: history slice for chat %1 has no directional flags"
+				).arg(key.chatId));
+			return;
+		}
+		weak->applyHistorySlice(history, key, response);
+	});
+}
+
+void NativeBridge::applyHistorySlice(
+		History *history,
+		const HistoryLoadKey &key,
+		const QJsonObject &response) {
+	const auto anchor = MsgId(key.aroundId);
+	auto ids = std::vector<MsgId>();
+	auto range = MsgRange{ anchor, anchor };
+	auto accumulate = [&](MsgId id) {
+		if (!range.from || id < range.from) range.from = id;
+		if (id > range.till) range.till = id;
+	};
+	for (const auto &entry : response.value("items").toArray()) {
+		const auto message = entry.toObject();
+		const auto messageId = message.value("id").toVariant().toLongLong();
+		if (messageId <= 0 || messageId > INT32_MAX) {
+			continue;
+		}
+		const auto clientNonce = message.value("client_nonce").toString().trimmed();
+		if (!clientNonce.isEmpty()
+			&& _pendingSendNonceToLocalId.contains(clientNonce)) {
+			continue;
+		}
+		auto prepared = prepareMessage(history, message);
+		if (!prepared) {
+			continue;
+		}
+		const auto item = history->addNewMessage(
+			prepared->messageId,
+			prepared->mtp,
+			MessageFlags(),
+			NewMessageType::Existing);
+		applyMessagePayloadState(item, message);
+		_seenMessages.emplace(SeenKey(key.chatId, messageId));
+		ids.push_back(item->id);
+		accumulate(item->id);
+	}
+	const auto hasMoreBefore = response.value("has_more_before").toBool();
+	const auto hasMoreAfter = response.value("has_more_after").toBool();
+	const auto nextBefore = MsgId(
+		response.value("next_before").toVariant().toLongLong());
+	const auto nextAfter = MsgId(
+		response.value("next_after").toVariant().toLongLong());
+	const auto readsOlder = (key.direction != Data::LoadDirection::After);
+	const auto readsNewer = key.tail
+		|| (key.direction != Data::LoadDirection::Before);
+	if (readsOlder) {
+		if (!hasMoreBefore) {
+			range.from = 0;
+		} else if (nextBefore > 0) {
+			accumulate(nextBefore);
+		}
+	}
+	if (readsNewer) {
+		if (key.tail || !hasMoreAfter) {
+			range.till = ServerMaxMsgId;
+		} else if (nextAfter > 0) {
+			accumulate(nextAfter);
+		}
+	}
+	history->messages().addSlice(std::move(ids), range, std::nullopt);
+	_session->data().sendHistoryChangeNotifications();
 }
 
 SendOptions SendOptionsFrom(const Api::SendOptions &options) {
@@ -5018,16 +5255,12 @@ void NativeBridge::deleteMessages(
                 weak->_messageRevisions.erase(SeenKey(chatId, messageId));
             }
             if (!refused.isEmpty() && history) {
-                LOG(("FoxMes: %1 deletions refused in chat %2, reloading"
+                LOG(("FoxMes: %1 deletions refused in chat %2, bottom invalidated"
                     ).arg(refused.size()).arg(chatId));
                 weak->_bottomLoadedChats.erase(chatId);
-                weak->_loadedChats.erase(chatId);
-                weak->_nextHistoryBefore.erase(chatId);
-                weak->loadHistoryPage(
-                    history,
-                    ShowAtTheEndMsgId.bare,
-                    Data::LoadDirection::Around,
-                    nullptr);
+                if (history->loadedAtBottom()) {
+                    history->setNotLoadedAtBottom();
+                }
             }
         }
         for (const auto messageId : messageIds) {
@@ -5180,7 +5413,8 @@ void NativeBridge::applyReadState(
         qint64 readThroughId,
         TimeId readAt,
         int unreadCount,
-        qint64 stateRevision) {
+        qint64 stateRevision,
+        qint64 firstUnreadId) {
     if (chatId <= 0 || readerId <= 0 || readThroughId < 0) return;
     const auto key = SeenKey(chatId, readerId);
     if (const auto i = _appliedReadStates.find(key); i != _appliedReadStates.end()) {
@@ -5192,19 +5426,29 @@ void NativeBridge::applyReadState(
             readAt = i->second.readAt;
         }
     }
+    const auto snapshotTopId = _appliedReadStates[key].snapshotTopId;
     _appliedReadStates[key] = AppliedReadState{
         .readThroughId = readThroughId,
         .stateRevision = stateRevision,
         .readAt = readAt,
+        .snapshotTopId = snapshotTopId,
     };
 
     const auto history = historyForChatId(chatId);
     if (!history) return;
     if (readerId == client().meId()) {
-        if (readThroughId > 0 && readThroughId <= INT32_MAX) {
-            history->inboxRead(MsgId(int32(readThroughId)), qMax(unreadCount, 0));
+        // Skip the gap containing only ordinary notes when locating unread history.
+        const auto inboxThrough = history->peer->isSelf()
+            && unreadCount > 0 && firstUnreadId > 0 && firstUnreadId <= INT32_MAX
+            ? qMax(readThroughId, firstUnreadId - 1)
+            : readThroughId;
+        if ((inboxThrough > 0 || history->peer->isSelf()) && inboxThrough <= INT32_MAX) {
+            history->inboxRead(MsgId(int32(inboxThrough)), qMax(unreadCount, 0));
         } else {
             history->setUnreadCount(qMax(unreadCount, 0));
+        }
+        if (history->peer->isSelf() && readThroughId > 0 && readThroughId <= INT32_MAX) {
+            history->outboxRead(MsgId(int32(readThroughId)));
         }
     } else if (readThroughId > 0 && readThroughId <= INT32_MAX
         && history->peer->id == peerFromUser(UserId(readerId))) {
@@ -5225,7 +5469,8 @@ void NativeBridge::applyReceiptSnapshot(
             state.value("read_through_id").toVariant().toLongLong(),
             unixTime(state.value("read_at").toString()),
             state.value("unread_count").toInt(),
-            state.value("state_revision").toVariant().toLongLong());
+            state.value("state_revision").toVariant().toLongLong(),
+            state.value("first_unread_id").toVariant().toLongLong());
     };
     apply(receiptState.value("inbox").toObject());
     const auto outbox = receiptState.value("outbox").toObject();
@@ -5344,7 +5589,8 @@ void NativeBridge::sendJournalRead(qint64 chatId) {
                 acknowledged,
                 unixTime(state.value("read_at").toString()),
                 state.value("unread_count").toInt(),
-                state.value("state_revision").toVariant().toLongLong());
+                state.value("state_revision").toVariant().toLongLong(),
+                state.value("first_unread_id").toVariant().toLongLong());
             if (acknowledged >= entry.desired) {
                 weak->_readJournal.erase(i);
                 weak->persistReadJournal();
@@ -5602,6 +5848,17 @@ void NativeBridge::rebuildPinnedOrder() {
     owner.notifyPinnedDialogsOrderUpdated();
 }
 
+void NativeBridge::applyAppearanceResult(qint64 chatId, const QJsonObject &result) {
+    if (const auto history = historyForChatId(chatId)) {
+        if (result.value("message").isObject()) {
+            applyMessage(history, result.value("message").toObject(), false, NewMessageType::Last);
+        }
+    }
+    auto patch = result;
+    patch.insert("chat_id", chatId);
+    applyChatLookPatch(patch);
+}
+
 void NativeBridge::applyChatLookPatch(const QJsonObject &data) {
     const auto history = historyForChatId(
         data.value("chat_id").toVariant().toLongLong());
@@ -5609,12 +5866,18 @@ void NativeBridge::applyChatLookPatch(const QJsonObject &data) {
         reloadChats();
         return;
     }
-    if (data.contains(u"wallpaper"_q)) {
+    const auto chatId = data.value("chat_id").toVariant().toLongLong();
+    const auto wallpaperRevision = data.value("wallpaper").toObject().value("settings_revision").toVariant().toLongLong();
+    if (data.contains(u"wallpaper"_q) && wallpaperRevision >= _wallpaperRevisionByChat[chatId]) {
+        _wallpaperRevisionByChat[chatId] = wallpaperRevision;
         Wallpapers::ApplyForPeer(
             history->peer,
             data.value("wallpaper").toObject());
     }
-    if (data.contains(u"theme"_q)) {
+    const auto theme = data.value("theme").toObject();
+    const auto themeRevision = theme.value("revision").toVariant().toLongLong();
+    if (data.contains(u"theme"_q) && themeRevision >= _themeRevisionByChat[chatId]) {
+        _themeRevisionByChat[chatId] = themeRevision;
         ChatThemes::ApplyForPeer(
             history->peer,
             data.value("theme").toObject().value("theme_emoticon").toString());
@@ -5634,6 +5897,7 @@ void NativeBridge::applyChatSettingsPatch(const QJsonObject &data) {
     bool pinnedOrderStale = false;
     if (data.contains(u"marked_unread"_q)) {
         history->setUnreadMark(data.value("marked_unread").toBool());
+        ChatRequests::UnreadMarkApplied(history);
         changed = true;
     }
     if (data.contains(u"archived"_q)) {
@@ -6381,6 +6645,9 @@ void NativeBridge::handleEvent(const QJsonObject &event) {
     if (Calls::HandleEvent(_session, type, data)) {
         return;
     }
+    if (ChatRequests::HandleEvent(_session, type, data)) {
+        return;
+    }
 
     if (type == u"message.created"_q || type == u"message.updated"_q) {
         const auto chatId = data.value("chat_id").toVariant().toLongLong();
@@ -6397,6 +6664,12 @@ void NativeBridge::handleEvent(const QJsonObject &event) {
             deferMessageEvent(type, data);
             reloadChats();
         }
+    } else if (type == u"folders.updated"_q) {
+        Folders::Receive(_session, data);
+    } else if (type == u"stickers.favorites.updated"_q) {
+        Stickers::ReceiveFavorites(_session, data);
+    } else if (type == u"reaction.default_updated"_q) {
+        Reactions::ReceiveFavorite(_session, data);
     } else if (type == u"reaction.updated"_q) {
         const auto chatId = data.value("chat_id").toVariant().toLongLong();
         const auto messageId = data.value("id").toVariant().toLongLong();
@@ -6463,7 +6736,8 @@ void NativeBridge::handleEvent(const QJsonObject &event) {
             readThroughId,
             unixTime(data.value("read_at").toString()),
             data.value("unread_count").toInt(),
-            data.value("state_revision").toVariant().toLongLong());
+            data.value("state_revision").toVariant().toLongLong(),
+            data.value("first_unread_id").toVariant().toLongLong());
     } else if (type == u"chat.read"_q) {
         const auto chatId = data.value("chat_id").toVariant().toLongLong();
         auto readerId = data.value("reader_id").toVariant().toLongLong();
@@ -6476,7 +6750,8 @@ void NativeBridge::handleEvent(const QJsonObject &event) {
             readThroughId,
             unixTime(data.value("read_at").toString()),
             data.value("unread_count").toInt(),
-            data.value("state_revision").toVariant().toLongLong());
+            data.value("state_revision").toVariant().toLongLong(),
+            data.value("first_unread_id").toVariant().toLongLong());
     } else if (type == u"chat.typing"_q) {
         const auto userId = data.value("user_id").toVariant().toLongLong();
         const auto chatId = data.value("chat_id").toVariant().toLongLong();
@@ -6510,6 +6785,8 @@ void NativeBridge::handleEvent(const QJsonObject &event) {
 		const auto chatId = data.value("chat_id").toVariant().toLongLong();
 		removeChat(chatId);
 		reloadChats();
+	} else if (type == u"user.photos.updated"_q) {
+		applyProfilePhotos(data, true);
 	} else if (type == u"user.updated"_q || type == u"user.created"_q) {
 		if (data.value("id").toVariant().toLongLong() == client().meId()) {
 			RememberUser(_session, data);
@@ -6537,7 +6814,16 @@ void NativeBridge::handleEvent(const QJsonObject &event) {
 		}
 		resyncAfterGap(resumeFrom, sequence);
 		return;
+    } else if (type == u"wallpapers.updated"_q) {
+        Wallpapers::RequestGallery(_session, nullptr);
+        Wallpapers::RequestDefault(_session);
+        reloadChats();
+	} else if (type == u"themes.updated"_q) {
+		_session->data().cloudThemes().refresh();
 	} else if (type == u"settings.updated"_q) {
+        if (data.value("default_wallpaper").isObject()) {
+            Wallpapers::ApplyDefault(_session, data.value("default_wallpaper").toObject());
+        }
 		applyDefaultNotifySettingsPayload(
 			data.value("notification_defaults").toObject());
 	} else if (type == u"chat.updated"_q) {
@@ -6573,6 +6859,8 @@ void NativeBridge::resyncAfterGap(qint64 resumeFrom, qint64 observedSeq) {
 		return;
 	}
 	_lastGapResumeFrom = resumeFrom;
+    Stickers::ResetFavorites(_session);
+    Folders::Refresh(_session, true);
 
 	_messageRevisions.clear();
 	_appliedReadStates.clear();
@@ -6584,6 +6872,10 @@ void NativeBridge::resyncAfterGap(qint64 resumeFrom, qint64 observedSeq) {
 	client().setEventSequence(_eventSeq);
 	RememberEventSequence(_session, _eventSeq);
 
+	Reactions::RequestFavorite(_session);
+	Wallpapers::RequestDefault(_session);
+	ChatThemes::Request(_session);
+	_session->data().cloudThemes().refresh();
 	reloadChats();
 	forceLiveUpdatesRestart();
 }

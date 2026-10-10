@@ -5,6 +5,12 @@ This file is part of FoxMes Desktop.
 
 #include "api/api_common.h"
 #include "base/unixtime.h"
+#include "base/call_delayed.h"
+#include "chat_helpers/compose/compose_show.h"
+#include "custom_backend/api_client.h"
+#include "storage/storage_account.h"
+
+#include <QtCore/QUuid>
 #include "custom_backend/native_bridge.h"
 #include "custom_backend/native_reactions_adapter.h"
 #include "custom_backend/native_runtime.h"
@@ -26,6 +32,40 @@ constexpr auto kStickerSide = 100;
 
 constexpr auto kSetIdBase = uint64(0xF0C0000000000000ULL);
 
+struct FavoriteMutation {
+	bool desired = false;
+	bool sent = false;
+	bool running = false;
+	bool uncertain = false;
+	QString operation;
+	std::shared_ptr<ChatHelpers::Show> show;
+};
+
+struct FavoriteState {
+	std::vector<DocumentId> ids;
+	qint64 revision = -1;
+	static std::optional<FavoriteState> Parse(const QJsonObject &value) {
+		if (!value.value("emoji_ids").isArray()
+			|| !value.value("revision").isDouble()
+			|| value.value("revision").toVariant().toLongLong() < 0
+			|| value.value("limit").toInt() != 100) {
+			return std::nullopt;
+		}
+		FavoriteState result;
+		result.revision = value.value("revision").toVariant().toLongLong();
+		for (const auto &entry : value.value("emoji_ids").toArray()) {
+			const auto id = entry.toVariant().toLongLong();
+			if (id <= 0 || id > INT32_MAX
+				|| ranges::contains(result.ids, DocumentId(id))) {
+				return std::nullopt;
+			}
+			result.ids.push_back(DocumentId(id));
+		}
+		if (result.ids.size() > 100) return std::nullopt;
+		return result;
+	}
+};
+
 struct State {
 	base::flat_map<DocumentId, DocumentId> stickers;
 	base::flat_map<DocumentId, std::shared_ptr<Data::DocumentMedia>> media;
@@ -36,6 +76,11 @@ struct State {
 	base::flat_map<DocumentId, QString> alts;
 	rpl::lifetime lifetime;
 	bool subscribed = false;
+	FavoriteState favorites;
+	std::shared_ptr<bool> favoritesLifetime = std::make_shared<bool>(true);
+	base::flat_map<DocumentId, FavoriteMutation> mutations;
+	bool requestingFavorites = false;
+	uint64 favoritesGeneration = 0;
 };
 
 base::flat_map<not_null<Main::Session*>, State> &States() {
@@ -144,8 +189,11 @@ void ApplyOne(
 		const auto setId = SetIdFor(item.category);
 		const auto id = StickerDocumentId(setId, item.id);
 		if (const auto j = state.media.find(id); j != state.media.end()) {
-			j->second->setBytes(asset.content);
+			if (!BuildDocument(session, item, setId, asset)) return;
 			i->second = asset.mime;
+			if (ranges::contains(state.favorites.ids, item.id)) {
+				session->local().writeFavedStickers();
+			}
 			const auto &sets = session->data().stickers().sets();
 			if (const auto k = sets.find(setId); k != sets.end()) {
 				const auto set = k->second.get();
@@ -211,10 +259,133 @@ void Clear(not_null<Main::Session*> session) {
 	state.stickers.clear();
 }
 
+void ApplyFavorites(not_null<Main::Session*> session) {
+	auto &state = StateFor(session);
+	if (state.favorites.revision < 0) return;
+	auto &stickers = session->data().stickers();
+	auto &sets = stickers.setsRef();
+	auto documents = Data::StickersPack();
+	for (const auto id : state.favorites.ids) {
+		for (const auto &[documentId, catalogId] : state.stickers) {
+			if (catalogId == id) {
+				documents.push_back(session->data().document(documentId));
+				break;
+			}
+		}
+	}
+	auto i = sets.find(Data::Stickers::FavedSetId);
+	stickers.setLastFavedUpdate(crl::now());
+	if ((i == sets.end() && documents.empty())
+		|| (i != sets.end() && i->second->stickers == documents)) return;
+	if (documents.empty()) {
+		if (i != sets.end()) sets.erase(i);
+	} else {
+		if (i == sets.end()) {
+			i = sets.emplace(Data::Stickers::FavedSetId, std::make_unique<Data::StickersSet>(
+				&session->data(), Data::Stickers::FavedSetId, uint64(0), uint64(0),
+				Lang::Hard::FavedSetTitle(), QString(), 0,
+				Data::StickersSetFlag::Special, TimeId(0))).first;
+		}
+		auto &set = *i->second;
+		set.stickers = std::move(documents);
+		set.count = set.stickers.size();
+		set.emoji.clear();
+		for (const auto document : set.stickers) {
+			if (const auto emoji = Ui::Emoji::Find(document->sticker()->alt)) {
+				set.emoji[emoji].push_back(document);
+			}
+		}
+	}
+	session->local().writeFavedStickers();
+	stickers.notifyUpdated(Data::StickersType::Stickers);
+}
+
+void SendFavorite(not_null<Main::Session*> session, DocumentId id);
+
+void FinishFavorite(not_null<Main::Session*> session, DocumentId id,
+		const QString &operation, const QJsonObject &value, const QString &error, int status) {
+	const auto owner = States().find(session);
+	if (owner == States().end()) return;
+	auto &state = owner->second;
+	const auto i = state.mutations.find(id);
+	if (i == state.mutations.end() || i->second.operation != operation) return;
+	const auto parsed = error.isEmpty() && status >= 200 && status < 300
+		? FavoriteState::Parse(value) : std::nullopt;
+	if (parsed) {
+		ReceiveFavorites(session, value);
+		auto &mutation = i->second;
+		mutation.running = false;
+		mutation.uncertain = false;
+		mutation.operation.clear();
+		if (mutation.desired != mutation.sent) {
+			SendFavorite(session, id);
+		} else {
+			state.mutations.erase(i);
+		}
+	} else if (status == 0 || status >= 500 || status == 408 || status == 429) {
+		i->second.running = false;
+		i->second.uncertain = true;
+		const auto weak = base::make_weak(session);
+		const auto lifetime = std::weak_ptr(state.favoritesLifetime);
+		base::call_delayed(2000, session, [weak, id, lifetime] {
+			if (lifetime.expired()) return;
+			if (const auto session = weak.get()) SendFavorite(session, id);
+		});
+	} else {
+		if (const auto show = i->second.show) {
+			show->showToast(u"Could not update favorite stickers."_q);
+		}
+		state.mutations.erase(i);
+	}
+}
+
+void SendFavorite(not_null<Main::Session*> session, DocumentId id) {
+	const auto owner = States().find(session);
+	if (owner == States().end()) return;
+	const auto item = owner->second.mutations.find(id);
+	if (item == owner->second.mutations.end()) return;
+	auto &mutation = item->second;
+	if (mutation.running) return;
+	mutation.running = true;
+	if (mutation.operation.isEmpty()) {
+		mutation.sent = mutation.desired;
+		mutation.operation = QUuid::createUuid().toString(QUuid::WithoutBraces);
+	}
+	const auto weak = base::make_weak(session);
+	const auto operation = mutation.operation;
+	const auto lifetime = std::weak_ptr(owner->second.favoritesLifetime);
+	const auto finish = [weak, id, operation, lifetime](QJsonDocument doc, QString error, int status) {
+		if (lifetime.expired()) return;
+		if (const auto session = weak.get()) FinishFavorite(session, id, operation, doc.object(), error, status);
+	};
+	if (mutation.uncertain) {
+		ClientFor(session).operationResult(operation, [weak, id, operation, finish, lifetime](QJsonDocument doc, QString error, int status) {
+			if (lifetime.expired()) return;
+			const auto session = weak.get();
+			if (!session) return;
+			const auto owner = States().find(session);
+			if (owner == States().end() || !owner->second.mutations.contains(id)) return;
+			if (!error.isEmpty()) { finish(doc, error, status); return; }
+			const auto result = doc.object();
+			if (result.value("status").toString() == u"done"_q) {
+				finish(QJsonDocument(result.value("result").toObject()), {}, 200);
+			} else if (result.value("status").toString() == u"unknown"_q) {
+				ClientFor(session).setStickerFavorite(id,
+					StateFor(session).mutations[id].sent, operation, finish);
+			} else {
+				finish({}, u"Invalid operation response"_q, 500);
+			}
+		});
+	} else {
+		ClientFor(session).setStickerFavorite(id, mutation.sent, operation, finish);
+	}
+}
+
 void Apply(not_null<Main::Session*> session) {
 	for (const auto &item : Reactions::Catalog(session)) {
 		ApplyOne(session, item);
 	}
+	ApplyFavorites(session);
 }
 
 void Subscribe(not_null<Main::Session*> session) {
@@ -239,6 +410,57 @@ void Subscribe(not_null<Main::Session*> session) {
 void Request(not_null<Main::Session*> session) {
 	Subscribe(session);
 	Apply(session);
+}
+
+void RequestFavorites(not_null<Main::Session*> session) {
+	Subscribe(session);
+	auto &state = StateFor(session);
+	if (state.requestingFavorites) return;
+	state.requestingFavorites = true;
+	const auto generation = state.favoritesGeneration;
+	const auto lifetime = std::weak_ptr(state.favoritesLifetime);
+	const auto weak = base::make_weak(session);
+	ClientFor(session).stickerFavorites([weak, generation, lifetime](QJsonDocument doc, QString error, int status) {
+		if (lifetime.expired()) return;
+		const auto session = weak.get();
+		if (!session) return;
+		const auto owner = States().find(session);
+		if (owner == States().end()) return;
+		auto &state = owner->second;
+		if (generation != state.favoritesGeneration) return;
+		state.requestingFavorites = false;
+		if (error.isEmpty() && status == 200) ReceiveFavorites(session, doc.object());
+	});
+}
+
+void ReceiveFavorites(not_null<Main::Session*> session, const QJsonObject &value) {
+	const auto parsed = FavoriteState::Parse(value);
+	auto &state = StateFor(session);
+	if (!parsed || parsed->revision < state.favorites.revision) return;
+	state.favorites = *parsed;
+	ApplyFavorites(session);
+}
+
+void ResetFavorites(not_null<Main::Session*> session) {
+	auto &state = StateFor(session);
+	state.requestingFavorites = false;
+	++state.favoritesGeneration;
+	RequestFavorites(session);
+}
+
+void ToggleFavorite(std::shared_ptr<ChatHelpers::Show> show,
+		not_null<DocumentData*> document, bool favorited) {
+	const auto session = &document->session();
+	auto &state = StateFor(session);
+	const auto i = state.stickers.find(document->id);
+	if (i == state.stickers.end()) {
+		if (show) show->showToast(u"Could not update favorite stickers."_q);
+		return;
+	}
+	auto &mutation = state.mutations[i->second];
+	mutation.desired = favorited;
+	mutation.show = std::move(show);
+	SendFavorite(session, i->second);
 }
 
 bool IsSticker(

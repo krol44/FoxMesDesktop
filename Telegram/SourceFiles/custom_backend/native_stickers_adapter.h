@@ -4,6 +4,11 @@ This file is part of FoxMes Desktop.
 #pragma once
 
 class DocumentData;
+class QJsonObject;
+
+namespace ChatHelpers {
+class Show;
+}
 
 namespace Main {
 class Session;
@@ -15,8 +20,16 @@ struct SendAction;
 
 namespace CustomBackend::Stickers {
 
-
 void Request(not_null<Main::Session*> session);
+void RequestFavorites(not_null<Main::Session*> session);
+void ReceiveFavorites(
+	not_null<Main::Session*> session,
+	const QJsonObject &value);
+void ResetFavorites(not_null<Main::Session*> session);
+void ToggleFavorite(
+	std::shared_ptr<ChatHelpers::Show> show,
+	not_null<DocumentData*> document,
+	bool favorited);
 
 [[nodiscard]] bool IsSticker(
 	not_null<Main::Session*> session,

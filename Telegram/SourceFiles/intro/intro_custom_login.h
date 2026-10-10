@@ -1,16 +1,20 @@
 #pragma once
 
+#include "base/timer.h"
 #include "intro/intro_step.h"
 
+#include <QtCore/QDateTime>
+#include <QtCore/QJsonDocument>
+
 namespace Ui {
-class InputField;
+class FlatLabel;
 class RoundButton;
 }
 
 namespace Intro::details {
 
 class FoxMesHeader;
-class FoxMesStepDivider;
+class FoxMesCodeView;
 
 class CustomLoginWidget final : public Step {
 public:
@@ -24,6 +28,8 @@ public:
 
     void setInnerFocus() override;
     void submit() override;
+    void cancelled() override;
+    void finished() override;
     rpl::producer<QString> nextButtonText() const override;
     bool hasBack() const override;
 
@@ -31,21 +37,29 @@ protected:
     void resizeEvent(QResizeEvent *e) override;
 
 private:
-	void requestPairing(Fn<void()> done);
-	void startPairing();
-	void copyAuthURL();
-	void openPairingPage();
-	void setBusy(bool busy);
+	void startLogin(const QString &status);
+	void schedulePoll(int seconds);
+	void poll();
+	void complete(const QJsonDocument &doc);
+	void stop();
+	void copyCode();
+	void setStatus(const QString &text);
 
+	rpl::variable<QString> _link;
 	object_ptr<FoxMesHeader> _header;
-	object_ptr<FoxMesStepDivider> _firstDivider;
-	object_ptr<Ui::RoundButton> _getCode;
-	object_ptr<Ui::RoundButton> _copyURL;
-	object_ptr<FoxMesStepDivider> _secondDivider;
-	object_ptr<Ui::InputField> _code;
-	QString _pairingRequest;
-	QString _pairingURL;
-	bool _busy = false;
+	object_ptr<Ui::FlatLabel> _about;
+	object_ptr<FoxMesCodeView> _code;
+	object_ptr<Ui::RoundButton> _copy;
+	object_ptr<Ui::FlatLabel> _status;
+	base::Timer _startTimer;
+	base::Timer _pollTimer;
+	QString _request;
+	QString _verificationUrl;
+	QDateTime _expiresAt;
+	int _interval = 5;
+	int _startDelay = 2;
+	int _generation = 0;
+	bool _stopped = false;
 };
 
 }

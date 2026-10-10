@@ -11,6 +11,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_premium.h"
 #include "api/api_sending.h"
 #include "apiwrap.h"
+#include "custom_backend/native_chat_request_adapter.h"
+#include "custom_backend/native_runtime.h"
 #include "base/random.h"
 #include "base/unixtime.h"
 #include "ui/effects/premium_stars.h"
@@ -745,8 +747,13 @@ bool AboutView::refresh() {
 	if (!info) {
 		if (user
 			&& !user->isContact()
-			&& !user->phoneCountryCode().isEmpty()) {
-			if (_item && !_commonGroupsStale) {
+			&& (!user->phoneCountryCode().isEmpty()
+				|| (CustomBackend::Enabled()
+					&& CustomBackend::ChatRequests::Gated(user)))) {
+			if (_item
+				&& !_commonGroupsStale
+				&& !(CustomBackend::Enabled()
+					&& CustomBackend::ChatRequests::PeerInfoStale(user))) {
 				return false;
 			}
 			loadCommonGroups();
@@ -1022,7 +1029,9 @@ AdminLog::OwnedItem AboutView::makeNewPeerInfo(not_null<UserData*> user) {
 	auto owned = AdminLog::OwnedItem(_delegate, item);
 	owned->overrideMedia(std::make_unique<HistoryView::MediaGeneric>(
 		owned.get(),
-		GenerateNewPeerInfo(owned.get(), _item.get(), user, _commonGroups),
+		(CustomBackend::Enabled()
+			? CustomBackend::ChatRequests::GeneratePeerInfo(owned.get(), user)
+			: GenerateNewPeerInfo(owned.get(), _item.get(), user, _commonGroups)),
 		HistoryView::MediaGenericDescriptor{
 			.maxWidth = st::newPeerWidth,
 			.service = true,

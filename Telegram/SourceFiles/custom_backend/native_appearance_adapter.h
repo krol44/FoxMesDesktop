@@ -10,6 +10,7 @@ struct ChatPaintContext;
 }
 
 namespace CustomBackend::Appearance {
+void Save(not_null<Main::Session*> session, QJsonObject body, Fn<void(bool)> done);
 void Load(not_null<Main::Session*> session);
 void Apply(not_null<Main::Session*> session, const QJsonObject &user);
 void PaintReply(PeerData *peer, const Ui::ChatPaintContext &context,

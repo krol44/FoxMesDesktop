@@ -482,7 +482,12 @@ bool CanCreateChannels(Main::Session *session) {
 void UploadPeerPhoto(
         not_null<PeerData*> peer,
         QImage &&image,
-        std::function<void()> done) {
+        std::function<void()> done,
+        std::function<void()> failed) {
+    if (const auto user = peer->asUser(); user && user->isSelf()) {
+        if (const auto bridge = BridgeFor(&peer->session())) bridge->uploadProfilePhoto(std::move(image), std::move(done), std::move(failed));
+        return;
+    }
     if (const auto user = peer->asUser(); user && !user->isSelf()) {
         Contacts::UploadPhoto(user, std::move(image), std::move(done));
         return;
@@ -612,4 +617,13 @@ int MtpDcStateFor(Main::Account *account) {
 	return MTP::ConnectingState;
 }
 
+}
+
+namespace CustomBackend {
+void RequestProfilePhotos(not_null<UserData*> user, PhotoId afterId) {
+    if (const auto bridge = BridgeFor(&user->session())) bridge->requestProfilePhotos(user, afterId);
+}
+void ChangeProfilePhoto(not_null<Main::Session*> session, PhotoId id, bool remove, Fn<void()> done) {
+    if (const auto bridge = BridgeFor(session)) bridge->changeProfilePhoto(id, remove, std::move(done));
+}
 }

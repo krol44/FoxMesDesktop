@@ -3,6 +3,10 @@
 #include "base/flat_map.h"
 #include "base/unixtime.h"
 #include "custom_backend/native_bridge.h"
+#include "custom_backend/api_client.h"
+#include "custom_backend/default_reaction_state.h"
+#include "mtproto/mtp_instance.h"
+#include <QUuid>
 #include "custom_backend/native_runtime.h"
 #include "history/history_item.h"
 #include "data/data_message_reactions.h"
@@ -42,6 +46,10 @@ struct PendingAsset final {
 };
 
 struct State final {
+    Data::Reactions *reactions = nullptr;
+    DefaultReactionState favorite;
+    std::vector<Mtp::Answer> favoriteAnswers;
+    bool favoriteLoading = false;
     std::vector<CatalogItem> catalog;
     int maxSelected = 3;
 
@@ -80,6 +88,70 @@ base::flat_map<not_null<Main::Session*>, std::unique_ptr<State>> &States() {
 [[nodiscard]] State *FindState(Main::Session *session) {
     const auto i = session ? States().find(session) : States().end();
     return (i == States().end()) ? nullptr : i->second.get();
+}
+
+void DispatchFavorite(not_null<Main::Session*> session);
+
+[[nodiscard]] DocumentId EffectiveFavorite(const State &state) {
+    auto catalog = std::vector<DefaultReactionState::Entry>();
+    for (const auto &entry : state.catalog) catalog.push_back({ entry.id, entry.emoji.toStdString() });
+    return state.favorite.effective(catalog);
+}
+
+void DispatchFavorite(not_null<Main::Session*> session) {
+    auto &state = StateFor(session);
+    if (state.favorite.sent || !state.favorite.desired) return;
+    if (state.favorite.revision < 0) { RequestFavorite(session); return; }
+    const auto mutation = *state.favorite.begin();
+    const auto sent = mutation.id;
+    auto answers = std::move(state.favoriteAnswers);
+    state.favoriteAnswers.clear();
+    if (mutation.unchanged) {
+        state.favorite.finish(true);
+        for (const auto &answer : answers) answer.done(MTP_boolTrue());
+        ApplyFavorite(session);
+        return;
+    }
+    const auto body = QJsonObject{
+        {"emoji_id", qint64(sent)},
+        {"expected_revision", qint64(mutation.revision)},
+        {"operation_id", QUuid::createUuid().toString(QUuid::WithoutBraces)},
+    };
+    const auto weak = base::make_weak(session);
+    const auto finish = [weak, answers = std::move(answers)](QJsonDocument doc, QString error, int status) {
+        const auto session = weak.get();
+        const auto state = FindState(session);
+        if (!state) return;
+        const auto success = error.isEmpty() && status == 200 && doc.object().contains("revision");
+        state->favorite.finish(success);
+        if (success) ReceiveFavorite(session, doc.object());
+        else if (status == 409 && doc.object().value("state").isObject()) ReceiveFavorite(session, doc.object().value("state").toObject());
+        ApplyFavorite(session);
+        for (const auto &answer : answers) {
+            if (success) answer.done(MTP_boolTrue());
+            else answer.fail(u"REACTION_INVALID"_q);
+        }
+        if (!success) {
+            state->favorite.desired.reset();
+            for (const auto &answer : state->favoriteAnswers) answer.fail(u"REACTION_INVALID"_q);
+            state->favoriteAnswers.clear();
+            ApplyFavorite(session);
+        } else if (state->favorite.desired) DispatchFavorite(session);
+        if (!success) RequestFavorite(session);
+    };
+    ClientFor(session).communityRequest("PUT", u"/reactions/default"_q, body,
+        [weak, body, finish](QJsonDocument doc, QString error, int status) {
+            if (!weak) return;
+            if (status <= 0 || status >= 500) {
+                ClientFor(weak.get()).operationResult(body.value("operation_id").toString(),
+                    [finish](QJsonDocument recovered, QString lookupError, int lookupStatus) {
+                        const auto value = recovered.object();
+                        if (lookupError.isEmpty() && value.value("status").toString() == u"done"_q && value.value("result").isObject()) {
+                            finish(QJsonDocument(value.value("result").toObject()), {}, 200);
+                        } else finish({}, u"NETWORK_ERROR"_q, lookupStatus == 409 ? 409 : 500);
+                    });
+            } else finish(doc, error, status);
+        });
 }
 
 [[nodiscard]] QByteArray RasterizeNativeEmoji(const QString &emoji) {
@@ -483,15 +555,13 @@ void SetAvailableCatalog(
         }
         entries.push_back(item);
     }
-    if (entries.empty()) {
-        return;
-    }
     auto &state = StateFor(session);
     for (const auto &entry : entries) {
         state.emojiByDocumentId[entry.id] = entry.emoji;
     }
     state.catalog = std::move(entries);
     state.catalogChanged.fire({});
+    ApplyFavorite(session);
 }
 
 void SetUsageLists(
@@ -612,6 +682,7 @@ void ApplyDefault(
 			}
 		};
 		const auto &state = StateFor(session);
+		ApplyFavorite(session);
 		resolveUsage(state.topUsage, self._topIds, self._top);
 		resolveUsage(state.recentUsage, self._recentIds, self._recent);
 		if (self._waitingForReactions) {
@@ -622,6 +693,78 @@ void ApplyDefault(
 		self._topUpdated.fire({});
 		self._recentUpdated.fire({});
 	});
+}
+
+void ApplyFavorite(not_null<Main::Session*> session) {
+    const auto state = FindState(session);
+    if (!state || !state->reactions) return;
+    auto &reactions = *state->reactions;
+    const auto id = EffectiveFavorite(*state);
+    reactions.applyFavorite(id ? Data::ReactionId{ id } : Data::ReactionId());
+    reactions._favorite = reactions.resolveById(reactions._favoriteId);
+    reactions._favoriteUpdated.fire({});
+}
+
+void ReceiveFavorite(not_null<Main::Session*> session, const QJsonObject &value) {
+    if (!value.value("revision").isDouble() || !value.contains("emoji_id")) return;
+    auto &state = StateFor(session);
+    const auto revision = value.value("revision").toVariant().toLongLong();
+    if (revision < 0 || revision < state.favorite.revision) return;
+    state.favorite.receive(value.value("emoji_id").toVariant().toULongLong(), revision);
+    if (!state.favorite.sent && !state.favorite.desired) ApplyFavorite(session);
+}
+
+void RequestFavorite(not_null<Main::Session*> session) {
+    auto &state = StateFor(session);
+    if (state.favoriteLoading) return;
+    state.favoriteLoading = true;
+    const auto weak = base::make_weak(session);
+    ClientFor(session).communityRequest("GET", u"/reactions/default"_q, {},
+        [weak](QJsonDocument doc, QString error, int status) {
+            const auto session = weak.get();
+            const auto state = FindState(session);
+            if (!state) return;
+            state->favoriteLoading = false;
+            if (error.isEmpty() && status == 200 && doc.object().value("revision").isDouble()
+                    && doc.object().value("revision").toVariant().toLongLong() >= 0
+                    && doc.object().contains("emoji_id")) {
+                ReceiveFavorite(session, doc.object());
+                DispatchFavorite(session);
+            } else {
+                state->favorite.desired.reset();
+                for (const auto &answer : state->favoriteAnswers) answer.fail(u"NETWORK_ERROR"_q, 500);
+                state->favoriteAnswers.clear();
+                ApplyFavorite(session);
+            }
+        });
+}
+
+void BindFavorite(not_null<Main::Session*> session, not_null<Data::Reactions*> reactions) {
+    StateFor(session).reactions = reactions;
+    ApplyFavorite(session);
+    RequestFavorite(session);
+}
+
+bool Intercepts(const MTP::details::SerializedRequest &request) {
+    return Mtp::RequestType(request) == mtpc_messages_setDefaultReaction;
+}
+
+void Intercept(not_null<MTP::Instance*> instance, mtpRequestId requestId, const MTP::details::SerializedRequest &request) {
+    const auto answer = Mtp::Answer(instance, requestId);
+    auto reader = Mtp::Reader(request);
+    const auto reaction = reader.read<MTPReaction>();
+    if (!reader.ok() || reaction.type() != mtpc_reactionCustomEmoji) { answer.fail(u"REACTION_INVALID"_q); return; }
+    const auto id = DocumentId(reaction.c_reactionCustomEmoji().vdocument_id().v);
+    crl::on_main([instance = QPointer<MTP::Instance>(instance.get()), answer, id] {
+        if (!instance) return;
+        const auto session = Mtp::SessionFor(instance.data());
+        if (!session) { answer.fail(u"SESSION_REVOKED"_q, 401); return; }
+        auto &state = StateFor(session);
+        if (!ranges::contains(state.catalog, id, &CatalogItem::id)) { answer.fail(u"REACTION_INVALID"_q); return; }
+        state.favorite.desired = id;
+        state.favoriteAnswers.push_back(answer);
+        DispatchFavorite(session);
+    });
 }
 
 void ClearSession(not_null<Main::Session*> session) {

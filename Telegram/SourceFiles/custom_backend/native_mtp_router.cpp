@@ -2,13 +2,17 @@
 This file is part of FoxMes Desktop.
 */
 #include "custom_backend/native_mtp_router.h"
+#include "custom_backend/native_reactions_adapter.h"
 #include "custom_backend/native_appearance_adapter.h"
+#include "custom_backend/native_folders_adapter.h"
 
 #include "base/unixtime.h"
 #include "core/application.h"
 #include "custom_backend/native_channels_adapter.h"
+#include "custom_backend/native_chat_request_adapter.h"
 #include "custom_backend/native_conference_adapter.h"
 #include "custom_backend/native_contacts_adapter.h"
+#include "custom_backend/native_history_loader.h"
 #include "custom_backend/native_topic_channels.h"
 #include "main/main_account.h"
 #include "main/main_domain.h"
@@ -95,9 +99,13 @@ QString ErrorType(
 }
 
 bool Intercepts(const SerializedRequest &request) {
-	return Appearance::Intercepts(request)
+	return HistoryPages::Intercepts(request)
+		|| Folders::Intercepts(request)
+        || Reactions::Intercepts(request)
+		|| Appearance::Intercepts(request)
 		|| Conferences::Intercepts(request)
 		|| Contacts::Intercepts(request)
+		|| ChatRequests::Intercepts(request)
 		|| TopicChannels::Intercepts(request)
 		|| Channels::Intercepts(request);
 }
@@ -106,12 +114,20 @@ void Intercept(
 		not_null<MTP::Instance*> instance,
 		mtpRequestId requestId,
 		const SerializedRequest &request) {
-	if (Appearance::Intercepts(request)) {
+	if (HistoryPages::Intercepts(request)) {
+		HistoryPages::Intercept(instance, requestId, request);
+	} else if (Folders::Intercepts(request)) {
+        Folders::Intercept(instance, requestId, request);
+    } else if (Reactions::Intercepts(request)) {
+		Reactions::Intercept(instance, requestId, request);
+	} else if (Appearance::Intercepts(request)) {
 		Appearance::Intercept(instance, requestId, request);
 	} else if (Conferences::Intercepts(request)) {
 		Conferences::Intercept(instance, requestId, request);
 	} else if (Contacts::Intercepts(request)) {
 		Contacts::Intercept(instance, requestId, request);
+	} else if (ChatRequests::Intercepts(request)) {
+		ChatRequests::Intercept(instance, requestId, request);
 	} else if (TopicChannels::Intercepts(request)) {
 		TopicChannels::Intercept(instance, requestId, request);
 	} else {

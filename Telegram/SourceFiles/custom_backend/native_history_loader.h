@@ -1,15 +1,12 @@
 #pragma once
 
-#include "data/data_messages.h"
-
-class History;
+#include "mtproto/core_types.h"
 
 namespace MTP {
-class Error;
+class Instance;
+namespace details {
+class SerializedRequest;
 }
-
-namespace Main {
-class Session;
 }
 
 namespace Ui {
@@ -22,17 +19,19 @@ class SessionController;
 
 namespace CustomBackend {
 
-struct HistoryLoadingView {
-    not_null<Window::SessionController*> controller;
-    not_null<Ui::ElasticScroll*> area;
-};
-[[nodiscard]] bool WidgetHistoryRequest(
-    not_null<Main::Session*> session,
-    not_null<History*> history,
-    MsgId showAtMsgId,
-    Data::LoadDirection direction,
-    Fn<void()> done,
-    Fn<void(const MTP::Error &)> failed,
-    std::optional<HistoryLoadingView> loading = std::nullopt);
+void ShowHistoryLoading(
+    not_null<Window::SessionController*> controller,
+    not_null<Ui::ElasticScroll*> area,
+    Fn<bool()> waiting);
+
+}
+
+namespace CustomBackend::HistoryPages {
+
+[[nodiscard]] bool Intercepts(const MTP::details::SerializedRequest &request);
+void Intercept(
+    not_null<MTP::Instance*> instance,
+    mtpRequestId requestId,
+    const MTP::details::SerializedRequest &request);
 
 }

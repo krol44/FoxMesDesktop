@@ -34,6 +34,8 @@ class Reactions;
 }
 
 namespace CustomBackend::Reactions {
+void BindFavorite(not_null<Main::Session*> session, not_null<Data::Reactions*> reactions);
+void ApplyFavorite(not_null<Main::Session*> session);
 void ApplyDefault(
 	not_null<Main::Session*> session,
 	not_null<Data::Reactions*> reactions);
@@ -391,6 +393,7 @@ private:
 
 	rpl::lifetime _lifetime;
 
+	friend void CustomBackend::Reactions::ApplyFavorite(not_null<Main::Session*> session);
 	friend void CustomBackend::Reactions::ApplyDefault(
 		not_null<Main::Session*> session,
 		not_null<Data::Reactions*> reactions);

@@ -6,6 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/media/history_view_theme_document.h"
+#include "custom_backend/native_runtime.h"
+#include "custom_backend/native_wallpaper_adapter.h"
 
 #include "apiwrap.h"
 #include "base/unixtime.h"
@@ -553,6 +555,7 @@ ClickHandlerPtr ThemeDocumentBox::createViewLink() {
 				&& WallPaperRevertable(view->data())) {
 				const auto reset = crl::guard(weak, [=](Fn<void()> close) {
 					const auto api = &controller->session().api();
+					if (CustomBackend::Enabled()) { CustomBackend::Wallpapers::RevertForPeer(to); close(); return; }
 					api->request(MTPmessages_SetChatWallPaper(
 						MTP_flags(MTPmessages_SetChatWallPaper::Flag::f_revert),
 						view->data()->history()->peer->input(),

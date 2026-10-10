@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "apiwrap.h"
 #include "custom_backend/native_gifs_adapter.h"
+#include "custom_backend/native_stickers_adapter.h"
 #include "custom_backend/native_runtime.h"
 #include "data/data_document.h"
 #include "data/data_file_origin.h"
@@ -65,6 +66,10 @@ void ToggleFavedSticker(
 		not_null<DocumentData*> document,
 		Data::FileOrigin origin,
 		bool faved) {
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Stickers::ToggleFavorite(std::move(show), document, faved);
+		return;
+	}
 	if (faved && !document->sticker()) {
 		return;
 	}

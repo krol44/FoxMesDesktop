@@ -6,6 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/themes/window_theme_editor_box.h"
+#include "custom_backend/native_chat_themes_adapter.h"
+#include "custom_backend/native_runtime.h"
 
 #include "window/themes/window_theme.h"
 #include "window/themes/window_theme_editor.h"
@@ -488,6 +490,16 @@ Fn<void()> SavePreparedTheme(
 		Fn<void(SaveErrorType,QString)> fail) {
 	Expects(window->account().sessionExists());
 
+
+    if (CustomBackend::Enabled()) {
+        const auto session = &window->account().session();
+        return CustomBackend::ChatThemes::SaveUserTheme(session, fields, parsed.palette, backgroundChosen ? background : QImage(), [=](Data::CloudTheme cloud) {
+            Background()->clearEditingTheme(ClearEditing::KeepChanges);
+            session->data().cloudThemes().savedFromEditor(cloud);
+            KeepFromEditor(originalContent, originalParsed, cloud, PackTheme(parsed), parsed, background);
+            done();
+        }, [=](QString error) { fail(SaveErrorType::Other, error); });
+    }
 	using Storage::UploadedMedia;
 	struct State {
 		FullMsgId id;
@@ -900,6 +912,7 @@ void SaveThemeBox(
 			st::boxRowPadding.right(),
 			st::boxRowPadding.bottom()));
 
+	if (CustomBackend::Enabled()) linkWrap->hide();
 	box->setFocusCallback([=] { name->setFocusFast(); });
 
 	box->setWidth(st::boxWideWidth);

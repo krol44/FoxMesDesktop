@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/sections/settings_information.h"
 
+#include "custom_backend/native_runtime.h"
 #include "settings/sections/settings_main.h"
 #include "settings/settings_builder.h"
 #include "settings/settings_common_session.h"
@@ -283,7 +284,7 @@ void SetupPhoto(
 		targets->uploadPhoto = upload;
 	}
 
-	upload->setVideoAllowed(true);
+	upload->setVideoAllowed(!CustomBackend::Enabled());
 	upload->chosenImages(
 	) | rpl::on_next([=](Ui::UserpicButton::ChosenImage &&chosen) {
 		auto &image = chosen.image;
@@ -1207,6 +1208,9 @@ void AccountsList::rebuild() {
 }
 
 void BuildInformationSection(SectionBuilder &builder) {
+	if (CustomBackend::Enabled()) {
+		return;
+	}
 	builder.add(nullptr, [] {
 		return SearchEntry{
 			.id = u"edit/bio"_q,
@@ -1357,11 +1361,13 @@ void Information::setupContent() {
 		auto targets = InformationHighlightTargets();
 
 		SetupPhoto(container, controller, self, &targets);
-		SetupBio(container, self, &targets);
-		SetupRows(container, controller, self, &targets);
-		SetupPersonalChannel(container, controller, self, &targets);
-		SetupBirthday(container, controller, self, &targets);
-		SetupAccountsWrap(container, controller, &targets);
+		if (!CustomBackend::Enabled()) {
+			SetupBio(container, self, &targets);
+			SetupRows(container, controller, self, &targets);
+			SetupPersonalChannel(container, controller, self, &targets);
+			SetupBirthday(container, controller, self, &targets);
+			SetupAccountsWrap(container, controller, &targets);
+		}
 
 		*photo = targets.photo;
 		*uploadPhoto = targets.uploadPhoto;

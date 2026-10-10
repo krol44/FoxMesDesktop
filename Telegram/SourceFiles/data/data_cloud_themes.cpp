@@ -483,6 +483,7 @@ void CloudThemes::scheduleReload() {
 }
 
 void CloudThemes::refresh() {
+    if (CustomBackend::Enabled()) { CustomBackend::ChatThemes::RequestUserThemes(_session); return; }
 	if (_refreshRequestId) {
 		return;
 	}
@@ -890,6 +891,7 @@ void CloudThemes::savedFromEditor(const CloudTheme &theme) {
 }
 
 void CloudThemes::remove(uint64 cloudThemeId) {
+    if (CustomBackend::Enabled()) { CustomBackend::ChatThemes::RemoveUserTheme(_session, cloudThemeId); return; }
 	const auto i = ranges::find(_list, cloudThemeId, &CloudTheme::id);
 	if (i == end(_list)) {
 		return;

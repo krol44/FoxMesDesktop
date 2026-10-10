@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "core/click_handler_types.h"
 #include "custom_backend/native_runtime.h"
+#include "custom_backend/native_wallpaper_adapter.h"
 #include "data/data_changes.h"
 #include "data/data_document_media.h"
 #include "data/data_folder.h"
@@ -772,6 +773,11 @@ void MainMenu::setupMenu() {
 	)->toggleOn(_nightThemeSwitches.events_starting_with(
 		Window::Theme::IsNightMode()
 	));
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Wallpapers::ObserveNightMode([=](bool night) {
+			_nightThemeSwitches.fire_copy(night);
+		}, _nightThemeToggle->lifetime());
+	}
 	_nightThemeToggle->toggledChanges(
 	) | rpl::filter([=](bool night) {
 		return (night != Window::Theme::IsNightMode());
@@ -780,6 +786,10 @@ void MainMenu::setupMenu() {
 			_nightThemeSwitches.fire(!night);
 			controller->show(Ui::MakeInformBox(
 				tr::lng_theme_editor_cant_change_theme()));
+			return;
+		}
+		if (CustomBackend::Enabled()) {
+			CustomBackend::Wallpapers::ApplyNightMode(controller, night);
 			return;
 		}
 		const auto weak = base::make_weak(this);

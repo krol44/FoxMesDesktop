@@ -88,13 +88,15 @@ public:
     void clearTokens();
 
     void startDevice(Callback done);
-    void exchangeDevice(const QString &request, const QString &code, Callback done);
+    void pollDevice(const QString &request, Callback done);
     void logout(Callback done);
     void me(Callback done);
     void updateMe(const QString &displayName, Callback done);
 
     void desktopVersion(Callback done);
 
+    void profilePhotos(qint64 userId, PhotoId afterId, Callback done);
+    void changeProfilePhoto(PhotoId id, bool remove, qint64 revision, Callback done);
     void users(const QString &query, Callback done);
     void user(qint64 userId, Callback done);
     void setUserBlocked(qint64 userId, bool blocked, Callback done);
@@ -106,7 +108,9 @@ public:
     void chatsLight(Callback done);
     void chat(qint64 chatId, Callback done);
     void savedChat(Callback done);
-    void createDirect(qint64 userId, Callback done);
+    void directChat(qint64 userId, Callback done);
+    void requestChat(qint64 userId, Callback done);
+    void answerChatRequest(qint64 chatId, bool accept, Callback done);
     void forwardMessages(qint64 chatId, qint64 sourceChatId, qint64 threadRootId, const QList<qint64> &messageIds, bool dropAuthor, std::optional<int> videoTimestamp, const QString &operationId, Callback done);
     void pinnedMessages(qint64 chatId, int limit, Callback done);
     void pinMessage(
@@ -358,6 +362,11 @@ public:
     void setChatArchived(qint64 chatId, bool archived, Callback done);
     void savePinnedOrder(const QList<qint64> &orderedIds, Callback done);
 
+    void chatThemes(Callback done);
+    void userThemes(Callback done);
+    void saveUserTheme(qint64 id, QJsonObject body, Callback done);
+    void deleteUserTheme(qint64 id, Callback done);
+    void setDefaultWallpaperState(QJsonObject body, Callback done);
     void wallpapers(Callback done);
     void deleteWallpaper(const QString &sha256, Callback done);
     void defaultWallpaper(Callback done);
@@ -381,12 +390,15 @@ public:
         const QString &operationId,
         Callback done);
 
+    void setChatAppearance(qint64 chatId, QJsonObject body, Callback done);
     void setChatTheme(
         qint64 chatId,
         const QString &emoticon,
         const QString &operationId,
         Callback done);
 
+    void stickerFavorites(Callback done);
+    void setStickerFavorite(qint64 emojiId, bool favorited, const QString &operationId, Callback done);
     void savedGifs(int limit, qint64 beforeId, Callback done);
     void saveGif(
         qint64 chatId,
@@ -423,6 +435,7 @@ private:
         bool authorize = true,
         const LanePtr &lane = nullptr,
         int timeoutMs = 0);
+    void appearanceRequest(const QByteArray &method, const QString &path, QJsonObject body, Callback done);
     void jsonRequestImpl(
         const QByteArray &method,
         const QString &path,

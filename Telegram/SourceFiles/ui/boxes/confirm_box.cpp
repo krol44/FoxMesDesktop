@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "ui/boxes/confirm_box.h"
+#include "custom_backend/error_alerts.h"
 
 #include "lang/lang_keys.h"
 #include "ui/rect.h"
@@ -111,6 +112,9 @@ void ConfirmBox(not_null<Ui::GenericBox*> box, ConfirmBoxArgs &&args) {
 }
 
 object_ptr<Ui::GenericBox> MakeConfirmBox(ConfirmBoxArgs &&args) {
+	if (CustomBackend::ErrorAlertsEnabled()) {
+		return CustomBackend::MakeErrorAlertBox(std::move(args));
+	}
 	return Box(ConfirmBox, std::move(args));
 }
 

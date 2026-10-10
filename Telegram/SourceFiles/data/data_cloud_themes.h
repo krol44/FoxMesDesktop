@@ -26,6 +26,7 @@ struct CloudTheme;
 }
 
 namespace CustomBackend::ChatThemes {
+void ApplyUserThemes(not_null<Data::CloudThemes*> themes, std::vector<Data::CloudTheme> list);
 void Apply(
 	not_null<Data::CloudThemes*> themes,
 	std::vector<Data::CloudTheme> list);
@@ -166,6 +167,8 @@ private:
 	mtpRequestId _chatThemesRequestId = 0;
 	std::vector<CloudTheme> _chatThemes;
 	rpl::event_stream<> _chatThemesUpdates;
+
+	friend void CustomBackend::ChatThemes::ApplyUserThemes(not_null<Data::CloudThemes*> themes, std::vector<Data::CloudTheme> list);
 
 	friend void CustomBackend::ChatThemes::Apply(
 		not_null<Data::CloudThemes*> themes,

@@ -7,6 +7,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_inner_widget.h"
 
+#include "custom_backend/native_chat_request_adapter.h"
+#include "custom_backend/native_runtime.h"
+
 #include "api/api_polls.h"
 #include "chat_helpers/stickers_emoji_pack.h"
 #include "core/application.h"
@@ -5896,7 +5899,9 @@ void HistoryInner::refreshAboutView(bool force) {
 				session().api().requestFullPeer(user);
 			}
 		} else if (!user->isContact()
-			&& !user->phoneCountryCode().isEmpty()) {
+			&& (!user->phoneCountryCode().isEmpty()
+				|| (CustomBackend::Enabled()
+					&& CustomBackend::ChatRequests::Gated(user)))) {
 			refresh();
 		} else if (!historyHeight()) {
 			if (user->starsPerMessage() > 0

@@ -104,6 +104,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_item_helpers.h" // GetErrorForSending.
+#include "custom_backend/native_chat_request_adapter.h"
 #include "custom_backend/native_history_loader.h"
 #include "custom_backend/native_runtime.h"
 #include "history/history_drag_area.h"
@@ -3262,6 +3263,9 @@ void HistoryWidget::showHistory(
 			&& !_peer->asUser()->isSupport())
 				? tr::lng_restart_button(tr::now)
 				: tr::lng_unblock_button(tr::now)).toUpper());
+		if (CustomBackend::Enabled()) {
+			CustomBackend::ChatRequests::BindComposeButton(_unblock.data(), _peer);
+		}
 	}
 
 	_nonEmptySelection = false;
@@ -4792,26 +4796,6 @@ void HistoryWidget::firstLoadMessages() {
 	if (!_history || _firstLoadRequest) {
 		return;
 	}
-	_firstLoadRequest = -1;
-	if (CustomBackend::WidgetHistoryRequest(
-			&session(),
-			_history,
-			_showAtMsgId,
-			Data::LoadDirection::Around,
-			crl::guard(this, [=] {
-				if (_firstLoadRequest != -1) {
-					return;
-				}
-				_firstLoadRequest = 0;
-				historyLoaded();
-			}),
-			crl::guard(this, [=](const MTP::Error &error) {
-				messagesFailed(error, -1);
-			}),
-			CustomBackend::HistoryLoadingView{ controller(), _scroll.data() })) {
-		return;
-	}
-	_firstLoadRequest = 0;
 
 	auto from = _history;
 	auto offsetId = MsgId();
@@ -4877,6 +4861,12 @@ void HistoryWidget::firstLoadMessages() {
 			finish();
 		}).send();
 	});
+	if (CustomBackend::Enabled()) {
+		CustomBackend::ShowHistoryLoading(
+			controller(),
+			_scroll.data(),
+			[=, id = _firstLoadRequest] { return _firstLoadRequest == id; });
+	}
 }
 
 void HistoryWidget::loadMessages() {
@@ -4895,31 +4885,6 @@ void HistoryWidget::loadMessages() {
 	const auto from = loadMigrated ? _migrated : _history;
 	if (from->loadedAtTop()) {
 		return;
-	}
-
-	if (!loadMigrated) {
-		_preloadRequest = -1;
-		if (CustomBackend::WidgetHistoryRequest(
-				&session(),
-				_history,
-				from->minMsgId(),
-				Data::LoadDirection::Before,
-				crl::guard(this, [=, history = _history] {
-					if (_preloadRequest != -1 || _history != history) {
-						return;
-					}
-					_preloadRequest = 0;
-					preloadHistoryIfNeeded();
-				}),
-				crl::guard(this, [=, history = _history](
-						const MTP::Error &error) {
-					if (_preloadRequest == -1 && _history == history) {
-						messagesFailed(error, -1);
-					}
-				}))) {
-			return;
-		}
-		_preloadRequest = 0;
 	}
 
 	const auto offsetId = from->minMsgId();
@@ -5017,34 +4982,6 @@ void HistoryWidget::loadMessagesDown() {
 		return;
 	}
 
-	if (!loadMigrated) {
-		_preloadDownRequest = -1;
-		if (CustomBackend::WidgetHistoryRequest(
-				&session(),
-				_history,
-				from->maxMsgId(),
-				Data::LoadDirection::After,
-				crl::guard(this, [=, history = _history] {
-					if (_preloadDownRequest != -1 || _history != history) {
-						return;
-					}
-					_preloadDownRequest = 0;
-					preloadHistoryIfNeeded();
-					if (_history->loadedAtBottom()) {
-						checkActivation();
-					}
-				}),
-				crl::guard(this, [=, history = _history](
-						const MTP::Error &error) {
-					if (_preloadDownRequest == -1 && _history == history) {
-						messagesFailed(error, -1);
-					}
-				}))) {
-			return;
-		}
-		_preloadDownRequest = 0;
-	}
-
 	const auto loadCount = kMessagesPerPage;
 	auto addOffset = -loadCount;
 	auto offsetId = from->maxMsgId();
@@ -5110,28 +5047,6 @@ void HistoryWidget::delayedShowAt(
 		).arg(Logs::b(_history->loadedAtBottom())
 		).arg(showAtMsgId.bare));
 
-	_delayedShowAtRequest = -1;
-	if (CustomBackend::WidgetHistoryRequest(
-			&session(),
-			_history,
-			showAtMsgId,
-			Data::LoadDirection::Around,
-			crl::guard(this, [=] {
-				if (_delayedShowAtRequest != -1) {
-					return;
-				}
-				_delayedShowAtRequest = 0;
-				setMsgId(_delayedShowAtMsgId, _delayedShowAtMsgParams);
-				historyLoaded();
-			}),
-			crl::guard(this, [=](const MTP::Error &error) {
-				messagesFailed(error, -1);
-			}),
-			CustomBackend::HistoryLoadingView{ controller(), _scroll.data() })) {
-		return;
-	}
-	_delayedShowAtRequest = 0;
-
 	auto from = _history;
 	auto offsetId = MsgId();
 	auto offset = 0;
@@ -5190,6 +5105,12 @@ void HistoryWidget::delayedShowAt(
 			finish();
 		}).send();
 	});
+	if (CustomBackend::Enabled()) {
+		CustomBackend::ShowHistoryLoading(
+			controller(),
+			_scroll.data(),
+			[=, id = _delayedShowAtRequest] { return _delayedShowAtRequest == id; });
+	}
 }
 
 void HistoryWidget::handleScroll() {
@@ -6057,6 +5978,12 @@ SendMenu::Details HistoryWidget::sendButtonDefaultDetails() const {
 }
 
 void HistoryWidget::unblockUser() {
+	if (CustomBackend::Enabled()
+		&& _peer
+		&& CustomBackend::ChatRequests::Gated(_peer)) {
+		CustomBackend::ChatRequests::ComposeClicked(controller(), _peer);
+		return;
+	}
 	if (const auto user = _peer ? _peer->asUser() : nullptr) {
 		const auto show = controller()->uiShow();
 		Window::PeerMenuUnblockUserWithBotRestart(show, user);
@@ -6740,6 +6667,9 @@ bool HistoryWidget::isReportMessages() const {
 }
 
 bool HistoryWidget::isBlocked() const {
+	if (CustomBackend::Enabled() && _peer) {
+		return CustomBackend::ChatRequests::ComposeBlocked(_peer);
+	}
 	return _peer && _peer->isUser() && _peer->asUser()->isBlocked();
 }
 

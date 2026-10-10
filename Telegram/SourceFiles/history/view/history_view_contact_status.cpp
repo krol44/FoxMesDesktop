@@ -7,6 +7,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_contact_status.h"
 
+#include "custom_backend/native_chat_request_adapter.h"
+#include "custom_backend/native_runtime.h"
+
 #include "lang/lang_keys.h"
 #include "ui/controls/userpic_button.h"
 #include "ui/widgets/menu/menu_add_action_callback_factory.h"
@@ -480,6 +483,13 @@ rpl::producer<> ContactStatus::Bar::setBotPhotoClicks() const {
 }
 
 void ContactStatus::Bar::refreshAddText(int newWidth) {
+	if (CustomBackend::Enabled()) {
+		CustomBackend::ChatRequests::DecorateBar(
+			_add.data(),
+			_block.data(),
+			_close.data());
+		return;
+	}
 	const auto compose = [](const QString &name) {
 		return tr::lng_new_contact_add_name(tr::now, lt_user, name).toUpper();
 	};
@@ -892,6 +902,10 @@ void ContactStatus::setupHandlers(not_null<PeerData*> peer) {
 void ContactStatus::setupAddHandler(not_null<UserData*> user) {
 	_inner->addClicks(
 	) | rpl::on_next([=] {
+		if (CustomBackend::Enabled()) {
+			CustomBackend::ChatRequests::Answer(_controller, user, true);
+			return;
+		}
 		_controller->window().show(Box(EditContactBox, _controller, user));
 	}, _bar.lifetime());
 }
@@ -899,6 +913,10 @@ void ContactStatus::setupAddHandler(not_null<UserData*> user) {
 void ContactStatus::setupBlockHandler(not_null<UserData*> user) {
 	_inner->blockClicks(
 	) | rpl::on_next([=] {
+		if (CustomBackend::Enabled()) {
+			CustomBackend::ChatRequests::Answer(_controller, user, false);
+			return;
+		}
 		_controller->window().show(Box(
 			Window::PeerMenuBlockUserBox,
 			&_controller->window(),

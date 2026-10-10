@@ -2,6 +2,7 @@
 This file is part of FoxMes Desktop.
 */
 #include "custom_backend/native_community.h"
+#include "custom_backend/native_wallpaper_adapter.h"
 
 #include "data/data_session.h"
 #include "main/main_session.h"
@@ -292,7 +293,13 @@ MTPMessageAction Action(
 	const auto call = MTP_inputGroupCall(
 		MTP_long(Number(action, "call_id")),
 		MTP_long(0));
-	if (type == u"created"_q) {
+    if (type == u"theme_changed"_q) {
+        return MTP_messageActionSetChatTheme(MTP_chatTheme(MTP_string(action.value("theme_emoticon").toString())));
+    } else if (type == u"wallpaper_changed"_q) {
+        return MTP_messageActionSetChatWallPaper(
+            MTP_flags(action.value("for_both").toBool() ? MTPDmessageActionSetChatWallPaper::Flag::f_for_both : MTPDmessageActionSetChatWallPaper::Flags()),
+            Wallpapers::NativePaper(session, action.value("wallpaper").toObject()));
+    } else if (type == u"created"_q) {
 		return MTP_messageActionChannelCreate(
 			MTP_string(action.value("title").toString()));
 	} else if (type == u"member_added"_q) {

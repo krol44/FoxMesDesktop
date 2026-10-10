@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "dialogs/ui/dialogs_layout.h"
 
+#include "custom_backend/native_chat_request_adapter.h"
 #include "custom_backend/native_runtime.h"
 #include "base/options.h"
 #include "base/unixtime.h"
@@ -801,6 +802,15 @@ void PaintRow(
 					texttop,
 					context.width,
 					tr::lng_community_chat_loading(tr::now));
+			} else if (const auto text = (CustomBackend::Enabled() && history)
+					? CustomBackend::ChatRequests::ListPreview(history->peer)
+					: QString(); !text.isEmpty()) {
+				p.setPen(color);
+				p.drawTextLeft(
+					nameleft,
+					texttop,
+					context.width,
+					st::dialogsTextFont->elided(text, availableWidth));
 			}
 		}
 	} else if (!item->isEmpty()) {

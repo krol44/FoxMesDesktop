@@ -3059,10 +3059,14 @@ void TopBar::setupButtons(
 		updateTabSwapVisibility();
 		updateRightButtonsPosition();
 
-		if (wrap != Wrap::Side) {
-			if (source == Source::Stories) {
-				addTopBarEditButton(controller, wrap);
-			}
+		if ((source == Source::Stories && wrap != Wrap::Side)
+			|| (CustomBackend::Enabled() && _peer->isSelf() && !_savedMessages)) {
+			addTopBarEditButton(controller, wrap);
+		} else if (CustomBackend::Enabled()) {
+			_topBarButton = nullptr;
+		}
+		if (CustomBackend::Enabled()) {
+			updateRightButtonsPosition();
 		}
 		updateButtonsColorOverride();
 		raiseTabSearchOverlay();

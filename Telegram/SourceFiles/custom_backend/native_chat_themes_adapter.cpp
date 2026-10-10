@@ -6,6 +6,8 @@ This file is part of FoxMes Desktop.
 #include "custom_backend/api_client.h"
 #include "custom_backend/native_bridge.h"
 #include "custom_backend/native_runtime.h"
+#include "custom_backend/native_wallpaper_adapter.h"
+#include <QtCore/QJsonArray>
 #include "data/data_cloud_themes.h"
 #include "base/unixtime.h"
 #include "data/data_document.h"
@@ -15,285 +17,66 @@ This file is part of FoxMes Desktop.
 #include "data/data_wall_paper.h"
 #include "history/history.h"
 #include "main/main_session.h"
+#include "window/window_session_controller.h"
+#include "window/themes/window_theme.h"
+#include "styles/style_layers.h"
 
-#include <QtCore/QFile>
+#include <QtCore/QRegularExpression>
 
 namespace CustomBackend::ChatThemes {
 namespace {
 
-constexpr auto kThemeIdBase = uint64(0xF0DE000000000000ULL);
-
-constexpr auto kThemePaperIdBase = uint64(0xF0DF000000000000ULL);
-
-constexpr auto kPatternDocumentId = uint64(0xF0DD000000000001ULL);
-
-constexpr auto kPatternSide = 1440;
-
-constexpr auto kPatternIntensity = 50;
-
-[[nodiscard]] quint32 SerializeColor(const QColor &color) {
-	return (quint32(std::clamp(color.red(), 0, 255)) << 16)
-		| (quint32(std::clamp(color.green(), 0, 255)) << 8)
-		| quint32(std::clamp(color.blue(), 0, 255));
-}
-
-base::flat_map<
-	not_null<Main::Session*>,
-	std::shared_ptr<Data::DocumentMedia>> &PatternMedia() {
-	static auto value = base::flat_map<
-		not_null<Main::Session*>,
-		std::shared_ptr<Data::DocumentMedia>>();
-	return value;
-}
-
-struct Palette {
-	std::vector<QColor> background;
-	std::vector<QColor> outgoing;
-	QColor accent;
-};
-
-struct ThemeSpec {
-	QString emoticon;
-	Palette light;
-	Palette dark;
-};
-
-[[nodiscard]] const std::vector<ThemeSpec> &Catalog() {
-	static const auto value = std::vector<ThemeSpec>{
-		{
-			u"\U0001F425"_q,
-			{ { QColor(0xD6, 0xEE, 0xD2), QColor(0xB4, 0xDE, 0xB1),
-				QColor(0xC8, 0xE8, 0xC3), QColor(0x9F, 0xD2, 0xA2) },
-			  { QColor(0x6F, 0xC2, 0x76), QColor(0x3E, 0x9E, 0x54) },
-			  QColor(0x3E, 0x9E, 0x54) },
-			{ { QColor(0x0D, 0x18, 0x0F), QColor(0x13, 0x26, 0x18),
-				QColor(0x10, 0x1F, 0x13), QColor(0x18, 0x30, 0x1D) },
-			  { QColor(0x4C, 0xA1, 0x5C), QColor(0x2E, 0x76, 0x3E) },
-			  QColor(0x6F, 0xC2, 0x76) },
-		},
-		{
-			u"\U000026C4"_q,
-			{ { QColor(0xCF, 0xE6, 0xF6), QColor(0xA6, 0xCF, 0xEC),
-				QColor(0xBB, 0xDB, 0xF1), QColor(0x8B, 0xC0, 0xE6) },
-			  { QColor(0x4A, 0xA8, 0xE0), QColor(0x2C, 0x7C, 0xB8) },
-			  QColor(0x2C, 0x7C, 0xB8) },
-			{ { QColor(0x0A, 0x14, 0x1C), QColor(0x0F, 0x22, 0x2F),
-				QColor(0x0C, 0x1B, 0x25), QColor(0x13, 0x2C, 0x3C) },
-			  { QColor(0x36, 0x8F, 0xC8), QColor(0x22, 0x63, 0x93) },
-			  QColor(0x5C, 0xB2, 0xE4) },
-		},
-		{
-			u"\U0001F48E"_q,
-			{ { QColor(0xD3, 0xDE, 0xF7), QColor(0xB6, 0xB9, 0xEE),
-				QColor(0xC5, 0xCB, 0xF3), QColor(0xA5, 0xA6, 0xE8) },
-			  { QColor(0x5A, 0x8F, 0xDE), QColor(0x7A, 0x5C, 0xC8) },
-			  QColor(0x6A, 0x74, 0xD4) },
-			{ { QColor(0x0C, 0x0F, 0x1D), QColor(0x14, 0x17, 0x30),
-				QColor(0x0F, 0x12, 0x25), QColor(0x1B, 0x1D, 0x3D) },
-			  { QColor(0x3F, 0x6F, 0xBE), QColor(0x5E, 0x45, 0xA6) },
-			  QColor(0x8A, 0x92, 0xE4) },
-		},
-		{
-			u"\U0001F469"_q,
-			{ { QColor(0xD9, 0xEC, 0xD9), QColor(0xB2, 0xD9, 0xC0),
-				QColor(0xC7, 0xE5, 0xCC), QColor(0x9C, 0xCE, 0xB4) },
-			  { QColor(0x62, 0xBB, 0x8C), QColor(0x38, 0x93, 0x69) },
-			  QColor(0x38, 0x93, 0x69) },
-			{ { QColor(0x0B, 0x17, 0x13), QColor(0x11, 0x26, 0x1F),
-				QColor(0x0E, 0x1E, 0x19), QColor(0x16, 0x30, 0x28) },
-			  { QColor(0x44, 0x9C, 0x74), QColor(0x2A, 0x71, 0x53) },
-			  QColor(0x6C, 0xC0, 0x96) },
-		},
-		{
-			u"\U0001F337"_q,
-			{ { QColor(0xF9, 0xDF, 0xD2), QColor(0xF2, 0xBA, 0xAE),
-				QColor(0xF6, 0xCE, 0xC1), QColor(0xEC, 0xA4, 0x9C) },
-			  { QColor(0xE8, 0x8A, 0x5E), QColor(0xD1, 0x59, 0x5C) },
-			  QColor(0xD1, 0x59, 0x5C) },
-			{ { QColor(0x1B, 0x0E, 0x0C), QColor(0x2D, 0x16, 0x13),
-				QColor(0x22, 0x11, 0x0F), QColor(0x38, 0x1C, 0x18) },
-			  { QColor(0xC0, 0x6A, 0x45), QColor(0xA1, 0x40, 0x44) },
-			  QColor(0xE8, 0x8A, 0x5E) },
-		},
-		{
-			u"\U0001F49C"_q,
-			{ { QColor(0xE7, 0xD8, 0xF3), QColor(0xDB, 0xB4, 0xE8),
-				QColor(0xE1, 0xC7, 0xEE), QColor(0xD3, 0xA2, 0xE2) },
-			  { QColor(0xA9, 0x6B, 0xD8), QColor(0xD2, 0x62, 0xB0) },
-			  QColor(0xA9, 0x6B, 0xD8) },
-			{ { QColor(0x16, 0x0D, 0x1D), QColor(0x25, 0x14, 0x30),
-				QColor(0x1B, 0x10, 0x25), QColor(0x2E, 0x19, 0x3C) },
-			  { QColor(0x84, 0x4F, 0xAC), QColor(0xA4, 0x47, 0x88) },
-			  QColor(0xC0, 0x8B, 0xE4) },
-		},
-		{
-			u"\U0001F384"_q,
-			{ { QColor(0xFA, 0xE8, 0xCE), QColor(0xF3, 0xD2, 0xA1),
-				QColor(0xF7, 0xDE, 0xB8), QColor(0xEE, 0xC5, 0x8A) },
-			  { QColor(0xE0, 0xA6, 0x4E), QColor(0xC0, 0x7F, 0x2E) },
-			  QColor(0xC0, 0x7F, 0x2E) },
-			{ { QColor(0x1A, 0x14, 0x0A), QColor(0x2B, 0x21, 0x10),
-				QColor(0x20, 0x19, 0x0D), QColor(0x36, 0x29, 0x15) },
-			  { QColor(0xB5, 0x84, 0x3A), QColor(0x8E, 0x62, 0x25) },
-			  QColor(0xE0, 0xA6, 0x4E) },
-		},
-		{
-			u"\U0001F3AE"_q,
-			{ { QColor(0xD5, 0xDD, 0xF5), QColor(0xBC, 0xC0, 0xEF),
-				QColor(0xC8, 0xCE, 0xF2), QColor(0xAE, 0xAE, 0xEA) },
-			  { QColor(0x53, 0x92, 0xDD), QColor(0x8A, 0x5C, 0xD0) },
-			  QColor(0x6E, 0x77, 0xD8) },
-			{ { QColor(0x0B, 0x0E, 0x1E), QColor(0x15, 0x16, 0x33),
-				QColor(0x0F, 0x11, 0x26), QColor(0x1C, 0x1B, 0x41) },
-			  { QColor(0x3A, 0x72, 0xC4), QColor(0x68, 0x44, 0xB0) },
-			  QColor(0x93, 0x99, 0xE8) },
-		},
-	};
-	return value;
-}
-
-[[nodiscard]] DocumentData *PatternDocument(
-		not_null<Main::Session*> session) {
-	static auto cache = base::flat_map<not_null<Main::Session*>, DocumentData*>();
-	if (const auto i = cache.find(session); i != cache.end()) {
-		return i->second;
-	}
-	auto file = QFile(u":/gui/art/background.tgv"_q);
-	if (!file.open(QIODevice::ReadOnly)) {
-		return nullptr;
-	}
-	const auto bytes = file.readAll();
-	if (bytes.isEmpty()) {
-		return nullptr;
-	}
-	const auto attributes = QVector<MTPDocumentAttribute>{
-		MTP_documentAttributeFilename(MTP_string(u"pattern.tgv"_q)),
-		MTP_documentAttributeImageSize(
-			MTP_int(kPatternSide),
-			MTP_int(kPatternSide)),
-	};
-	const auto document = MTP_document(
-		MTP_flags(0),
-		MTP_long(qint64(kPatternDocumentId)),
-		MTP_long(0),
-		MTP_bytes(),
-		MTP_int(base::unixtime::now()),
-		MTP_string(u"application/x-tgwallpattern"_q),
-		MTP_long(bytes.size()),
-		MTPVector<MTPPhotoSize>(),
-		MTPVector<MTPVideoSize>(),
-		MTP_int(0),
-		MTP_vector<MTPDocumentAttribute>(attributes));
-	const auto data = session->data().document(qint64(kPatternDocumentId));
-	data->updateThumbnails(
-		InlineImageLocation(),
-		ImageWithLocation{
-			.location = ImageLocation(
-				DownloadLocation{ InMemoryLocation{ bytes } },
-				kPatternSide,
-				kPatternSide),
-			.bytes = bytes,
-			.bytesCount = int(bytes.size()),
-		},
-		ImageWithLocation(),
-		false);
-	session->data().processDocument(document);
-	auto media = data->createMediaView();
-	media->setBytes(bytes);
-	PatternMedia()[session] = std::move(media);
-	cache[session] = data;
-	return data;
-}
-
-[[nodiscard]] Data::CloudTheme::Settings SettingsFrom(
-		not_null<Main::Session*> session,
-		const Palette &palette,
-		quint64 paperId) {
-	const auto document = PatternDocument(session);
-	if (!document) {
-		return Data::CloudTheme::Settings{
-			.paper = Data::WallPaper(paperId).withBackgroundColors(
-				palette.background),
-			.accentColor = palette.accent,
-			.outgoingMessagesColors = palette.outgoing,
-		};
-	}
-	using Flag = MTPDwallPaperSettings::Flag;
-	const auto color = [&](int index) {
-		return (int(palette.background.size()) > index)
-			? MTP_int(SerializeColor(palette.background[index]))
-			: MTP_int(0);
-	};
-	const auto settings = MTP_wallPaperSettings(
-		MTP_flags(Flag::f_intensity
-			| Flag::f_background_color
-			| Flag::f_second_background_color
-			| Flag::f_third_background_color
-			| Flag::f_fourth_background_color),
-		color(0),
-		color(1),
-		color(2),
-		color(3),
-		MTP_int(kPatternIntensity),
-		MTP_int(0),
-		MTPstring());
-	auto paper = Data::WallPaper::Create(session, MTP_wallPaper(
-		MTP_long(qint64(paperId)),
-		MTP_flags(MTPDwallPaper::Flag::f_pattern
-			| MTPDwallPaper::Flag::f_settings),
-		MTP_long(0),
-		MTP_string(QString::number(paperId)),
-		MTP_document(
-			MTP_flags(0),
-			MTP_long(document->id),
-			MTP_long(0),
-			MTP_bytes(),
-			MTP_int(base::unixtime::now()),
-			MTP_string(u"application/x-tgwallpattern"_q),
-			MTP_long(document->size),
-			MTPVector<MTPPhotoSize>(),
-			MTPVector<MTPVideoSize>(),
-			MTP_int(0),
-			MTP_vector<MTPDocumentAttribute>(QVector<MTPDocumentAttribute>{
-				MTP_documentAttributeFilename(MTP_string(u"pattern.tgv"_q)),
-				MTP_documentAttributeImageSize(
-					MTP_int(kPatternSide),
-					MTP_int(kPatternSide)),
-			})),
-		settings).c_wallPaper());
-	return Data::CloudTheme::Settings{
-		.paper = paper
-			? *paper
-			: Data::WallPaper(paperId).withBackgroundColors(
-				palette.background),
-		.accentColor = palette.accent,
-		.outgoingMessagesColors = palette.outgoing,
-	};
-}
-
 [[nodiscard]] std::vector<Data::CloudTheme> BuildCatalog(
-		not_null<Main::Session*> session) {
-	const auto &specs = Catalog();
-	auto result = std::vector<Data::CloudTheme>();
-	result.reserve(specs.size());
-	auto index = quint64(0);
-	for (const auto &spec : specs) {
-		const auto id = kThemeIdBase + (++index);
-		auto theme = Data::CloudTheme();
-		theme.id = id;
-		theme.emoticon = spec.emoticon;
-		using Type = Data::CloudThemeType;
-		const auto lightPaperId = kThemePaperIdBase + index * 2;
-		const auto darkPaperId = lightPaperId + 1;
-		theme.settings.emplace(
-			Type::Light,
-			SettingsFrom(session, spec.light, lightPaperId));
-		theme.settings.emplace(
-			Type::Dark,
-			SettingsFrom(session, spec.dark, darkPaperId));
-		result.push_back(std::move(theme));
-	}
-	return result;
+        not_null<Main::Session*> session, const QJsonObject &catalog) {
+    auto result = std::vector<Data::CloudTheme>();
+    for (const auto &value : catalog.value("items").toArray()) {
+        const auto object = value.toObject();
+        auto theme = Data::CloudTheme();
+        const auto personal = object.value("emoticon").toString().isEmpty();
+        const auto idBase = personal ? quint64(1000000000) : quint64(900000000);
+        theme.id = idBase + object.value("id").toVariant().toULongLong();
+        if (personal) theme.createdBy = session->userId();
+        const auto palette = object.value("desktop_palette").toObject();
+        if (personal && !palette.isEmpty()) {
+            auto bytes = QByteArray();
+            for (auto i = palette.begin(); i != palette.end(); ++i) bytes += i.key().toUtf8() + ": " + i.value().toString().toUtf8() + ";\n";
+            theme.documentId = DocumentId(1400000000 + object.value("id").toVariant().toULongLong());
+            const auto document = session->data().processDocument(MTP_document(
+                MTP_flags(0), MTP_long(theme.documentId), MTP_long(0), MTP_bytes(), MTP_int(base::unixtime::now()),
+                MTP_string(u"application/x-tgtheme-tdesktop"_q), MTP_long(bytes.size()), MTPVector<MTPPhotoSize>(), MTPVector<MTPVideoSize>(), MTP_int(0),
+                MTP_vector<MTPDocumentAttribute>(QVector<MTPDocumentAttribute>{MTP_documentAttributeFilename(MTP_string(u"theme.tdesktop-palette"_q))})));
+            document->setDataAndCache(bytes);
+        }
+
+        theme.emoticon = object.value("emoticon").toString();
+        theme.title = object.value("title").toString();
+        theme.slug = u"foxmes-"_q + QString::number(theme.id - idBase);
+        for (const auto &entry : object.value("settings").toArray()) {
+            const auto settings = entry.toObject();
+            const auto base = settings.value("base_theme").toString();
+            auto native = Data::CloudTheme::Settings();
+            native.accentColor = QColor::fromRgb(settings.value("accent_color").toInt());
+            if (settings.value("outgoing_accent_color").isDouble()) native.outgoingAccentColor = QColor::fromRgb(settings.value("outgoing_accent_color").toInt());
+            for (const auto &color : settings.value("message_colors").toArray()) native.outgoingMessagesColors.push_back(QColor::fromRgb(color.toInt()));
+            if (settings.value("wallpaper").isObject()) {
+                const auto paper = settings.value("wallpaper").toObject();
+                native.paper = Data::WallPaper::Create(session, Wallpapers::NativePaper(session, QJsonObject{
+                    { "wallpaper", paper }, { "intensity", paper.value("intensity") },
+                }));
+            }
+            const auto type = (base == u"night"_q || base == u"tinted"_q)
+                ? Data::CloudThemeType::Dark
+                : Data::CloudThemeType::Light;
+            if (personal && !palette.isEmpty()
+                && (base == u"classic"_q || base == u"tinted"_q)) {
+                theme.settings[type] = std::move(native);
+            } else {
+                theme.settings.emplace(type, std::move(native));
+            }
+        }
+        result.push_back(std::move(theme));
+    }
+    return result;
 }
 
 } // namespace
@@ -310,11 +93,77 @@ void Apply(
 }
 
 void Request(not_null<Main::Session*> session) {
-	const auto themes = &session->data().cloudThemes();
-	if (!themes->chatThemes().empty()) {
-		return;
-	}
-	Apply(themes, BuildCatalog(session));
+    const auto weak = base::make_weak(session);
+    ClientFor(session).chatThemes([weak](QJsonDocument doc, QString error, int) {
+        const auto strong = weak.get();
+        if (!strong || !BridgeFor(strong) || !error.isEmpty() || !doc.isObject()) return;
+        Apply(&strong->data().cloudThemes(), BuildCatalog(strong, doc.object()));
+    });
+}
+
+void ApplyUserThemes(not_null<Data::CloudThemes*> themes, std::vector<Data::CloudTheme> list) {
+    themes->_list = std::move(list);
+    themes->_updates.fire({});
+}
+void RequestUserThemes(not_null<Main::Session*> session) {
+    const auto weak = base::make_weak(session);
+    ClientFor(session).userThemes([weak](QJsonDocument doc, QString error, int) {
+        const auto strong = weak.get();
+        if (strong && BridgeFor(strong) && error.isEmpty() && doc.isObject()) ApplyUserThemes(&strong->data().cloudThemes(), BuildCatalog(strong, doc.object()));
+    });
+}
+void RemoveUserTheme(not_null<Main::Session*> session, quint64 id) {
+    if (id < 1000000000) return;
+    const auto weak = base::make_weak(session);
+    ClientFor(session).deleteUserTheme(id - 1000000000, [weak](QJsonDocument, QString error, int) {
+        if (const auto strong = weak.get(); strong && error.isEmpty()) RequestUserThemes(strong);
+    });
+}
+Fn<void()> SaveUserTheme(not_null<Main::Session*> session, const Data::CloudTheme &fields, const QByteArray &palette, const QImage &background, Fn<void(Data::CloudTheme)> done, Fn<void(QString)> fail) {
+    auto values = QJsonObject();
+    const auto expression = QRegularExpression(u"([A-Za-z][A-Za-z0-9_]*):\\s*([^;]+);"_q);
+    auto matches = expression.globalMatch(QString::fromUtf8(palette));
+    while (matches.hasNext()) { const auto match = matches.next(); values[match.captured(1)] = match.captured(2).trimmed(); }
+    if (values.isEmpty()) { fail(u"THEME_FILE_INVALID"_q); return [] {}; }
+    const auto active = std::make_shared<bool>(true);
+    const auto weak = base::make_weak(session);
+    const auto id = fields.createdBy == session->userId() && fields.id >= 1000000000 ? fields.id - 1000000000 : 0;
+    // Keep the editor's values while its wallpaper upload is pending.
+    const auto editorPaper = Window::Theme::Background()->paper();
+    const auto baseTheme = Window::Theme::IsNightMode() ? "tinted" : "classic";
+    const auto accent = int(st::windowActiveTextFg->c.rgb() & 0xffffff);
+    const auto messageColor = int(st::msgOutBg->c.rgb() & 0xffffff);
+    const auto send = [=](std::optional<Data::WallPaper> paper) {
+        if (!*active || !weak.get()) return;
+        auto settings = QJsonArray();
+        const auto source = paper ? *paper : editorPaper;
+        if (!id || paper || (Data::IsCloudWallPaper(source) && !source.isLocal())) {
+            const auto wallpaper = Wallpapers::StateFromPaper(session, source).value("wallpaper");
+            settings.push_back(QJsonObject{
+                { "base_theme", baseTheme },
+                { "accent_color", accent },
+                { "outgoing_accent_color", accent },
+                { "message_colors", QJsonArray{messageColor} },
+                { "animate_message_colors", false }, { "wallpaper", wallpaper.isUndefined() ? QJsonValue(QJsonValue::Null) : wallpaper },
+            });
+        }
+        ClientFor(session).saveUserTheme(id, QJsonObject{{ "title", fields.title }, { "settings", settings }, { "desktop_palette", values }},
+[=](QJsonDocument doc, QString error, int) {
+            const auto strong = weak.get();
+            if (!*active || !strong || !BridgeFor(strong)) return;
+            if (!error.isEmpty() || !doc.isObject()) { fail(error); return; }
+            const auto list = BuildCatalog(strong, QJsonObject{{ "items", QJsonArray{doc.object()} }});
+            if (list.empty()) { fail(u"THEME_FILE_INVALID"_q); return; }
+            done(list.front());
+        });
+    };
+    if (background.isNull()) send(std::nullopt);
+    else Wallpapers::Upload(session, background, [=](std::optional<Data::WallPaper> paper) {
+        if (!paper) { if (*active) fail(u"WALLPAPER_UPLOAD_FAILED"_q); return; }
+        send(paper);
+    });
+
+    return [active] { *active = false; };
 }
 
 void Save(not_null<PeerData*> peer, const QString &emoticon) {
@@ -333,15 +182,18 @@ void Save(not_null<PeerData*> peer, const QString &emoticon) {
 		if (!strong || chatId <= 0 || !BridgeFor(strong)) {
 			return;
 		}
-		ClientFor(strong).setChatWallpaper(
-			chatId,
-			QString(),
-			false,
-			0,
-			false,
-			QString(),
-			nullptr);
-		ClientFor(strong).setChatTheme(chatId, emoticon, QString(), nullptr);
+        ClientFor(strong).setChatAppearance(chatId, QJsonObject{
+            { "theme_emoticon", emoticon }, { "reset_wallpaper", "self" },
+        }, [weak, chatId](QJsonDocument doc, QString error, int) {
+            const auto strong = weak.get();
+            if (!strong || !BridgeFor(strong)) return;
+            if (error.isEmpty() && doc.isObject()) {
+                BridgeFor(strong)->applyAppearanceResult(chatId, doc.object());
+            } else {
+                BridgeFor(strong)->reloadChats();
+                if (const auto controller = strong->tryResolveWindow()) controller->showToast(error);
+            }
+        });
 	});
 }
 

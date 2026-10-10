@@ -1,13 +1,15 @@
 #include "custom_backend/native_history_loader.h"
 
-#include "logs.h"
 #include "custom_backend/native_bridge.h"
+#include "custom_backend/native_mtp_router.h"
 #include "custom_backend/native_runtime.h"
 
 #include "base/call_delayed.h"
-#include "data/data_msg_id.h"
-#include "dialogs/dialogs_key.h"
-#include "history/history.h"
+#include "base/timer.h"
+#include "data/data_peer.h"
+#include "data/data_session.h"
+#include "main/main_session.h"
+#include "mtproto/details/mtproto_serialized_request.h"
 #include "ui/chat/chat_style.h"
 #include "ui/effects/radial_animation.h"
 #include "ui/painter.h"
@@ -20,13 +22,15 @@ namespace CustomBackend {
 namespace {
 
 constexpr auto kLoadingDelay = crl::time(200);
+constexpr auto kLoadingCheckPeriod = crl::time(50);
 
-[[nodiscard]] Fn<void()> ShowLoading(
-        const HistoryLoadingView &view,
-        not_null<History*> history) {
-    const auto area = view.area.get();
-    const auto controller = view.controller.get();
-    const auto overlay = Ui::CreateChild<Ui::RpWidget>(area);
+} // namespace
+
+void ShowHistoryLoading(
+        not_null<Window::SessionController*> controller,
+        not_null<Ui::ElasticScroll*> area,
+        Fn<bool()> waiting) {
+    const auto overlay = Ui::CreateChild<Ui::RpWidget>(area.get());
     overlay->setAttribute(Qt::WA_TransparentForMouseEvents);
     overlay->hide();
     area->sizeValue() | rpl::on_next([=](QSize size) {
@@ -60,68 +64,79 @@ constexpr auto kLoadingDelay = crl::time(200);
             st.thickness);
     }, overlay->lifetime());
 
-    const auto weak = QPointer<Ui::RpWidget>(overlay);
-    const auto remove = [=] {
-        if (const auto strong = weak.data()) {
-            strong->hide();
-            strong->deleteLater();
+    const auto check = overlay->lifetime().make_state<base::Timer>([=] {
+        if (!waiting()) {
+            overlay->hide();
+            overlay->deleteLater();
         }
-    };
-    controller->activeChatChanges(
-    ) | rpl::filter([=](const Dialogs::Key &key) {
-        return key.history() != history.get();
-    }) | rpl::take(1) | rpl::on_next(remove, overlay->lifetime());
-    base::call_delayed(kLoadingDelay, overlay, [=] {
-        overlay->show();
-        overlay->raise();
-        animation->start();
     });
-    return remove;
+    check->callEach(kLoadingCheckPeriod);
+    base::call_delayed(kLoadingDelay, overlay, [=] {
+        if (waiting()) {
+            overlay->show();
+            overlay->raise();
+            animation->start();
+        }
+    });
 }
+
+}
+
+namespace CustomBackend::HistoryPages {
+namespace {
+
+using SerializedRequest = MTP::details::SerializedRequest;
 
 } // namespace
 
-bool WidgetHistoryRequest(
-        not_null<Main::Session*> session,
-        not_null<History*> history,
-        MsgId showAtMsgId,
-        Data::LoadDirection direction,
-        Fn<void()> done,
-        Fn<void(const MTP::Error &)> failed,
-        std::optional<HistoryLoadingView> loading) {
-    if (!Enabled()) {
-        return false;
+bool Intercepts(const SerializedRequest &request) {
+    return Mtp::RequestType(request) == mtpc_messages_getHistory;
+}
+
+void Intercept(
+        not_null<MTP::Instance*> instance,
+        mtpRequestId requestId,
+        const SerializedRequest &request) {
+    const auto answer = Mtp::Answer(instance, requestId);
+    auto reader = Mtp::Reader(request);
+    const auto peer = reader.read<MTPInputPeer>();
+    const auto offsetId = reader.read<MTPint>().v;
+    const auto offsetDate = reader.read<MTPint>().v;
+    const auto addOffset = reader.read<MTPint>().v;
+    const auto limit = reader.read<MTPint>().v;
+    const auto session = Mtp::SessionFor(instance);
+    if (!reader.ok() || !session) {
+        answer.fail(u"PEER_ID_INVALID"_q);
+        return;
     }
-    const auto bridge = BridgeFor(session);
-    if (!bridge) {
-        return false;
-    }
-    auto aroundId = ShowAtTheEndMsgId.bare;
-    if (showAtMsgId > 0 && showAtMsgId < ServerMaxMsgId) {
-        aroundId = showAtMsgId.bare;
-    } else if (showAtMsgId == ShowAtUnreadMsgId) {
-        if (const auto around = history->loadAroundId()) {
-            aroundId = around.bare;
+    crl::on_main(session, [=] {
+        const auto bridge = BridgeFor(session);
+        const auto resolved = Data::PeerFromInputMTP(&session->data(), peer);
+        if (!bridge || !resolved) {
+            answer.fail(u"PEER_ID_INVALID"_q);
+            return;
         }
-    }
-    if (loading) {
-        const auto remove = ShowLoading(*loading, history);
-        done = [=, done = std::move(done)] {
-            remove();
-            if (done) done();
+        const auto reply = [=](QVector<MTPMessage> messages) {
+            answer.done(MTP_messages_messages(
+                MTP_vector<MTPMessage>(std::move(messages)),
+                MTP_vector<MTPForumTopic>(),
+                MTP_vector<MTPChat>(),
+                MTP_vector<MTPUser>()));
         };
-        failed = [=, failed = std::move(failed)](const MTP::Error &error) {
-            remove();
-            if (failed) failed(error);
-        };
-    }
-    bridge->loadHistory(
-        history,
-        aroundId,
-        direction,
-        std::move(done),
-        std::move(failed));
-    return true;
+        if (offsetDate) {
+            reply({});
+            return;
+        }
+        bridge->requestHistoryMessages(
+            session->data().history(resolved),
+            {
+                .offsetId = MsgId(offsetId),
+                .addOffset = addOffset,
+                .limit = limit,
+            },
+            reply,
+            [=](const QString &type) { answer.fail(type); });
+    });
 }
 
 }

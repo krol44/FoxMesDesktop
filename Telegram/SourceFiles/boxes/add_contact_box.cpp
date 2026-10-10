@@ -254,6 +254,9 @@ void ShowAddParticipantsError(
 		} else if (error == u"USER_KICKED"_q) {
 			// Trying to return a user who was kicked by admin.
 			return tr::lng_cant_invite_banned(tr::now);
+		} else if (CustomBackend::Enabled()
+			&& error == u"CHAT_REQUEST_REQUIRED"_q) {
+			return tr::lng_fox_mes_chat_request_add_required(tr::now);
 		} else if (error == u"USER_NOT_MUTUAL_CONTACT"_q) {
 			// Trying to return user who does not have me in contacts.
 			return tr::lng_failed_add_not_mutual(tr::now);

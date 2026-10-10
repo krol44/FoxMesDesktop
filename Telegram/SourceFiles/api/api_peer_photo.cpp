@@ -301,6 +301,11 @@ void PeerPhoto::updateSelf(
 		not_null<PhotoData*> photo,
 		Data::FileOrigin origin,
 		Fn<void()> done) {
+    if (CustomBackend::Enabled()) {
+        CustomBackend::ChangeProfilePhoto(_session, photo->id, false, std::move(done));
+        return;
+    }
+
 	const auto send = [=](auto resend) -> void {
 		const auto usedFileReference = photo->fileReference();
 		_api.request(MTPphotos_UpdateProfilePhoto(
@@ -336,7 +341,10 @@ void PeerPhoto::upload(
 		UploadType type,
 		Fn<void()> done) {
 	if (CustomBackend::Enabled() && !photo.video) {
-		CustomBackend::UploadPeerPhoto(peer, std::move(photo.image), std::move(done));
+		CustomBackend::UploadPeerPhoto(peer, std::move(photo.image), [=] {
+            _uploadDone.fire_copy(peer);
+            if (done) done();
+        }, [=] { _uploadFailed.fire_copy(peer); });
 		return;
 	}
 	peer = peer->migrateToOrMe();
@@ -582,6 +590,10 @@ void PeerPhoto::cancelUpload(not_null<PeerData*> peer) {
 }
 
 void PeerPhoto::clear(not_null<PhotoData*> photo) {
+    if (CustomBackend::Enabled() && (!photo->peer || photo->peer == _session->user())) {
+        CustomBackend::ChangeProfilePhoto(_session, photo->id, true);
+        return;
+    }
 	const auto self = _session->user();
 	if (self->userpicPhotoId() == photo->id) {
 		const auto photoId = photo->id;
@@ -655,6 +667,10 @@ void PeerPhoto::clearPersonal(not_null<UserData*> user) {
 }
 
 void PeerPhoto::set(not_null<PeerData*> peer, not_null<PhotoData*> photo) {
+    if (CustomBackend::Enabled() && peer->isSelf()) {
+        CustomBackend::ChangeProfilePhoto(_session, photo->id, false);
+        return;
+    }
 	if (peer->userpicPhotoId() == photo->id) {
 		return;
 	}
@@ -820,6 +836,11 @@ void PeerPhoto::ready(FullMsgId msgId, ReadyFiles &&files) {
 void PeerPhoto::requestUserPhotos(
 		not_null<UserData*> user,
 		UserPhotoId afterId) {
+    if (CustomBackend::Enabled()) {
+        CustomBackend::RequestProfilePhotos(user, afterId);
+        return;
+    }
+
 	if (_userPhotosRequests.contains(user)) {
 		return;
 	}

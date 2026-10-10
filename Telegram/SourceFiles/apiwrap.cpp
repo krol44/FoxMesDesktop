@@ -3388,6 +3388,10 @@ void ApiWrap::requestRecentStickers(
 }
 
 void ApiWrap::requestFavedStickers(std::optional<TimeId> now) {
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Stickers::RequestFavorites(_session);
+		return;
+	}
 	if (now) {
 		if (!_session->data().stickers().favedUpdateNeeded(*now)
 			|| _favedStickersUpdateRequest) {
@@ -3694,7 +3698,7 @@ void ApiWrap::requestHistory(
 		SliceType slice) {
 	if (CustomBackend::Enabled()) {
 		if (const auto bridge = CustomBackend::BridgeFor(_session)) {
-			bridge->loadHistory(history, messageId.bare, slice);
+			bridge->requestHistorySlice(history, messageId.bare, slice);
 		}
 		return;
 	}

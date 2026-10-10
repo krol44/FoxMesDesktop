@@ -90,16 +90,20 @@ introFoxMesLogoSize: 40px;
 introFoxMesHeaderHeight: 44px;
 introFoxMesHeaderSkip: 12px;
 introFoxMesNameFont: font(22px semibold);
-introFoxMesDividerHeight: 22px;
-introFoxMesDividerSkip: 14px;
-introFoxMesBadgeSize: 22px;
-introFoxMesBadgeFont: font(13px semibold);
-introFoxMesDividerFirstTop: 54px;
-introFoxMesButtonsTop: 84px;
-introFoxMesButtonsSkip: 10px;
-introFoxMesDividerSecondTop: 134px;
-introFoxMesFieldTop: 162px;
-introFoxMesStepButton: RoundButton(introNextButton) {
+introFoxMesAboutTop: 58px;
+introFoxMesAbout: FlatLabel(introDescription) {
+	align: align(top);
+}
+introFoxMesCodeTop: 108px;
+introFoxMesCodeHeight: 56px;
+introFoxMesCodeFont: font(40px semibold);
+introFoxMesCodeGroupSkip: 14px;
+introFoxMesCopyTop: 170px;
+introFoxMesStatusTop: 224px;
+introFoxMesStatus: FlatLabel(introDescription) {
+	align: align(top);
+}
+introFoxMesCopyButton: RoundButton(introNextButton) {
 	textFg: lightButtonFg;
 	textFgOver: lightButtonFgOver;
 	numbersTextFg: lightButtonFg;

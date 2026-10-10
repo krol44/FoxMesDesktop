@@ -133,6 +133,8 @@ PRIVATE
     custom_backend/api_client.cpp
     custom_backend/api_client.h
     custom_backend/dev_profile.h
+    custom_backend/error_alerts.cpp
+    custom_backend/error_alerts.h
     custom_backend/github_update.cpp
     custom_backend/github_update.h
     custom_backend/github_update_ui.cpp
@@ -152,6 +154,7 @@ PRIVATE
     custom_backend/native_delete_adapter.h
     custom_backend/native_chat_state_adapter.cpp
     custom_backend/native_chat_state_adapter.h
+    custom_backend/saved_reminder_state.h
     custom_backend/native_calls_adapter.cpp
     custom_backend/native_calls_adapter.h
     custom_backend/native_conference_adapter.cpp
@@ -166,10 +169,16 @@ PRIVATE
     custom_backend/topic_channel_links.h
     custom_backend/topic_channels_prompt.cpp
     custom_backend/topic_channels_prompt.h
+    custom_backend/appearance_editor.cpp
+    custom_backend/appearance_editor.h
     custom_backend/native_appearance_adapter.cpp
     custom_backend/native_appearance_adapter.h
+    custom_backend/native_folders_adapter.cpp
+    custom_backend/native_folders_adapter.h
     custom_backend/native_mtp_router.cpp
     custom_backend/native_mtp_router.h
+    custom_backend/native_chat_request_adapter.cpp
+    custom_backend/native_chat_request_adapter.h
     custom_backend/native_contacts_adapter.cpp
     custom_backend/native_contacts_adapter.h
     custom_backend/native_meet_adapter.cpp

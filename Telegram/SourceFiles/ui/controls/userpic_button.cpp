@@ -384,7 +384,7 @@ void UserpicButton::choosePhotoLocally() {
 	};
 	const auto user = _peer ? _peer->asUser() : nullptr;
 	const auto addUserpicBuilder = [&](ChosenType type) {
-		if (!_controller || (CustomBackend::HideGroupExtras && !user)) {
+		if (!_controller || CustomBackend::Enabled() || (CustomBackend::HideGroupExtras && !user)) {
 			return;
 		}
 		const auto done = [=](UserpicBuilder::Result data) {

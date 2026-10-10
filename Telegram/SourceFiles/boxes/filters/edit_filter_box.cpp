@@ -6,6 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/filters/edit_filter_box.h"
+#include "custom_backend/native_folders_adapter.h"
+#include "custom_backend/native_runtime.h"
 
 #include "apiwrap.h"
 #include "base/event_filter.h"
@@ -512,6 +514,9 @@ void EditFilterBox(
 		Fn<void(
 			const Data::ChatFilter &data,
 			Fn<void(Data::ChatFilter)> next)> saveAnd) {
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Folders::BindEditor(&window->session(), filter, doneCallback, saveAnd);
+	}
 	using namespace rpl::mappers;
 	constexpr auto kColorsCount = 8;
 	constexpr auto kNoTag = kColorsCount - 1;
@@ -1006,6 +1011,7 @@ void EditFilterBox(
 		).withColorIndex(colorIndex);
 	};
 
+	if (CustomBackend::Folders::SharingEnabled(&window->session())) {
 	Ui::AddSubsectionTitle(
 		content,
 		rpl::conditional(
@@ -1093,6 +1099,8 @@ void EditFilterBox(
 			state->hasLinks.value(),
 			tr::lng_filters_link_about_many(),
 			tr::lng_filters_link_about()));
+
+	}
 
 	const auto show = box->uiShow();
 	const auto refreshPreviews = [=] {

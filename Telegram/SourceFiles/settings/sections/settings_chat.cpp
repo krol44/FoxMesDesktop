@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/sections/settings_chat.h"
 
 #include "custom_backend/native_runtime.h"
+#include "custom_backend/native_wallpaper_adapter.h"
 #include "settings/settings_common_session.h"
 
 #include "base/timer_rpl.h"
@@ -2770,6 +2771,10 @@ void SetupThemeSettings(
 			st::settingsButton,
 			{ &st::menuIconNightMode });
 		button->setClickedCallback([=] {
+			if (CustomBackend::Enabled()) {
+				CustomBackend::Wallpapers::ToggleSystemNightMode(controller);
+				return;
+			}
 			const auto now = !settings->systemDarkModeEnabled();
 			if (now && Window::Theme::Background()->editingTheme()) {
 				controller->show(Ui::MakeInformBox(

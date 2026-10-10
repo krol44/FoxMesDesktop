@@ -100,29 +100,35 @@ MTPhelp_PeerColors Palette(const ColorCatalog &catalog, bool profile) {
     }
     return MTP_help_peerColors(MTP_int(catalog.hash), MTP_vector<MTPhelp_PeerColorOption>(options));
 }
-void Run(not_null<Main::Session*> session) {
-    auto &state = Get(session);
-    if (state.queue.empty()) return;
-    const auto body = state.queue.front().body;
+void Persist(not_null<Main::Session*> session, QJsonObject body, Fn<void(bool)> done) {
     const auto weak = base::make_weak(session);
-    const auto finish = [weak](QJsonDocument doc, QString error, int status) {
+    const auto finish = [weak, body, done](QJsonDocument doc, QString error, int status) {
         const auto session = weak.get();
         if (!session) return;
-        auto &state = Get(session);
-        if (state.queue.empty()) return;
-        const auto answer = state.queue.front().answer;
-        if (error.isEmpty() && status >= 200 && status < 300 && doc.object().contains("peer_appearance")) {
+        auto confirmed = error.isEmpty() && status >= 200 && status < 300
+            && doc.object().value("peer_appearance").isObject();
+        if (confirmed) {
+            const auto value = PeerAppearance::Parse(doc.object().value("peer_appearance").toObject());
+            for (const auto profile : { false, true }) {
+                const auto key = profile ? "profile" : "name";
+                if (!body.contains(key)) continue;
+                const auto choice = body.value(key).toObject();
+                const auto color = choice.value("color_id").isDouble()
+                    ? std::make_optional(choice.value("color_id").toInt()) : std::nullopt;
+                const auto icon = choice.value("background_emoji_id").toVariant().toULongLong();
+                confirmed = confirmed && color == (profile ? value.profile : value.name)
+                    && icon == (profile ? value.profileBackground : value.background);
+            }
+        }
+        if (confirmed) {
             Apply(session, doc.object());
             RememberUser(session, doc.object());
-            answer.done(MTP_boolTrue());
         } else {
-            answer.fail(u"APPEARANCE_SAVE_FAILED"_q, 500);
             ClientFor(session).me([weak](QJsonDocument doc, QString error, int status) {
                 if (weak && error.isEmpty() && status == 200) { Apply(weak.get(), doc.object()); RememberUser(weak.get(), doc.object()); }
             });
         }
-        state.queue.pop_front();
-        Run(session);
+        done(confirmed);
     };
     ClientFor(session).communityRequest("PATCH", u"/me/appearance"_q, body,
         [weak, body, finish](QJsonDocument doc, QString error, int status) {
@@ -140,6 +146,22 @@ void Run(not_null<Main::Session*> session) {
                     } else { finish(journal, error, status); }
                 });
         });
+}
+void Run(not_null<Main::Session*> session) {
+    auto &state = Get(session);
+    if (state.queue.empty()) return;
+    const auto weak = base::make_weak(session);
+    Persist(session, state.queue.front().body, [weak](bool ok) {
+        const auto session = weak.get();
+        if (!session) return;
+        auto &state = Get(session);
+        if (state.queue.empty()) return;
+        const auto answer = state.queue.front().answer;
+        if (ok) answer.done(MTP_boolTrue());
+        else answer.fail(u"APPEARANCE_SAVE_FAILED"_q, 500);
+        state.queue.pop_front();
+        Run(session);
+    });
 }
 void Catalog(not_null<Main::Session*> session, Fn<void(QVector<MTPlong>, QVector<MTPDocument>)> done) {
     const auto weak = base::make_weak(session);
@@ -188,6 +210,10 @@ void Catalog(not_null<Main::Session*> session, Fn<void(QVector<MTPlong>, QVector
         });
 }
 } // namespace
+void Save(not_null<Main::Session*> session, QJsonObject body, Fn<void(bool)> done) {
+    body.insert("operation_id", QUuid::createUuid().toString(QUuid::WithoutBraces));
+    Persist(session, std::move(body), std::move(done));
+}
 void Load(not_null<Main::Session*> session) {
     auto &state = Get(session);
     if (state.loading) return;

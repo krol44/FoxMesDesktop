@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "chat_helpers/compose/compose_show.h"
 #include "core/ui_integration.h"
 #include "custom_backend/native_runtime.h"
+#include "custom_backend/appearance_editor.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "data/stickers/data_stickers.h"
 #include "data/data_changes.h"
@@ -2122,6 +2123,12 @@ void EditPeerColorSection(
 				tr::marked));
 		}
 	}, button->lifetime());
+
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Appearance::BindEditor(box, button, show, peer,
+			state->index.value(), state->emojiId.value(), false);
+		return;
+	}
 }
 
 void EditPeerProfileColorSection(
@@ -2396,6 +2403,12 @@ void EditPeerProfileColorSection(
 				tr::marked));
 		}
 	}, button->lifetime());
+
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Appearance::BindEditor(box, button, show, peer,
+			state->index.value(), state->patternEmojiId.value(), true);
+		return;
+	}
 }
 
 void EditPeerColorBox(

@@ -7,6 +7,8 @@
 #include <QtCore/QSysInfo>
 
 #include <QtCore/QBuffer>
+#include <QtCore/QCryptographicHash>
+#include <QtCore/QSettings>
 #include <QtCore/QDeadlineTimer>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
@@ -85,6 +87,8 @@ QString UploadTypeFor(const QString &mime, bool forceFile, const QString &kind) 
         return u"audio-message"_q;
     } else if (kind == u"wallpaper"_q) {
         return u"wallpaper-chat"_q;
+    } else if (kind == u"avatar"_q) {
+        return u"avatar"_q;
     } else if (kind == u"contact_photo"_q) {
         return u"contact-photo"_q;
     } else if (forceFile) {
@@ -266,12 +270,11 @@ void ApiClient::startDevice(Callback done) {
     }, false);
 }
 
-void ApiClient::exchangeDevice(const QString &request, const QString &code, Callback done) {
+void ApiClient::pollDevice(const QString &request, Callback done) {
     jsonRequest("POST", "/auth/device/exchange", QJsonDocument(QJsonObject{
         {"request", request},
-        {"code", code},
     }), [this, done = std::move(done)](QJsonDocument doc, QString err, int status) mutable {
-        if (err.isEmpty()) acceptTokens(doc);
+        if (err.isEmpty() && status == 200) acceptTokens(doc);
         if (done) done(std::move(doc), std::move(err), status);
     }, false);
 }
@@ -323,6 +326,20 @@ void ApiClient::setUserContact(
         std::move(done));
 }
 
+
+void ApiClient::profilePhotos(qint64 userId, PhotoId afterId, Callback done) {
+    jsonRequest("GET", QString("/users/%1/photos?max_id=%2&limit=100").arg(userId).arg(afterId), {}, std::move(done));
+}
+
+void ApiClient::changeProfilePhoto(PhotoId id, bool remove, qint64 revision, Callback done) {
+    auto body = QJsonObject{
+        {"operation_id", QUuid::createUuid().toString(QUuid::WithoutBraces)},
+        {"expected_revision", revision},
+    };
+    if (remove) body.insert("photo_ids", QJsonArray{QString::number(id)});
+    jsonRequest(remove ? "DELETE" : "PUT", remove ? u"/me/photos"_q : QString("/me/photos/%1/main").arg(id), QJsonDocument(body), std::move(done));
+}
+
 void ApiClient::users(const QString &query, Callback done) {
     QUrlQuery q;
     if (!query.isEmpty()) q.addQueryItem("q", query);
@@ -359,10 +376,29 @@ void ApiClient::savedChat(Callback done) {
     jsonRequest("GET", "/chats/saved", {}, std::move(done));
 }
 
-void ApiClient::createDirect(qint64 userId, Callback done) {
+void ApiClient::directChat(qint64 userId, Callback done) {
     jsonRequest("POST", "/chats/direct", QJsonDocument(QJsonObject{
         {"user_id", userId},
     }), std::move(done));
+}
+
+void ApiClient::requestChat(qint64 userId, Callback done) {
+    jsonRequest("POST", "/chats/direct/request", QJsonDocument(QJsonObject{
+        {"user_id", userId},
+        {"operation_id", QUuid::createUuid().toString(QUuid::WithoutBraces)},
+    }), std::move(done));
+}
+
+void ApiClient::answerChatRequest(qint64 chatId, bool accept, Callback done) {
+    jsonRequest(
+        "POST",
+        QString("/chats/%1/request/%2"
+            ).arg(chatId
+            ).arg(accept ? u"accept"_q : u"decline"_q),
+        QJsonDocument(QJsonObject{
+            {"operation_id", QUuid::createUuid().toString(QUuid::WithoutBraces)},
+        }),
+        std::move(done));
 }
 
 void ApiClient::forwardMessages(
@@ -1258,6 +1294,25 @@ void ApiClient::savePinnedOrder(const QList<qint64> &orderedIds, Callback done) 
     }), std::move(done));
 }
 
+void ApiClient::userThemes(Callback done) {
+    jsonRequest("GET", u"/themes"_q, {}, std::move(done));
+}
+void ApiClient::saveUserTheme(qint64 id, QJsonObject body, Callback done) {
+    body["operation_id"] = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    appearanceRequest(id ? "PUT" : "POST", id ? u"/themes/%1"_q.arg(id) : u"/themes"_q, std::move(body), std::move(done));
+}
+void ApiClient::deleteUserTheme(qint64 id, Callback done) {
+    appearanceRequest("DELETE", u"/themes/%1"_q.arg(id), {}, std::move(done));
+}
+void ApiClient::setDefaultWallpaperState(QJsonObject body, Callback done) {
+    body["operation_id"] = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    appearanceRequest("PUT", u"/wallpaper"_q, std::move(body), std::move(done));
+}
+
+void ApiClient::chatThemes(Callback done) {
+    jsonRequest("GET", QStringLiteral("/chat-themes"), {}, std::move(done));
+}
+
 void ApiClient::wallpapers(Callback done) {
     jsonRequest("GET", QStringLiteral("/wallpapers"), {}, std::move(done));
 }
@@ -1321,6 +1376,47 @@ void ApiClient::setChatNoWallpaper(
     }), std::move(done));
 }
 
+void ApiClient::appearanceRequest(const QByteArray &method, const QString &path, QJsonObject body, Callback done) {
+    const auto owner = meId();
+    const auto base = baseUrl();
+    const auto identity = base.toString() + u":"_q + QString::number(owner) + u":"_q + QString::fromLatin1(method) + path;
+    const auto key = u"FoxMes/appearancePending/"_q + QString::fromLatin1(QCryptographicHash::hash(identity.toUtf8(), QCryptographicHash::Sha256).toHex());
+    QSettings settings;
+    auto previous = QJsonDocument::fromJson(settings.value(key).toByteArray()).object();
+    const auto previousOperation = previous.take("operation_id").toString();
+    body.remove("operation_id");
+    body.insert("operation_id", !previousOperation.isEmpty() && previous == body ? previousOperation : QUuid::createUuid().toString(QUuid::WithoutBraces));
+    const auto operation = body.value("operation_id").toString();
+    settings.setValue(key, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    settings.sync();
+    const auto weak = QPointer<ApiClient>(this);
+    auto finish = [weak, owner, base, key, operation, done = std::move(done)](QJsonDocument doc, QString error, int status) mutable {
+        if (!weak || weak->meId() != owner || weak->baseUrl() != base) return;
+        if (error.isEmpty() || !IsTransportFailure(status)) {
+            QSettings settings;
+            if (QJsonDocument::fromJson(settings.value(key).toByteArray()).object().value("operation_id").toString() == operation) settings.remove(key);
+        }
+        if (done) done(std::move(doc), std::move(error), status);
+    };
+    jsonRequest(method, path, QJsonDocument(body),
+        [weak, owner, base, operation, method, path, body, finish = std::move(finish)](QJsonDocument doc, QString error, int status) mutable {
+            if (!weak || weak->meId() != owner || weak->baseUrl() != base) return;
+            if (error.isEmpty() || !IsTransportFailure(status)) { finish(std::move(doc), std::move(error), status); return; }
+            weak->operationResult(operation,
+                [weak, owner, base, method, path, body, finish = std::move(finish)](QJsonDocument journal, QString error, int status) mutable {
+                    if (!weak || weak->meId() != owner || weak->baseUrl() != base) return;
+                    const auto object = journal.object();
+                    if (error.isEmpty() && object.value("status").toString() == u"done"_q) finish(QJsonDocument(object.value("result").toObject()), {}, 200);
+                    else if (error.isEmpty() && object.value("status").toString() == u"unknown"_q) weak->jsonRequest(method, path, QJsonDocument(body), std::move(finish));
+                    else finish({}, error.isEmpty() ? u"Appearance confirmation unavailable"_q : error, 0);
+                });
+        });
+}
+
+void ApiClient::setChatAppearance(qint64 chatId, QJsonObject body, Callback done) {
+    appearanceRequest("PUT", QString("/chats/%1/appearance").arg(chatId), std::move(body), std::move(done));
+}
+
 void ApiClient::setChatTheme(
         qint64 chatId,
         const QString &emoticon,
@@ -1331,6 +1427,16 @@ void ApiClient::setChatTheme(
         {"operation_id", operationId.isEmpty()
             ? QUuid::createUuid().toString(QUuid::WithoutBraces)
             : operationId},
+    }), std::move(done));
+}
+
+void ApiClient::stickerFavorites(Callback done) {
+    jsonRequest("GET", "/stickers/favorites", {}, std::move(done));
+}
+
+void ApiClient::setStickerFavorite(qint64 emojiId, bool favorited, const QString &operationId, Callback done) {
+    jsonRequest("PUT", QString("/stickers/favorites/%1").arg(emojiId), QJsonDocument(QJsonObject{
+        {"favorited", favorited}, {"operation_id", operationId},
     }), std::move(done));
 }
 
@@ -1393,6 +1499,13 @@ ApiClient::CancelHandle ApiClient::uploadDevice(
     part.setBodyDevice(device);
     device->setParent(multipart);
     multipart->append(part);
+    if (kind == u"avatar"_q) {
+        QHttpPart operation;
+        operation.setHeader(QNetworkRequest::ContentDispositionHeader, u"form-data; name=\"operation_id\""_q);
+        operation.setBody(QUuid::createUuid().toString(QUuid::WithoutBraces).toUtf8());
+        multipart->append(operation);
+    }
+
 
     QUrlQuery query;
     AddUploadTarget(query, target);
@@ -1497,6 +1610,7 @@ ApiClient::CancelHandle ApiClient::uploadPrepared(
         const QString &kind) {
     const auto type = UploadTypeFor(mime, forceFile, kind);
     if (type == u"image"_q
+        || type == u"avatar"_q
         || type == u"wallpaper-chat"_q
         || type == u"contact-photo"_q) {
         return uploadDevice(name, device, mime, target, forceFile, std::move(done), std::move(progress), kind);

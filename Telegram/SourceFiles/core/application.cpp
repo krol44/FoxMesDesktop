@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "custom_backend/native_deep_link.h"
 #include "custom_backend/native_runtime.h"
+#include "custom_backend/native_wallpaper_adapter.h"
 
 #include "data/data_abstract_structure.h"
 #include "data/data_channel.h"
@@ -557,6 +558,10 @@ void Application::startSettingsAndBackground() {
 }
 
 void Application::checkSystemDarkMode() {
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Wallpapers::CheckSystemNightMode();
+		return;
+	}
 	const auto maybeDarkMode = settings().systemDarkMode();
 	const auto darkModeEnabled = settings().systemDarkModeEnabled();
 	const auto needToSwitch = darkModeEnabled

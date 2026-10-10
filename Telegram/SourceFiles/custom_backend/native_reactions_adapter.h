@@ -1,5 +1,6 @@
 #pragma once
 
+#include "custom_backend/native_mtp_router.h"
 #include <QJsonArray>
 #include <QString>
 #include <QStringList>
@@ -67,6 +68,10 @@ void SetMaxSelectedReactions(not_null<Main::Session*> session, int value);
 [[nodiscard]] std::vector<Data::Reaction> BuildAvailableReactions(
 	not_null<Main::Session*> session);
 
+void RequestFavorite(not_null<Main::Session*> session);
+void ReceiveFavorite(not_null<Main::Session*> session, const QJsonObject &state);
+[[nodiscard]] bool Intercepts(const MTP::details::SerializedRequest &request);
+void Intercept(not_null<MTP::Instance*> instance, mtpRequestId requestId, const MTP::details::SerializedRequest &request);
 void ClearSession(not_null<Main::Session*> session);
 
 }

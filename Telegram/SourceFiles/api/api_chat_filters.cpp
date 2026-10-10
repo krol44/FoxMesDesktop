@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "api/api_chat_filters.h"
+#include "custom_backend/native_folders_adapter.h"
 
 #include "api/api_text_entities.h"
 #include "apiwrap.h"
@@ -884,6 +885,9 @@ void CheckFilterInvite(
 		not_null<Window::SessionController*> controller,
 		const QString &slug) {
 	const auto session = &controller->session();
+	if (!CustomBackend::Folders::SharingEnabled(session)) {
+		return;
+	}
 	const auto weak = base::make_weak(controller);
 	session->api().checkFilterInvite(slug, [=](
 			const MTPchatlists_ChatlistInvite &result) {

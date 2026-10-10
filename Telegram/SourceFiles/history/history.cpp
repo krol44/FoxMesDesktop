@@ -1468,6 +1468,7 @@ void History::applyServiceChanges(
 			}
 		}
 	}, [&](const MTPDmessageActionSetChatTheme &data) {
+        if (CustomBackend::Enabled()) return;
 		data.vtheme().match([&](const MTPDchatTheme &data) {
 			peer->setThemeToken(qs(data.vemoticon()));
 		}, [&](const MTPDchatThemeUniqueGift &data) {
@@ -1475,6 +1476,7 @@ void History::applyServiceChanges(
 				owner().cloudThemes().processGiftThemeGetToken(data));
 		});
 	}, [&](const MTPDmessageActionSetChatWallPaper &data) {
+        if (CustomBackend::Enabled()) return;
 		if (item->out() || data.is_for_both()) {
 			peer->setWallPaper(
 				Data::WallPaper::Create(&session(), data.vwallpaper()),
@@ -2075,6 +2077,10 @@ void History::calculateFirstUnreadMessage() {
 	if (!unreadCount() || !trackUnreadMessages()) {
 		return;
 	}
+	if (CustomBackend::Enabled() && peer->isSelf()) {
+		_firstUnreadView = CustomBackend::FirstUnreadSavedReminder(this);
+		return;
+	}
 	for (const auto &block : ranges::views::reverse(blocks)) {
 		for (const auto &message : ranges::views::reverse(block->messages)) {
 			const auto item = message->data();
@@ -2117,6 +2123,9 @@ bool History::unreadCountRefreshNeeded(MsgId readTillId) const {
 }
 
 std::optional<int> History::countStillUnreadLocal(MsgId readTillId) const {
+	if (CustomBackend::Enabled() && peer->isSelf()) {
+		return CustomBackend::CountUnreadSavedReminders(this, readTillId);
+	}
 	if (!folderKnown()) {
 		return std::nullopt;
 	}
@@ -3446,6 +3455,9 @@ bool History::isUnknownMessageDeleted(MsgId messageId) const {
 
 bool History::isServerSideUnread(not_null<const HistoryItem*> item) const {
 	Expects(item->isRegular());
+	if (CustomBackend::Enabled() && peer->isSelf()) {
+		return CustomBackend::IsUnreadSavedReminder(item);
+	}
 
 	return item->out()
 		? (!_outboxReadBefore || (item->id >= *_outboxReadBefore))

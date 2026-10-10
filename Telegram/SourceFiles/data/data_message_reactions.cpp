@@ -403,6 +403,10 @@ Reactions::Reactions(not_null<Session*> owner)
 	}, _lifetime);
 
 	crl::on_main(&owner->session(), [=] {
+		if (CustomBackend::Enabled()) {
+			CustomBackend::Reactions::BindFavorite(&owner->session(), this);
+			return;
+		}
 		// applyFavorite accesses not yet constructed parts of session.
 		rpl::single(rpl::empty) | rpl::then(
 			_owner->session().mtp().config().updates()
