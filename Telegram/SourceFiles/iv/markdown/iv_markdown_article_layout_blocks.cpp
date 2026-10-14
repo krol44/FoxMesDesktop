@@ -769,6 +769,22 @@ void PopulateCodeBlockLeaf(
 	return result;
 }
 
+void ApplyMessageSkipBlock(not_null<LaidOutBlock*> block, QSize skip) {
+	auto &leaf = block->leaf;
+	if (!skip.isEmpty()
+		&& (block->skipBlockLength > 0)
+		&& leaf.hasSkipBlock()) {
+		return;
+	}
+	leaf.removeSkipBlock();
+	block->skipBlockLength = 0;
+	if (!skip.isEmpty() && !leaf.isEmpty()) {
+		const auto length = leaf.length();
+		leaf.updateSkipBlock(skip.width(), skip.height());
+		block->skipBlockLength = leaf.length() - length;
+	}
+}
+
 [[nodiscard]] int LeafCollapsedLineBottom(
 		const Ui::Text::String &leaf,
 		int width,
@@ -1777,6 +1793,15 @@ bool IsAnchorOnlyBlock(const PreparedBlock &block) {
 		&& block.children.empty();
 }
 
+bool TakesMessageSkipBlock(const PreparedBlock &block) {
+	return (block.kind == PreparedBlockKind::Paragraph)
+		&& !block.supplementary
+		&& !block.quoteAuthor
+		&& !block.pullquote
+		&& !IsAnchorOnlyBlock(block)
+		&& !block.text.text.isEmpty();
+}
+
 bool PreparedBlockHasInlineButton(const PreparedBlock &prepared) {
 	if (TextHasInlineButton(prepared.text)) {
 		return true;
@@ -1822,11 +1847,11 @@ int TextLineHeight(const style::TextStyle &style) {
 
 int TextLineAscent(const style::TextStyle &style) {
 	if (style.qtextEditLineMetrics) {
-		const auto lineHeight = QFixed(TextLineHeight(style));
-		const auto leading = std::max(style.font->fleading, QFixed());
+		const auto lineHeight = Ui::Fixed(TextLineHeight(style));
+		const auto leading = std::max(style.font->fleading, Ui::Fixed());
 		return std::clamp(
 			(lineHeight * 4 / 5) - leading,
-			QFixed(),
+			Ui::Fixed(),
 			lineHeight).toInt();
 	}
 	const auto lineHeight = TextLineHeight(style);
@@ -4016,6 +4041,7 @@ LaidOutBlock LayoutGroupedMediaBlock(
 		FinishBlockGeometry(block);
 		return block->outer.y() + block->outer.height();
 	}
+	ApplyMessageSkipBlock(block, context.skipBlock);
 	const auto &textStyle = TextStyleFor(prepared, st);
 	const auto &displayLeaf = usePlaceholder
 		? block->placeholderLeaf

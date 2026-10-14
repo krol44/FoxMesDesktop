@@ -6,5 +6,8 @@
 *.patch text eol=lf
 *.bat text eol=crlf
 
+# Keep the zxcvbn word lists byte-identical to upstream so their digests hold
+Telegram/Resources/zxcvbn/*.txt text eol=lf
+
 # Ensure lottie animations are treated as binary files
 *.lottie binary

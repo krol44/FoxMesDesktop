@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "storage/localimageloader.h"
 #include "storage/localstorage.h"
+#include "storage/storage_folder_archive.h"
 #include "storage/storage_media_prepare.h"
 #include "iv/iv_instance.h"
 #include "mainwidget.h"
@@ -31,6 +32,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/controls/history_view_compose_ai_button.h"
 #include "history/view/history_view_schedule_box.h"
 #include "core/mime_type.h"
+#include "core/shortcuts.h"
 #include "core/ui_integration.h"
 #include "base/event_filter.h"
 #include "base/call_delayed.h"
@@ -87,6 +89,8 @@ namespace {
 
 constexpr auto kMaxMessageLength = 4096;
 constexpr auto kMaxDisplayNameLength = 64;
+constexpr auto kStashFilesLimit = 100;
+constexpr auto kStashFilesMemoryLimit = int64(256) * 1024 * 1024;
 
 using Ui::SendFilesWay;
 
@@ -887,9 +891,26 @@ void SendFilesBox::prepare() {
 	setCloseByOutsideClick(false);
 
 	boxClosing() | rpl::on_next([=] {
-		if (!_confirmed && !_textTaken && _cancelledCallback) {
+		if (!_confirmed
+			&& !_stashed
+			&& !_textTaken
+			&& _cancelledCallback) {
 			_cancelledCallback();
 		}
+	}, lifetime());
+
+	Shortcuts::Requests(
+	) | rpl::filter([=] {
+		return _stashCallback
+			&& isVisible()
+			&& Ui::AppInFocus()
+			&& window()->isActiveWindow();
+	}) | rpl::on_next([=](not_null<Shortcuts::Request*> request) {
+		using Command = Shortcuts::Command;
+		request->check(Command::StashMessage, 2) && request->handle([=] {
+			stash();
+			return true;
+		});
 	}, lifetime());
 
 	setupDragArea();
@@ -906,14 +927,21 @@ void SendFilesBox::setupDragArea() {
 			? (_sendWay.current().sendImagesAsPhotos()
 				? DragState::Image
 				: DragState::Files)
+			: (state == DragState::FilesArchive)
+			? DragState::Files
 			: state;
+	};
+	const auto archiveOnly = [=] {
+		const auto margins = st::dragMargin.top() + st::dragMargin.bottom();
+		return ((height() - margins) / 2) < DragArea::MinimalHeight();
 	};
 	const auto areas = DragArea::SetupDragAreaToContainer(
 		this,
 		CanAddFiles,
 		[=](bool f) { _caption->setAcceptDrops(f); },
 		[=] { updateControlsGeometry(); },
-		std::move(computeState));
+		std::move(computeState),
+		archiveOnly);
 
 	const auto droppedCallback = [=](bool compress) {
 		return [=](const QMimeData *data) {
@@ -1424,13 +1452,18 @@ void SendFilesBox::pushBlock(int from, int till) {
 			show->session().saveSettings();
 		}
 		*openedOnce = true;
+		const auto videos = (_limits & SendFilesAllow::Videos);
+		const auto animated = videos || (_limits & SendFilesAllow::Gifs);
 		Editor::OpenWithPreparedFile(
 			this,
 			show,
 			&_list.files[index],
 			st::sendMediaPreviewSize,
 			std::move(done),
-			PhotoSideLimit(true));
+			PhotoSideLimit(true),
+			QSize(),
+			animated,
+			videos);
 	};
 	const auto replaceAttachment = [=, show = _show](int index) {
 		applyBlockChanges();
@@ -2261,8 +2294,22 @@ bool SendFilesBox::addFiles(
 		not_null<const QMimeData*> data,
 		std::optional<bool> overrideSendImagesAsPhotos) {
 	const auto premium = _show->session().premium();
+	const auto urls = Core::ReadMimeUrls(data);
+	const auto folder = Storage::SingleFolderPath(urls);
+	if (!folder.isEmpty()) {
+		if (overrideSendImagesAsPhotos == false) {
+			const auto files = Storage::FolderFilesForSending(folder);
+			return !files.isEmpty()
+				&& addFiles(Storage::PrepareMediaList(
+					files,
+					st::sendMediaPreviewSize,
+					premium));
+		}
+		auto list = Ui::PreparedList();
+		list.files.push_back(Storage::PrepareFolderArchive(folder));
+		return addFiles(std::move(list));
+	}
 	auto list = [&] {
-		const auto urls = Core::ReadMimeUrls(data);
 		auto result = CanAddUrls(urls)
 			? Storage::PrepareMediaList(
 				urls,
@@ -2608,7 +2655,9 @@ void SendFilesBox::send(
 				return;
 			}
 		}
-		Storage::ApplyModifications(_list, true);
+		const auto animated = (_limits & SendFilesAllow::Gifs)
+			|| (_limits & SendFilesAllow::Videos);
+		Storage::ApplyModifications(_list, animated);
 		saveSendWaySettings(_wayRemember && _wayRemember->checked());
 		options.invertCaption = _invertCaption;
 		options.price = hasPrice() ? _price.current() : 0;
@@ -2659,6 +2708,40 @@ void SendFilesBox::send(
 		_confirmedCallback(std::move(bundle), options, _replyTo);
 	}
 	closeBox();
+}
+
+void SendFilesBox::stash() {
+	if (!_stashCallback || (_stashCheck && !_stashCheck())) {
+		return;
+	} else if (_preparing) {
+		_whenReadySend = [=] { stash(); };
+		return;
+	}
+	for (auto &item : _list.files) {
+		item.spoiler = false;
+	}
+	applyBlockChanges();
+
+	Assert(_list.filesToProcess.empty());
+
+	if ((int(_list.files.size()) > kStashFilesLimit)
+		|| (_list.memoryUsage() > kStashFilesMemoryLimit)) {
+		showToast(tr::lng_stash_files_limit(tr::now));
+		return;
+	}
+	const auto way = _sendWay.current();
+	_list.overrideSendImagesAsPhotos = way.sendImagesAsPhotos();
+	_stashed = true;
+	_stashCallback(SendFilesStashed{
+		.list = std::move(_list),
+		.caption = _caption->getTextWithTags(),
+		.replyTo = _replyTo,
+	});
+	closeBox();
+}
+
+void SendFilesBox::sendWithOptions(Api::SendOptions options) {
+	send(options, false);
 }
 
 Fn<void(Api::SendOptions)> SendFilesBox::sendCallback() {

@@ -62,6 +62,12 @@ enum class AlbumType {
 	File,
 };
 
+struct PreparedFileArchive {
+	QString folder;
+	QString root;
+	QStringList paths;
+};
+
 struct PreparedFile {
 	// File-s can be grouped if 'groupFiles'.
 	// File-s + Photo-s can be grouped if 'groupFiles && !sendImagesAsPhotos'.
@@ -89,11 +95,13 @@ struct PreparedFile {
 	[[nodiscard]] bool isGifv() const;
 	[[nodiscard]] bool canUseHighQualityPhoto() const;
 	[[nodiscard]] bool hasAnimatedEditScene() const;
+	[[nodiscard]] bool hasAudioEditScene() const;
 	[[nodiscard]] bool sendsVideoAsGif() const;
 
 	[[nodiscard]] bool canEditVideo() const;
 
 	[[nodiscard]] int videoQuality() const;
+	[[nodiscard]] int64 memoryUsage() const;
 
 	// Assigned on demand, so deferred work can find this entry back.
 	int64 id = 0;
@@ -112,6 +120,7 @@ struct PreparedFile {
 	bool spoiler = false;
 	bool sendLargePhotos = false;
 	std::shared_ptr<Media::Encode::Job> animationJob;
+	std::shared_ptr<PreparedFileArchive> archive;
 };
 
 [[nodiscard]] bool CanBeInAlbumType(PreparedFile::Type type, AlbumType album);
@@ -156,6 +165,7 @@ struct PreparedList {
 	[[nodiscard]] bool hasSticker() const;
 	[[nodiscard]] bool hasSpoilerMenu(bool compress) const;
 	[[nodiscard]] bool hasSendLargePhotosOption(bool compress) const;
+	[[nodiscard]] int64 memoryUsage() const;
 
 	Error error = Error::None;
 	QString errorData;
@@ -184,6 +194,8 @@ struct PreparedBundle {
 	std::vector<PreparedGroup> groups,
 	SendFilesWay way,
 	bool ctrlShiftEnter);
+[[nodiscard]] std::shared_ptr<PreparedBundle> MakeSingleFileBundle(
+	PreparedList &&list);
 
 [[nodiscard]] int MaxAlbumItems();
 [[nodiscard]] bool ValidateThumbDimensions(int width, int height);

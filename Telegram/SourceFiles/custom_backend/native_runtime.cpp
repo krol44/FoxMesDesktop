@@ -3,6 +3,7 @@
 
 #include "custom_backend/native_gifs_adapter.h"
 #include "custom_backend/native_reactions_adapter.h"
+#include "custom_backend/native_peer_status_adapter.h"
 #include "custom_backend/native_wallpaper_adapter.h"
 #include "custom_backend/native_stickers_adapter.h"
 #include "custom_backend/native_streaming_loader.h"
@@ -45,6 +46,7 @@ using details::Settings;
 struct AuthContext {
     std::unique_ptr<ApiClient> client;
     QJsonObject user;
+    base::weak_ptr<Main::Account> account;
     bool loaded = false;
 };
 
@@ -80,20 +82,26 @@ QString Prefix(qint64 userId) {
     return u"accounts/"_q + QString::number(userId);
 }
 
+void SaveEventSequence(qint64 userId, qint64 seq) {
+	auto settings = Settings();
+	settings.setValue(Prefix(userId) + u"/event_seq_v2"_q, seq);
+	settings.sync();
+}
+
 void SaveContext(qint64 userId) {
     const auto i = gContexts.find(userId);
     if (i == gContexts.end() || !i->second || !i->second->client) return;
-	auto settings = Settings();
-	const auto prefix = Prefix(userId);
-	SaveStoredTokens(userId, i->second->client->accessToken());
-	settings.setValue(
-		prefix + u"/user"_q,
-		QJsonDocument(i->second->user).toJson(QJsonDocument::Compact));
-    settings.setValue(prefix + u"/event_seq_v2"_q, i->second->client->eventSequence());
-    settings.sync();
+	const auto &context = *i->second;
+	if (const auto account = context.account.get()) {
+		SaveStoredAuth(
+			account,
+			context.client->accessToken(),
+			context.user);
+	}
+	SaveEventSequence(userId, context.client->eventSequence());
 }
 
-AuthContext &EnsureContext(qint64 userId) {
+AuthContext &EnsureContext(Main::Account *account, qint64 userId) {
     ReleaseClientsOnQuit();
     auto &slot = gContexts[userId];
     if (!slot) slot = std::make_unique<AuthContext>();
@@ -105,34 +113,21 @@ AuthContext &EnsureContext(qint64 userId) {
             SaveContext(userId);
         });
     }
-    if (!context.loaded) {
+    if (account && !context.account) {
+        context.account = base::make_weak(account);
+    }
+    if (account && !context.loaded) {
         context.loaded = true;
-        auto settings = Settings();
-        const auto prefix = Prefix(userId);
-        const auto stored = LoadStoredTokens(userId);
-        auto access = stored.access;
-        auto userBytes = settings.value(prefix + u"/user"_q).toByteArray();
-
-        if (access.isEmpty()) {
-            const auto legacyUserBytes = settings.value(u"auth/user"_q).toByteArray();
-            const auto legacyDoc = QJsonDocument::fromJson(legacyUserBytes);
-            const auto legacyUser = legacyDoc.isObject() ? legacyDoc.object() : QJsonObject();
-            const auto legacyId = legacyUser.value("id").toVariant().toLongLong();
-            if (legacyId == userId) {
-                access = settings.value(u"auth/access"_q).toString();
-                userBytes = legacyUserBytes;
-                settings.remove(u"auth"_q);
-            }
-        }
-
-        if (!userBytes.isEmpty()) {
-            const auto doc = QJsonDocument::fromJson(userBytes);
-            if (doc.isObject()) context.user = doc.object();
-        }
-        context.client->setTokens(access);
+        [[maybe_unused]] static const auto forgotten = [] {
+            details::ForgetPlaintextData();
+            return true;
+        }();
+        auto stored = LoadStoredAuth(account);
+        context.user = std::move(stored.user);
+        context.client->setTokens(std::move(stored.access));
         context.client->setMeId(userId);
-        context.client->setEventSequence(settings.value(prefix + u"/event_seq_v2"_q).toLongLong());
-        if (!access.isEmpty()) SaveContext(userId);
+        context.client->setEventSequence(Settings().value(
+            Prefix(userId) + u"/event_seq_v2"_q).toLongLong());
     }
     return context;
 }
@@ -141,14 +136,23 @@ qint64 SessionUserId(Main::Session *session) {
     return session ? qint64(session->userId().bare) : 0;
 }
 
-void ClearContext(qint64 userId) {
+AuthContext &EnsureContext(Main::Session *session) {
+    return EnsureContext(
+        session ? &session->account() : nullptr,
+        SessionUserId(session));
+}
+
+void ClearContext(Main::Account *account, qint64 userId) {
     if (userId <= 0) return;
     if (const auto i = gContexts.find(userId); i != gContexts.end()) {
         if (i->second && i->second->client) i->second->client->clearTokens();
         gContexts.erase(i);
     }
+    if (account) {
+        ClearStoredAuth(account);
+        ClearStoredCaches(account);
+    }
     auto settings = Settings();
-    ClearStoredTokens(userId);
     settings.remove(Prefix(userId));
     settings.sync();
 }
@@ -261,8 +265,7 @@ ApiClient &Client() {
 }
 
 ApiClient &ClientFor(Main::Session *session) {
-    const auto id = SessionUserId(session);
-    return *EnsureContext(id).client;
+    return *EnsureContext(session).client;
 }
 
 QJsonObject CurrentUser() {
@@ -270,8 +273,9 @@ QJsonObject CurrentUser() {
 }
 
 QJsonObject CurrentUser(Main::Session *session) {
-    const auto id = SessionUserId(session);
-    return (id > 0) ? EnsureContext(id).user : QJsonObject();
+    return (SessionUserId(session) > 0)
+        ? EnsureContext(session).user
+        : QJsonObject();
 }
 
 bool HasStoredAuth(Main::Session *session) {
@@ -280,7 +284,9 @@ bool HasStoredAuth(Main::Session *session) {
     return !client.accessToken().isEmpty();
 }
 
-void RememberLogin(const QJsonDocument &document) {
+void RememberLogin(
+        not_null<Main::Account*> account,
+        const QJsonDocument &document) {
     if (!document.isObject()) return;
     const auto root = document.object();
     const auto user = root.value("user").toObject();
@@ -288,7 +294,7 @@ void RememberLogin(const QJsonDocument &document) {
     if (id <= 0) return;
 
     gLoginUser = user;
-    auto &context = EnsureContext(id);
+    auto &context = EnsureContext(account, id);
     context.user = user;
     context.client->setTokens(Client().accessToken());
     context.client->setMeId(id);
@@ -298,8 +304,16 @@ void RememberLogin(const QJsonDocument &document) {
 void RememberUser(Main::Session *session, const QJsonObject &user) {
     const auto id = SessionUserId(session);
     if (id <= 0 || user.isEmpty()) return;
-    auto &context = EnsureContext(id);
+    auto &context = EnsureContext(session);
     auto incoming = user;
+    if (!incoming.contains(u"event_seq"_q)) {
+        for (const auto &key : { u"capabilities"_q, u"prompts"_q,
+                u"can_create_group"_q, u"can_create_channel"_q,
+                u"group_members_max"_q, u"channel_members_max"_q }) {
+            if (!incoming.contains(key) && context.user.contains(key)) incoming.insert(key, context.user.value(key));
+        }
+    }
+    incoming = PeerStatuses::Merge(session, session->user()->id, incoming);
     if (incoming.value(u"peer_appearance"_q).isObject()) {
         if (!incoming.contains(u"event_seq"_q)) {
             for (const auto &key : { u"capabilities"_q, u"prompts"_q,
@@ -324,52 +338,44 @@ void RememberUser(Main::Session *session, const QJsonObject &user) {
 void RememberEventSequence(Main::Session *session, qint64 seq) {
 	const auto id = SessionUserId(session);
 	if (id <= 0 || seq <= 0) return;
-	auto &context = EnsureContext(id);
-	context.client->setEventSequence(seq);
-	SaveContext(id);
+	EnsureContext(session).client->setEventSequence(seq);
+	SaveEventSequence(id, seq);
 }
 
 QByteArray LoadChatsCache(Main::Session *session) {
-	const auto id = SessionUserId(session);
-	if (id <= 0) return {};
-	return Settings().value(Prefix(id) + u"/chats_cache"_q).toByteArray();
+	if (SessionUserId(session) <= 0) return {};
+	return ReadStoredData(&session->account(), details::kChatsCachePref);
 }
 
 void SaveChatsCache(Main::Session *session, const QByteArray &json) {
-	const auto id = SessionUserId(session);
-	if (id <= 0 || json.isEmpty()) return;
-	auto settings = Settings();
-	settings.setValue(Prefix(id) + u"/chats_cache"_q, json);
-	settings.sync();
+	if (SessionUserId(session) <= 0 || json.isEmpty()) return;
+	WriteStoredData(&session->account(), details::kChatsCachePref, json);
 }
 
-[[nodiscard]] QString DefaultNotifyCacheKey(const QString &scope) {
-	return (scope.isEmpty() || scope == u"user"_q)
-		? u"/notify_defaults"_q
-		: (u"/notify_defaults_"_q + scope);
+[[nodiscard]] std::string DefaultNotifyCacheKey(const QString &scope) {
+	return details::NotifyDefaultsPref(scope.isEmpty()
+		? std::string("user")
+		: scope.toStdString());
 }
 
 QJsonObject LoadDefaultNotifyCache(
 		Main::Session *session,
 		const QString &scope) {
-	const auto id = SessionUserId(session);
-	if (id <= 0) return {};
-	const auto raw = Settings().value(
-		Prefix(id) + DefaultNotifyCacheKey(scope)).toByteArray();
-	const auto document = QJsonDocument::fromJson(raw);
+	if (SessionUserId(session) <= 0) return {};
+	const auto document = QJsonDocument::fromJson(ReadStoredData(
+		&session->account(),
+		DefaultNotifyCacheKey(scope)));
 	return document.isObject() ? document.object() : QJsonObject();
 }
 
 void SaveDefaultNotifyCache(
 		Main::Session *session,
 		const QJsonObject &settings) {
-	const auto id = SessionUserId(session);
-	if (id <= 0 || settings.isEmpty()) return;
-	auto storage = Settings();
-	storage.setValue(
-		Prefix(id) + DefaultNotifyCacheKey(settings.value("scope").toString()),
+	if (SessionUserId(session) <= 0 || settings.isEmpty()) return;
+	WriteStoredData(
+		&session->account(),
+		DefaultNotifyCacheKey(settings.value("scope").toString()),
 		QJsonDocument(settings).toJson(QJsonDocument::Compact));
-	storage.sync();
 }
 
 bool AppearanceDefaultApplied(Main::Session *session) {
@@ -387,33 +393,30 @@ void RememberAppearanceDefaultApplied(Main::Session *session) {
 }
 
 QJsonObject LoadReadJournal(Main::Session *session) {
-	const auto id = SessionUserId(session);
-	if (id <= 0) return {};
-	const auto raw = Settings().value(
-		u"read_journal/accounts/"_q + QString::number(id)).toByteArray();
-	const auto document = QJsonDocument::fromJson(raw);
+	if (SessionUserId(session) <= 0) return {};
+	const auto document = QJsonDocument::fromJson(ReadStoredData(
+		&session->account(),
+		details::kReadJournalPref));
 	return document.isObject() ? document.object() : QJsonObject();
 }
 
 void SaveReadJournal(Main::Session *session, const QJsonObject &journal) {
-	const auto id = SessionUserId(session);
-	if (id <= 0) return;
-	auto settings = Settings();
-	const auto key = u"read_journal/accounts/"_q + QString::number(id);
-	if (journal.isEmpty()) {
-		settings.remove(key);
-	} else {
-		settings.setValue(key, QJsonDocument(journal).toJson(QJsonDocument::Compact));
-	}
-	settings.sync();
+	if (SessionUserId(session) <= 0) return;
+	WriteStoredData(
+		&session->account(),
+		details::kReadJournalPref,
+		journal.isEmpty()
+			? QByteArray()
+			: QJsonDocument(journal).toJson(QJsonDocument::Compact));
 }
 
 void ClearLogin(Main::Session *session) {
 	if (const auto bridge = BridgeFor(session)) {
 		bridge->stopLiveUpdates();
 	}
-    const auto id = SessionUserId(session);
-    ClearContext(id);
+    ClearContext(
+        session ? &session->account() : nullptr,
+        SessionUserId(session));
 }
 
 void Logout(Main::Session *session, std::function<void()> done) {
@@ -425,14 +428,15 @@ void Logout(Main::Session *session, std::function<void()> done) {
 		bridge->stopLiveUpdates();
 	}
     const auto id = SessionUserId(session);
+    const auto account = base::make_weak(&session->account());
     auto &client = ClientFor(session);
     if (client.accessToken().isEmpty()) {
-        ClearContext(id);
+        ClearContext(account.get(), id);
         if (done) done();
         return;
     }
-    client.logout([id, done = std::move(done)](QJsonDocument, QString, int) mutable {
-        ClearContext(id);
+    client.logout([=, done = std::move(done)](QJsonDocument, QString, int) mutable {
+        ClearContext(account.get(), id);
         if (done) done();
     });
 }
@@ -461,6 +465,7 @@ void DetachSession(Main::Session *session) {
 	gBridgeChanges.fire_copy(session);
     if (session) {
         Reactions::ClearSession(session);
+        PeerStatuses::ClearSession(session);
     }
 }
 

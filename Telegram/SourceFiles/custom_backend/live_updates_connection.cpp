@@ -1,5 +1,7 @@
 #include "custom_backend/live_updates_connection.h"
 
+#include "base/network_reachability.h"
+
 #include <QtNetwork/QAbstractSocket>
 #include <QtNetwork/QSslConfiguration>
 #include <QtNetwork/QSslError>
@@ -16,6 +18,8 @@ namespace CustomBackend {
 namespace {
 
 constexpr auto kMaximumRetryTimeout = 64'000;
+constexpr auto kHeartbeatInterval = 10'000;
+constexpr auto kPongTimeout = 5'000;
 
 constexpr int NextRetryTimeout(int timeout) {
 	if (timeout < 3) {
@@ -51,13 +55,30 @@ LiveUpdatesConnection::LiveUpdatesConnection(
 : QObject(parent)
 , _requestFactory(std::move(requestFactory))
 , _connected(std::move(connected))
-, _message(std::move(message)) {
+, _message(std::move(message))
+, _networkReachability(base::NetworkReachability::Instance()) {
 	_retryTimer.setSingleShot(true);
 	QObject::connect(
 		&_retryTimer,
 		&QTimer::timeout,
 		this,
 		&LiveUpdatesConnection::retryByTimer);
+	_heartbeatTimer.setInterval(kHeartbeatInterval);
+	QObject::connect(
+		&_heartbeatTimer,
+		&QTimer::timeout,
+		this,
+		&LiveUpdatesConnection::checkNow);
+	_pongTimer.setSingleShot(true);
+	QObject::connect(
+		&_pongTimer,
+		&QTimer::timeout,
+		this,
+		&LiveUpdatesConnection::pongTimedOut);
+	_networkReachability->availableChanges(
+	) | rpl::on_next([=](bool) {
+		restartNow();
+	}, _lifetime);
 }
 
 LiveUpdatesConnection::~LiveUpdatesConnection() {
@@ -97,6 +118,22 @@ void LiveUpdatesConnection::restartNow() {
 		.retryAt = crl::now() + _retryTimeout,
 	});
 	_retryTimer.start(_retryTimeout);
+}
+
+void LiveUpdatesConnection::checkNow() {
+	if (!_running
+		|| !_webSocket
+		|| _attemptFailed
+		|| _webSocket->state() != QAbstractSocket::ConnectedState
+		|| _pongTimer.isActive()) {
+		return;
+	}
+	_webSocket->ping();
+	_pongTimer.start(kPongTimeout);
+}
+
+void LiveUpdatesConnection::pongTimedOut() {
+	failAttempt(_webSocket.get());
 }
 
 void LiveUpdatesConnection::setPresenceChat(qint64 chatId) {
@@ -147,6 +184,11 @@ void LiveUpdatesConnection::connectNow() {
 	QObject::connect(socket, &QWebSocket::disconnected, this, [=] {
 		failAttempt(socket);
 	});
+	QObject::connect(socket, &QWebSocket::pong, this, [=] {
+		if (_webSocket.get() == socket) {
+			_pongTimer.stop();
+		}
+	});
 	const auto request = _requestFactory();
 	const auto configuration = request.sslConfiguration();
 	socket->setSslConfiguration(configuration);
@@ -175,6 +217,7 @@ void LiveUpdatesConnection::failAttempt(QWebSocket *socket) {
 		return;
 	}
 	_attemptFailed = true;
+	stopHeartbeat();
 	setStatus({
 		.state = LiveUpdatesState::Waiting,
 		.retryAt = crl::now() + _retryTimeout,
@@ -189,6 +232,7 @@ void LiveUpdatesConnection::socketConnected(QWebSocket *socket) {
 	_attemptFailed = false;
 	_retryTimer.stop();
 	_retryTimeout = 1;
+	_heartbeatTimer.start();
 	setStatus({ LiveUpdatesState::Connected });
 	if (_connected) {
 		_connected();
@@ -218,10 +262,17 @@ void LiveUpdatesConnection::socketMessage(
 		|| !_message) {
 		return;
 	}
+	_pongTimer.stop();
 	_message(std::move(message));
 }
 
+void LiveUpdatesConnection::stopHeartbeat() {
+	_heartbeatTimer.stop();
+	_pongTimer.stop();
+}
+
 void LiveUpdatesConnection::destroySocket() {
+	stopHeartbeat();
 	if (!_webSocket) {
 		return;
 	}

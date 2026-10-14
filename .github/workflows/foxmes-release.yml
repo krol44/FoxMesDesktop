@@ -20,8 +20,8 @@ concurrency:
 
 env:
   FOXMES_DEPS_REVISION: '1'
-  FOXMES_VERSION: 1.10.0
-  FOXMES_VERSION_CODE: '1010000'
+  FOXMES_VERSION: 1.11.0
+  FOXMES_VERSION_CODE: '1011000'
 
 jobs:
   validate:
@@ -203,7 +203,7 @@ jobs:
 
       - name: Install build prerequisites
         shell: bash
-        run: brew install automake libtool meson nasm ninja pkg-config
+        run: brew install automake ccache libtool meson nasm ninja pkg-config
 
       - name: Resolve the dependency root and cache key
         shell: bash
@@ -268,10 +268,30 @@ jobs:
             $(security list-keychains -d user | tr -d '"')
           echo "SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
 
+      - name: Restore the macOS compiler cache
+        if: ${{ github.event.inputs.only_cache != 'true' }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ runner.temp }}/foxmes-ccache
+          key: macOS-arm64-ccache-${{ github.run_id }}
+          restore-keys: macOS-arm64-ccache-
+
       - name: Build signed macOS package
+        id: app
         if: ${{ github.event.inputs.only_cache != 'true' }}
         shell: bash
+        env:
+          FOXMES_CCACHE_DIR: ${{ runner.temp }}/foxmes-ccache
         run: bash Telegram/build/foxmes/build-macos.sh app
+
+      # Saved even when the build fails or hits the six-hour limit: a cold
+      # build may not fit, and the objects it did compile let the next run finish.
+      - name: Save the macOS compiler cache
+        if: always() && steps.app.outcome != 'skipped' && github.ref_name == github.event.repository.default_branch
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ runner.temp }}/foxmes-ccache
+          key: macOS-arm64-ccache-${{ github.run_id }}
 
       - name: Remove the signing keychain
         if: ${{ always() && env.SIGNING_KEYCHAIN != '' }}
@@ -347,7 +367,7 @@ jobs:
         run: |
           desktop-file-validate out/FoxMes.AppDir/usr/share/applications/ing.foxtail.FoxMes.desktop
           appstreamcli validate --no-net out/FoxMes.AppDir/usr/share/metainfo/ing.foxtail.FoxMes.metainfo.xml
-          artifacts/linux/FoxMes-1.10.0-linux-x86_64.AppImage --appimage-extract >/dev/null
+          artifacts/linux/FoxMes-1.11.0-linux-x86_64.AppImage --appimage-extract >/dev/null
           ldd out/FoxMes.AppDir/usr/bin/FoxMes | tee /tmp/foxmes-ldd.txt
           ! grep -q 'not found' /tmp/foxmes-ldd.txt
       - name: Upload Linux packages

@@ -121,6 +121,8 @@ public:
 		const FullReplyTo &replyTo);
 
 private:
+	[[nodiscard]] bool hasBackgroundEmoji() const;
+	[[nodiscard]] int nameIconsSkip() const;
 	void paintNative(
 		Painter &p,
 		not_null<const Element*> view,
@@ -169,6 +171,7 @@ private:
 	mutable int _nameVersion = 0;
 	uint8 _hiddenSenderColorIndexPlusOne : 7 = 0;
 	uint8 _hasQuoteIcon : 1 = 0;
+	uint8 _hasBackgroundEmoji : 1 = 0;
 	uint8 _expanded : 1 = 0;
 	mutable uint8 _expandable : 1 = 0;
 	mutable uint8 _minHeightExpandable : 1 = 0;

@@ -1849,6 +1849,9 @@ void ShowGiftPremium(
 void ShowEmojiStatusPremium(
 		not_null<Window::SessionController*> controller,
 		not_null<PeerData*> peer) {
+	if (CustomBackend::Enabled()) {
+		return;
+	}
 	if (const auto unique = peer->emojiStatusId().collectible.get()) {
 		Core::ResolveAndShowUniqueGift(controller->uiShow(), unique->slug);
 	} else {

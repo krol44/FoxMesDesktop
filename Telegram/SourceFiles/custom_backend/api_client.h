@@ -21,6 +21,8 @@
 
 #include "data/data_messages.h"
 
+#include <rpl/event_stream.h>
+
 class QNetworkReply;
 
 namespace CustomBackend {
@@ -83,6 +85,7 @@ public:
     void setMeId(qint64 id) { _meId = id; }
     void setEventSequence(qint64 value) { _eventSequence = value; }
     void setTokensChangedCallback(TokensChanged callback) { _tokensChanged = std::move(callback); }
+    [[nodiscard]] rpl::producer<> transportFailures() const { return _transportFailures.events(); }
 
     void setTokens(QString access);
     void clearTokens();
@@ -391,6 +394,7 @@ public:
         Callback done);
 
     void setChatAppearance(qint64 chatId, QJsonObject body, Callback done);
+    void peerStatusRequest(const QByteArray &method, const QString &path, QJsonObject body, Callback done);
     void setChatTheme(
         qint64 chatId,
         const QString &emoticon,
@@ -478,6 +482,7 @@ private:
     qint64 _meId = 0;
     qint64 _eventSequence = 0;
     TokensChanged _tokensChanged;
+    rpl::event_stream<> _transportFailures;
     QNetworkAccessManager _network;
 };
 

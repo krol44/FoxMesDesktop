@@ -73,5 +73,6 @@ void ReceiveFavorite(not_null<Main::Session*> session, const QJsonObject &state)
 [[nodiscard]] bool Intercepts(const MTP::details::SerializedRequest &request);
 void Intercept(not_null<MTP::Instance*> instance, mtpRequestId requestId, const MTP::details::SerializedRequest &request);
 void ClearSession(not_null<Main::Session*> session);
+void RegisterStatusAsset(not_null<Main::Session*> session, DocumentId id, const QString &url);
 
 }

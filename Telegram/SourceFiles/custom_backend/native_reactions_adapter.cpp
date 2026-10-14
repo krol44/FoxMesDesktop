@@ -57,6 +57,7 @@ struct State final {
     std::vector<DocumentId> recentUsage;
 
     base::flat_map<DocumentId, QString> emojiByDocumentId;
+    base::flat_map<DocumentId, QString> statusUrls;
 
     base::flat_map<DocumentId, std::shared_ptr<Data::DocumentMedia>> media;
     base::flat_map<DocumentId, not_null<DocumentData*>> documents;
@@ -794,7 +795,16 @@ QString AssetUrlFor(not_null<Main::Session*> session, DocumentId id) {
             return entry.assetUrl;
         }
     }
-    return QString();
+    const auto &urls = StateFor(session).statusUrls;
+    const auto i = urls.find(id);
+    return i == urls.end() ? QString() : i->second;
+}
+
+void RegisterStatusAsset(not_null<Main::Session*> session, DocumentId id, const QString &url) {
+    if (!id || url.isEmpty()) return;
+    auto &state = StateFor(session);
+    state.statusUrls[id] = url;
+    if (!state.assets.contains(id)) DownloadAsset(session, state, id, u"🙂"_q, url);
 }
 
 QString EmojiFor(not_null<Main::Session*> session, DocumentId id) {

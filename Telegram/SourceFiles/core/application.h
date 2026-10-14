@@ -179,7 +179,7 @@ public:
 	void setActivePrimaryWindow(not_null<Window::Controller*> window);
 	[[nodiscard]] Window::Controller *separateWindowFor(
 		Window::SeparateId id) const;
-	Window::Controller *ensureSeparateWindowFor(
+	not_null<Window::Controller*> ensureSeparateWindowFor(
 		Window::SeparateId id,
 		MsgId showAtMsgId = 0);
 	[[nodiscard]] Window::Controller *windowFor( // Doesn't auto-switch.
@@ -359,6 +359,9 @@ public:
 	// Global runtime variables.
 	void setScreenIsLocked(bool locked);
 	bool screenIsLocked() const;
+	[[nodiscard]] rpl::producer<bool> screenIsLockedValue() const;
+	void notifySystemSleep();
+	[[nodiscard]] rpl::producer<> systemSleepEvents() const;
 
 	static void RegisterUrlScheme();
 
@@ -470,7 +473,8 @@ private:
 
 	rpl::variable<bool> _passcodeLock;
 	rpl::variable<bool> _setupEmailLock;
-	bool _screenIsLocked = false;
+	rpl::variable<bool> _screenIsLocked = false;
+	rpl::event_stream<> _systemSleep;
 
 	crl::time _shouldLockAt = 0;
 	base::Timer _autoLockTimer;

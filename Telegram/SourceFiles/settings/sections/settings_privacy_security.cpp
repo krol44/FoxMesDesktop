@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/sections/settings_privacy_security.h"
 
 #include "custom_backend/native_runtime.h"
+#include "custom_backend/native_security_settings.h"
 #include "settings/settings_common_session.h"
 
 #include "api/api_authorizations.h"
@@ -333,13 +334,15 @@ bool CheckEditCloudPassword(not_null<::Main::Session*> session) {
 	return !current->outdatedClient;
 }
 
-object_ptr<Ui::BoxContent> EditCloudPasswordBox(not_null<::Main::Session*> session) {
+object_ptr<Ui::BoxContent> EditCloudPasswordBox(
+		not_null<::Main::Session*> session,
+		std::shared_ptr<Ui::Show> show) {
 	const auto current = session->api().cloudPassword().stateCurrent();
 	Assert(current.has_value());
 
-	auto result = Box<PasscodeBox>(
-		session,
-		PasscodeBox::CloudFields::From(*current));
+	auto fields = PasscodeBox::CloudFields::From(*current);
+	fields.customShow = std::move(show);
+	auto result = Box<PasscodeBox>(session, fields);
 	const auto box = result.data();
 
 	rpl::merge(
@@ -634,7 +637,7 @@ void BuildSecuritySection(
 	auto passcodeHas = rpl::single(rpl::empty) | rpl::then(
 		session->domain().local().localPasscodeChanged()
 	) | rpl::map([=] {
-		return session->domain().local().hasLocalPasscode();
+		return session->domain().local().hasPasscode();
 	});
 	auto passcodeLabel = rpl::combine(
 		tr::lng_settings_cloud_password_on(),
@@ -1163,6 +1166,7 @@ void BuildConfirmationExtensions(SectionBuilder &builder) {
 
 void BuildPrivacySecuritySectionContent(SectionBuilder &builder) {
 	if (CustomBackend::Enabled()) {
+		CustomBackend::Security::BuildSection(builder);
 		return;
 	}
 

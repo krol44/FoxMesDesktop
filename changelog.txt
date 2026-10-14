@@ -1,3 +1,9 @@
+1.11.0 (14.10.26)
+
+- New features
+- Merging with the upstream
+- Fix bugs
+
 1.10.0 (11.10.26)
 
 - New features

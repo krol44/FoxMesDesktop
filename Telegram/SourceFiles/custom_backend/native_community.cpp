@@ -2,6 +2,7 @@
 This file is part of FoxMes Desktop.
 */
 #include "custom_backend/native_community.h"
+#include "custom_backend/native_peer_status_adapter.h"
 #include "custom_backend/native_wallpaper_adapter.h"
 
 #include "data/data_session.h"
@@ -113,6 +114,8 @@ MTPChat Channel(const QJsonObject &chat, qint64 me, bool member) {
 	if (!member) {
 		flags |= Flag::f_left;
 	}
+	if (chat.value("verified").toBool()) flags |= Flag::f_verified;
+	if (chat.value("emoji_status").isObject()) flags |= Flag::f_emoji_status;
 	if (!username.isEmpty()) {
 		flags |= Flag::f_username;
 	}
@@ -146,7 +149,7 @@ MTPChat Channel(const QJsonObject &chat, qint64 me, bool member) {
 		MTPRecentStory(),
 		MTPPeerColor(),
 		MTPPeerColor(),
-		MTPEmojiStatus(),
+		PeerStatuses::NativeStatus(chat),
 		MTPint(),
 		MTPint(),
 		MTPlong(),

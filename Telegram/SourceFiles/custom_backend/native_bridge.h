@@ -733,6 +733,7 @@ private:
 	bool _topicChannelsPromptOffered = false;
 	std::unordered_map<qint64, QJsonObject> _communityChats;
 	std::unique_ptr<LiveUpdatesConnection> _liveUpdates;
+	rpl::lifetime _liveUpdatesLifetime;
 
 };
 

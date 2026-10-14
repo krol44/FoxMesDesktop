@@ -324,8 +324,8 @@ void CustomLoginWidget::complete(const QJsonDocument &doc) {
 	stop();
 	setStatus(tr::lng_fox_mes_login_done(tr::now));
 
-	CustomBackend::RememberLogin(doc);
 	const auto raw = &account();
+	CustomBackend::RememberLogin(raw, doc);
 	raw->setSessionUserId(UserId(id));
 	raw->createSession(
 		UserId(id),

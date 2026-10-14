@@ -41,6 +41,8 @@ class NativeBridge;
 
 [[nodiscard]] bool Enabled();
 inline constexpr bool DisableWhile = true;
+inline constexpr bool PremiumBadge = false;
+[[nodiscard]] inline bool HidesPremiumBadge() { return Enabled() && !PremiumBadge; }
 inline constexpr bool HideGroupExtras = true;
 [[nodiscard]] bool CanCreateGroups(Main::Session *session);
 [[nodiscard]] bool CanCreateChannels(Main::Session *session);
@@ -76,7 +78,9 @@ void ReleaseOnQuit(std::function<void()> release);
 [[nodiscard]] QJsonObject CurrentUser(Main::Session *session);
 [[nodiscard]] bool HasStoredAuth(Main::Session *session);
 
-void RememberLogin(const QJsonDocument &document);
+void RememberLogin(
+	not_null<Main::Account*> account,
+	const QJsonDocument &document);
 void RememberUser(Main::Session *session, const QJsonObject &user);
 void RememberEventSequence(Main::Session *session, qint64 seq);
 [[nodiscard]] QByteArray LoadChatsCache(Main::Session *session);

@@ -321,10 +321,12 @@ void Runner::captureAndInspect(
 		Fn<bool(QWidget*)> ready,
 		Fn<void(QWidget*, const QImage &)> inspect,
 		crl::time timeout,
-		Fn<QString(QWidget*)> readinessDetails) {
+		Fn<QString(QWidget*)> readinessDetails,
+		Fn<QString()> skipReason) {
 	const auto capture = std::make_shared<PreparedWidgetCapture>();
 	add({
 		.name = u"capture painted widget: %1"_q.arg(name),
+		.skipReason = std::move(skipReason),
 		.until = [=] {
 			const auto widget = resolve();
 			if (!capture->prepare(widget)) {
@@ -359,6 +361,17 @@ bool Runner::empty() const {
 	return _stages.empty();
 }
 
+void Runner::onFinish(Fn<void()> callback) {
+	if (!callback) {
+		return;
+	}
+	if (_finished) {
+		callback();
+		return;
+	}
+	_onFinish.push_back(std::move(callback));
+}
+
 void Runner::start() {
 	Expects(!_started && !_stages.empty());
 
@@ -370,6 +383,9 @@ void Runner::start() {
 	});
 	_watchdog.callOnce(WatchdogTimeout());
 	beginStage();
+	if (_finished) {
+		return;
+	}
 	_ticker.setCallback([=] { tick(); });
 	_ticker.callEach(kTickInterval);
 }
@@ -396,11 +412,24 @@ void Runner::tick() {
 }
 
 void Runner::beginStage() {
-	const auto &stage = _stages[_index];
-	Step(stage.name);
-	_stageStarted = crl::now();
-	if (stage.run) {
-		stage.run();
+	while (true) {
+		const auto &stage = _stages[_index];
+		Step(stage.name);
+		_stageStarted = crl::now();
+		const auto reason = stage.skipReason
+			? stage.skipReason()
+			: QString();
+		if (reason.isEmpty()) {
+			if (stage.run) {
+				stage.run();
+			}
+			return;
+		}
+		Skipped(stage.name, reason);
+		if (++_index == int(_stages.size())) {
+			finish();
+			return;
+		}
 	}
 }
 
@@ -423,15 +452,23 @@ void Runner::finish() {
 	_finished = true;
 	_ticker.cancel();
 	_watchdog.cancel();
+	const auto releases = std::move(_onFinish);
+	for (const auto &callback : releases) {
+		callback();
+	}
 	const auto fuseDeadline = crl::now() + kAbortAfterQuit;
 	QTimer::singleShot(int(kAbortAfterQuit), [=] {
 		ResolveQuitFuse(fuseDeadline);
 	});
 	base::call_delayed(kFinishDrainDelay, [] {
 		const auto failures = FailureCount();
-		LogRaw(u"SCENARIO_RESULT: %1 (failures: %2)"_q.arg(
+		const auto skipped = SkippedCount();
+		LogRaw(u"SCENARIO_RESULT: %1 (failures: %2%3)"_q.arg(
 			failures ? u"FAIL"_q : u"PASS"_q,
-			QString::number(failures)));
+			QString::number(failures),
+			skipped
+				? u", skipped: %1"_q.arg(skipped)
+				: QString()));
 		Complete();
 		Core::Quit();
 	});
@@ -459,6 +496,99 @@ void Start() {
 		return;
 	}
 	runner.start();
+}
+
+void AppendFinishReleaseSelfTest(
+		not_null<Runner*> runner,
+		FinishReleasePath path,
+		bool registerRelease) {
+	struct State {
+		base::Timer timer;
+		int releaseCount = 0;
+	};
+	const auto state = std::make_shared<State>();
+	state->timer.setCallback([] {});
+	state->timer.callEach(crl::time(5));
+
+	if (registerRelease) {
+		runner->onFinish([=] {
+			state->timer.cancel();
+			++state->releaseCount;
+			Note(u"finish-release: ran count=%1"_q.arg(state->releaseCount));
+			if (path == FinishReleasePath::LateRegister) {
+				runner->onFinish([=] {
+					Note(u"finish-release: late-ran"_q);
+				});
+			}
+		});
+	}
+
+	const auto skipReason = [=] {
+		return u"applies=0: finish-release skip-to-end armed=%1"_q.arg(
+			state->timer.isActive() ? 1 : 0);
+	};
+	const auto neverReady = [=] {
+		return !state->timer.isActive();
+	};
+	const auto requireArmed = [=] {
+		Check(
+			state->timer.isActive(),
+			u"finish-release self-test: the 5 ms timer is still armed"_q,
+			u"armed=%1"_q.arg(state->timer.isActive() ? 1 : 0));
+	};
+
+	switch (path) {
+	case FinishReleasePath::Timeout:
+		runner->add({
+			.name = u"finish-release self-test: timeout"_q,
+			.until = neverReady,
+			.timeout = crl::time(500),
+		});
+		return;
+	case FinishReleasePath::Watchdog:
+		runner->add({
+			.name = u"finish-release self-test: watchdog"_q,
+			.until = neverReady,
+			.timeout = kDefaultStageTimeout,
+		});
+		return;
+	case FinishReleasePath::Complete:
+		runner->add({
+			.name = u"finish-release self-test: complete"_q,
+			.then = requireArmed,
+		});
+		return;
+	case FinishReleasePath::CompleteWithTeardown:
+		runner->add({
+			.name = u"finish-release self-test: work"_q,
+			.then = requireArmed,
+		});
+		runner->add({
+			.name = u"finish-release self-test: teardown"_q,
+			.then = [=] {
+				requireArmed();
+				Note(u"finish-release: teardown-ran"_q);
+			},
+		});
+		return;
+	case FinishReleasePath::SkipAll:
+		runner->add({
+			.name = u"finish-release self-test: skipped first"_q,
+			.skipReason = skipReason,
+		});
+		runner->add({
+			.name = u"finish-release self-test: skipped last"_q,
+			.skipReason = skipReason,
+		});
+		return;
+	case FinishReleasePath::LateRegister:
+		runner->add({
+			.name = u"finish-release self-test: late register"_q,
+			.then = requireArmed,
+		});
+		return;
+	}
+	Unexpected("Unknown FinishReleasePath");
 }
 
 } // namespace Test

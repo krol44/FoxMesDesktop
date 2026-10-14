@@ -59,13 +59,15 @@ index 0000000..5ade5f6
 +    return strm ? BZ_OK : BZ_PARAM_ERROR;
 +}
 diff --git a/external/ffmpeg/CMakeLists.txt b/external/ffmpeg/CMakeLists.txt
-index 7854c9f..2e36d12 100644
+index 7854c9f..476ab67 100644
 --- a/external/ffmpeg/CMakeLists.txt
 +++ b/external/ffmpeg/CMakeLists.txt
-@@ -45,5 +45,5 @@ INTERFACE
+@@ -45,5 +45,7 @@ INTERFACE
  )
  
  if (APPLE)
 -    target_link_libraries(external_ffmpeg INTERFACE bz2)
 +    target_link_libraries(external_ffmpeg INTERFACE desktop-app::external_bzip2_stub)
++elseif (WIN32)
++    target_link_libraries(external_ffmpeg INTERFACE mfuuid)
  endif()

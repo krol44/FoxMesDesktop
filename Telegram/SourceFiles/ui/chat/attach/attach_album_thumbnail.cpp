@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/chat/attach/attach_album_thumbnail.h"
 
 #include "core/mime_type.h" // Core::IsMimeSticker.
+#include "lang/lang_keys.h"
 #include "ui/chat/attach/attach_prepare.h"
 #include "ui/image/image_prepare.h"
 #include "ui/text/format_values.h"
@@ -42,10 +43,12 @@ AlbumThumbnail::AlbumThumbnail(
 , _fullPreview(file.videoCover ? file.videoCover->preview : file.preview)
 , _shrinkSize(int(std::ceil(st::roundRadiusLarge / 1.4)))
 , _isPhoto(file.type == PreparedFile::Type::Photo)
-, _isVideo(file.type == PreparedFile::Type::Video)
+, _isVideo((file.type == PreparedFile::Type::Video)
+	|| file.hasAudioEditScene())
 , _canEditVideo(file.canEditVideo())
 , _canShowHighQualityBadge(file.canUseHighQualityPhoto())
-, _canShowAnimatedBadge(file.hasAnimatedEditScene())
+, _canShowAnimatedBadge(file.hasAnimatedEditScene()
+	&& !file.hasAudioEditScene())
 , _videoQuality(file.videoQuality())
 , _ttlSeconds(file.ttlSeconds)
 , _isCompressedSticker(Core::IsMimeSticker(file.information->filemime))
@@ -98,7 +101,10 @@ AlbumThumbnail::AlbumThumbnail(
 		- st::sendBoxAlbumGroupSkipRight;
 	_captionAvailableWidth = availableCaptionWidth;
 	const auto filepath = file.path;
-	if (filepath.isEmpty()) {
+	if (file.archive) {
+		_name = file.displayName;
+		_status = tr::lng_folder_archive_status(tr::now);
+	} else if (filepath.isEmpty()) {
 		_name = file.displayName.isEmpty()
 			? "image.png"
 			: file.displayName;

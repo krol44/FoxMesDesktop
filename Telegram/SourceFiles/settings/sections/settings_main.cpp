@@ -31,10 +31,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_cloud_themes.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
+#include "info/info_memento.h"
 #include "info/profile/info_profile_badge.h"
 #include "info/profile/info_profile_emoji_status_panel.h"
 #include "info/profile/info_profile_phone_menu.h"
 #include "info/profile/info_profile_values.h"
+#include "info/stories/info_stories_widget.h"
 #include "lang/lang_cloud_manager.h"
 #include "lang/lang_instance.h"
 #include "lang/lang_keys.h"
@@ -374,10 +376,13 @@ void BuildSectionButtons(SectionBuilder &builder) {
 	const auto showOther = builder.showOther();
 
 	if (!session->supportMode()) {
-		builder.addSectionButton({
+		builder.addButton({
 			.title = tr::lng_settings_my_account(),
-			.targetSection = InformationId(),
 			.icon = { &st::menuIconProfile },
+			.onClick = [=] {
+				controller->showSection(
+					Info::Stories::MakeMyProfile(session->user()));
+			},
 			.keywords = { u"profile"_q, u"edit"_q, u"information"_q },
 		});
 	}
@@ -389,15 +394,12 @@ void BuildSectionButtons(SectionBuilder &builder) {
 		.keywords = { u"alerts"_q, u"sounds"_q, u"badge"_q },
 	});
 
-	if (!CustomBackend::Enabled()) {
-		builder.addSectionButton({
-			.title = tr::lng_settings_section_privacy(),
-			.targetSection = PrivacySecurityId(),
-			.icon = { &st::menuIconLock },
-			.keywords = { u"security"_q, u"passcode"_q, u"password"_q, u"2fa"_q },
-		});
-
-	}
+	builder.addSectionButton({
+		.title = tr::lng_settings_section_privacy(),
+		.targetSection = PrivacySecurityId(),
+		.icon = { &st::menuIconLock },
+		.keywords = { u"security"_q, u"passcode"_q, u"password"_q, u"2fa"_q },
+	});
 
 	if (!CustomBackend::Enabled() || CustomBackend::Folders::Supported(session)) {
 		const auto preload = [=] {

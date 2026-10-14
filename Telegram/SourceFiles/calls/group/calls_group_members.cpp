@@ -1612,6 +1612,8 @@ void Members::Controller::addMuteActionsToContextMenu(
 			Group::kMaxVolume,
 			muted,
 			st::groupCallMenuVolumePadding);
+		volumeItem->setCanMute(!isMe(participantPeer)
+			&& !(participantIsCallAdmin && _call->canManage()));
 
 		mutesFromVolume = volumeItem->toggleMuteRequests();
 

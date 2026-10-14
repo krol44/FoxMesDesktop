@@ -5,6 +5,7 @@ This file is part of FoxMes Desktop.
 #include "custom_backend/native_reactions_adapter.h"
 #include "custom_backend/native_appearance_adapter.h"
 #include "custom_backend/native_folders_adapter.h"
+#include "custom_backend/native_peer_status_adapter.h"
 
 #include "base/unixtime.h"
 #include "core/application.h"
@@ -100,6 +101,7 @@ QString ErrorType(
 
 bool Intercepts(const SerializedRequest &request) {
 	return HistoryPages::Intercepts(request)
+		|| PeerStatuses::Intercepts(request)
 		|| Folders::Intercepts(request)
         || Reactions::Intercepts(request)
 		|| Appearance::Intercepts(request)
@@ -116,6 +118,8 @@ void Intercept(
 		const SerializedRequest &request) {
 	if (HistoryPages::Intercepts(request)) {
 		HistoryPages::Intercept(instance, requestId, request);
+	} else if (PeerStatuses::Intercepts(request)) {
+		PeerStatuses::Intercept(instance, requestId, request);
 	} else if (Folders::Intercepts(request)) {
         Folders::Intercept(instance, requestId, request);
     } else if (Reactions::Intercepts(request)) {

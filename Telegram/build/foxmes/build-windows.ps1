@@ -5,7 +5,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$version = "1.10.0"
+$version = "1.11.0"
 $telegramRoot = Join-Path $SourceRoot "Telegram"
 $buildRoot = Join-Path $SourceRoot "out"
 $librariesPath = Join-Path (Split-Path -Parent $SourceRoot) "Libraries\win64"
@@ -45,7 +45,10 @@ function Remove-UnusedLibraryFiles() {
         ".lib", ".a", ".exe", ".h", ".hpp", ".inc", ".cmake", ".pc", ".pl", ".bat")
     $keepFragments = @(
         "\include\", "\objects-", "\cache_keys\", "\patches\",
-        "\nv-codec-headers\")
+        "\nv-codec-headers\", "\tdesktop_rust\out\src\")
+    # tdesktop_rust compiles these checkouts, so a stale tdesktop_rust key
+    # needs their full sources; their cargo target directories are not needed.
+    $sourceFragments = @("\win64\tlottie\", "\win64\wallet-engine\")
 
     $removed = 0
     Get-ChildItem -LiteralPath $librariesPath -Recurse -File -Force `
@@ -55,6 +58,11 @@ function Remove-UnusedLibraryFiles() {
             $path = $_.FullName.Replace([char]47, [char]92)
             foreach ($fragment in $keepFragments) {
                 if ($path.Contains($fragment)) { $keep = $true; break }
+            }
+            if (-not $keep -and -not $path.Contains("\target\")) {
+                foreach ($fragment in $sourceFragments) {
+                    if ($path.Contains($fragment)) { $keep = $true; break }
+                }
             }
         }
         if (-not $keep) {
@@ -158,7 +166,7 @@ if ($LASTEXITCODE -ne 0) { throw "Windows build failed." }
 if (-not (Test-Path $executable)) { throw "FoxMes.exe was not produced." }
 $versionInfo = (Get-Item $executable).VersionInfo
 if ("$($versionInfo.CompanyName)".Trim() -ne "Foxtail") { throw "Unexpected executable publisher." }
-if ($versionInfo.ProductVersion -notlike "1.10.0*") { throw "Unexpected executable version." }
+if ($versionInfo.ProductVersion -notlike "1.11.0*") { throw "Unexpected executable version." }
 
 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $ArtifactRoot
 New-Item -ItemType Directory -Force -Path $ArtifactRoot | Out-Null
@@ -203,7 +211,7 @@ if ($observedVersion -ne $version) {
     throw "Unexpected installer version: '$($observedVersion)'."
 }
 if ((Get-AuthenticodeSignature $setup).Status -ne "NotSigned") {
-    throw "The version 1.10.0 installer must be unsigned."
+    throw "The version 1.11.0 installer must be unsigned."
 }
 
 $temporaryRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { $env:TEMP }

@@ -18,6 +18,7 @@
 #include "custom_backend/native_reactions_adapter.h"
 #include "custom_backend/native_stickers_adapter.h"
 #include "custom_backend/native_runtime.h"
+#include "custom_backend/native_peer_status_adapter.h"
 #include "custom_backend/native_scheduled_adapter.h"
 #include "custom_backend/native_streaming_loader.h"
 #include "custom_backend/native_topic_channels.h"
@@ -1030,7 +1031,6 @@ NativeBridge::NativeBridge(Main::Session *session)
 	});
 	loadReadJournal();
     Ui::ThanosEffect::WarmUp();
-    _session->user()->addFlags(UserDataFlag::Premium);
     const auto me = CurrentUser(_session);
     if (!me.isEmpty()) {
         ensureUser(me, false);
@@ -1072,6 +1072,10 @@ NativeBridge::NativeBridge(Main::Session *session)
 			}
 		},
 		[=](QString message) { onWebSocketMessage(message); });
+	client().transportFailures(
+	) | rpl::on_next([=] {
+		_liveUpdates->checkNow();
+	}, _liveUpdatesLifetime);
 	for (const auto &controller : _session->windows()) {
 		trackWindow(controller);
 	}
@@ -1445,6 +1449,7 @@ void NativeBridge::clearPendingSend(qint64 localId) {
 }
 
 void NativeBridge::ensureUser(const QJsonObject &user, bool contact) {
+    PeerStatuses::ApplyUser(_session, user);
     Appearance::Apply(_session, user);
     const auto id = user.value("id").toVariant().toLongLong();
     if (id <= 0) return;
@@ -1458,6 +1463,10 @@ void NativeBridge::ensureUser(const QJsonObject &user, bool contact) {
         data->setLoadedStatus(PeerData::LoadedStatus::Normal);
     }
     data->addFlags(UserDataFlag::CanPinMessages);
+    if (user.contains(u"premium"_q)) {
+        if (user.value(u"premium"_q).toBool()) data->addFlags(UserDataFlag::Premium);
+        else data->removeFlags(UserDataFlag::Premium);
+    }
     EnsureBarSettingsKnown(data);
     if (user.contains("is_contact")) {
         data->setIsContact(user.value("is_contact").toBool() && id != client().meId());
@@ -1689,6 +1698,7 @@ void NativeBridge::refreshSelf() {
 		}
 		weak->offerTopicChannels();
         Folders::Refresh(weak->_session);
+        PeerStatuses::Refresh(weak->_session);
 	});
 }
 
@@ -1913,12 +1923,13 @@ ChannelData *NativeBridge::applyCommunityChat(
         return nullptr;
     }
     const auto me = client().meId();
-    const auto linked = TopicChannels::WithDiscussion(chat);
+    const auto linked = PeerStatuses::Merge(_session, peerFromChannel(ChannelId(chatId)), TopicChannels::WithDiscussion(chat));
     const auto channel = _session->data().processChat(
         Community::Channel(linked, me, member))->asChannel();
     if (!channel) {
         return nullptr;
     }
+    PeerStatuses::Apply(_session, channel, linked);
     _communityChats[chatId] = linked;
     if (TopicChannels::IsTopicChannel(linked)) {
         applyCommunityChat(TopicChannels::DiscussionChat(linked), false);
@@ -6780,6 +6791,7 @@ void NativeBridge::handleEvent(const QJsonObject &event) {
             data.value("skipped_pinned_ids").toArray());
         _bottomLoadedChats.erase(chatId);
         reloadChats();
+	} else if (PeerStatuses::ApplyEvent(_session, type, data)) {
 	} else if (handleCommunityEvent(type, data)) {
 	} else if (type == u"chat.deleted"_q) {
 		const auto chatId = data.value("chat_id").toVariant().toLongLong();

@@ -2,6 +2,68 @@
 
 This guide defines repository-wide instructions for coding agents working with the Telegram Desktop codebase.
 
+## AI Tasks
+
+In this repository "task" is a specific term. It always means one work record in
+the sibling `ai-tdesktop` repository, never a `TODO` comment, a checklist item,
+or a unit of work invented during the current conversation. "The tasks", "the
+queue", "the board", "what's most pressing", and a bare task slug all refer to
+that queue.
+
+- The queue lives in `../ai-tdesktop`, a sibling of this checkout, with one
+  record per directory under `tasks/YYYY/MM/DD/<slug>/`. A task id is that dated
+  path, for example `2026/07/18/fix-community-forward`, and it is the only
+  durable link between a source commit and its task. Linked slot worktrees live
+  in `../ai-tdesktop-worktrees`. Read `../ai-tdesktop/AGENTS.md` before doing
+  anything inside that repository.
+- Each record holds `task.md` — one `# ` title line, then one self-contained
+  paragraph that is the task's description wherever it is summarized — and
+  `state.yaml` with `status`, `type`, `depends_on`, `claimed_by`, and dates.
+  Open statuses are `todo`, `in-progress`, `blocked`, and `split-required`;
+  `approved` is completed history, and `split.yaml` / `superseded.yaml` mark
+  retired records.
+- To browse the queue, read those files directly. Do not run `python3 ai.py`: it
+  is a full-screen browser for the user's own terminal and refuses to run in a
+  pipe. A compact open listing:
+
+```bash
+cd ../ai-tdesktop && for state in tasks/*/*/*/*/state.yaml; do
+  status=$(sed -n 's/^status: //p' "$state")
+  case "$status" in todo|in-progress|blocked|split-required)
+    dir=$(dirname "$state")
+    printf '%-14s %-70s %s\n' "$status" "${dir#tasks/}" \
+      "$(sed -n '1s/^# //p' "$dir/task.md")";;
+  esac
+done | sort
+```
+
+- When ranking open work by urgency, use `in-progress`, then `blocked`, then
+  `split-required`, then ready `todo` (no `claimed_by`, and every `depends_on`
+  already `approved`), then `todo` still waiting on a dependency. Say who owns
+  claimed work. This checkout's tag is the `Telegram/build/ai-machine-tag` value
+  plus the checkout folder name, such as `macbook-tdesktop`, and work claimed by
+  another checkout is never taken over without an explicit human reassignment.
+- Browsing is read-only. Listing, summarizing, comparing, or recommending tasks
+  never edits `state.yaml`, publishes a lifecycle commit, or starts
+  implementation, no matter how small the task looks.
+- Acting on an existing queue task goes through the workflow skills instead of
+  by hand: `perform-task <slug or full id>` starts or resumes and performs
+  exactly one known task, and `continue` drains eligible shared work. Source
+  commits owned by a task use the three-line form described under `## Commits`.
+- A request the user makes in conversation is ordinary work: do it directly in
+  this checkout. Do not write it to the ignored `../ai-tdesktop/inbox/inbox.md`,
+  and do not run `process-inbox` or `continue` over it, unless the user asks for
+  that. The queue's planning, review and evidence campaign costs hours, so
+  spending it on a request the user expected you to just do is a real error, not
+  thoroughness.
+- You may *offer* the queue when the work genuinely earns it: a large or
+  ambiguous change, one whose correctness needs a real testing campaign, or one
+  that is safety-, security- or data-safety-critical. Make the offer in one
+  line, say why, and route it only after the user approves. Absent approval,
+  implement it directly and say what you skipped.
+- Never guess between similarly named tasks. Report the matching full ids and
+  let the user choose.
+
 ## Working from Codex on Windows + WSL
 
 This checkout may be opened in Codex Desktop through the Windows UNC path `\\wsl.localhost\{distro}\home\{user}\Telegram\tdesktop`, while the real Linux path is `/home/{user}/Telegram/tdesktop`. Treat it as a WSL/Linux checkout first, not as a native Windows checkout.
@@ -342,30 +404,13 @@ Both app-level (`Core::Settings`) and session-level (`Main::SessionSettings`) us
 
 ## Coding Style
 
-**Do NOT write useless comments in code:**
+**Code comments:**
 
-This is important! Do not write single-line comments that describe what the next line does - they are bloat. Comments are allowed ONLY to describe complex algorithms in detail, when the explanation requires at least 4-5 lines. Self-documenting code with clear variable and function names is preferred.
+Comments of any kind in code are strictly prohibited unless explicitly requested by the developer.
 
-Do not remove existing comments just to satisfy this rule. Preserve comments unless your change makes them incorrect or truly obsolete; when moving or refactoring code, move the useful comment with it. Inline comments that label positional arguments for generated or schema-driven APIs (for example TL/MTP constructors) are useful because the field names are not visible in the call itself.
-
-```cpp
-// BAD - don't do this:
-// Get the user's name
-auto name = user->name();
-// Check if premium
-if (user->isPremium()) {
-
-// GOOD - no comments needed, code is self-explanatory:
-auto name = user->name();
-if (user->isPremium()) {
-
-// ACCEPTABLE - complex algorithm explanation (4+ lines):
-// The algorithm works by first collecting all visible messages
-// in the viewport, then calculating their intersection with
-// the clip rectangle. Messages are grouped by date headers,
-// and we need to account for sticky headers that may overlap
-// with the first message in each group.
-```
+Write all code comments strictly in English. Use ASD-STE100 Simplified Technical English, the standard
+used for aircraft maintenance manuals, with at least 80% adherence and up to 20% deviation.
+When you modify an existing comment in Russian, rewrite it in English to follow this standard.
 
 **Style and formatting rules** are in `REVIEW.md` — see that file for empty-line-before-closing-brace, operator placement in multi-line expressions, if-with-initializer, and other mechanical style rules.
 
@@ -797,6 +842,7 @@ auto filesTextProducer = tr::lng_files_selected(
 - Omit `tr::now` for reactive `rpl::producer<QString>`
 - Placeholders use `lt_tag_name, value` pattern
 - For `{count}`: immediate uses `int`, reactive uses `rpl::producer<float64>` with `| tr::to_count()`
+- Every plural form, `#one` included, keeps `{count}`: many languages put more than 1 into their "one" category (Russian: 21, 31, ...), so a `#one` phrase written for exactly 1 is wrong for them. When exactly 1 deserves different wording, add a separate non-plural key and pick it in code, so every language gets that special case
 - Move producers with `std::move` when passing to placeholders
 - Rich text projectors — these `tr::` helpers serve double duty: as the **last argument** (projector) they set the return type to `TextWithEntities`, and as **placeholder values** they wrap individual substitutions in formatting. Always prefer them over `Ui::Text::Bold()`, `Ui::Text::RichLangValue`, etc. — see REVIEW.md for the full mapping.
   - `tr::marked` — basic projection, converts `QString` to `TextWithEntities`
@@ -894,51 +940,29 @@ The `Error` template parameter defaults to `rpl::no_error`: `rpl::producer<Type,
 - Use `rpl::duplicate(producer)` to reuse a producer multiple times
 - Combined producers automatically unpack tuples in lambdas (works with `rpl::map`, `rpl::filter`, and `rpl::on_next`)
 
-<!-- gitnexus:start -->
-# GitNexus — Code Intelligence
+### Per-subscription state
 
-This project is indexed by GitNexus as **FoxMesDesktop** (246732 symbols, 476953 relationships, 392 execution flows).
+`rpl::on_next` stores the handler by value. Each emission invokes a *copy* of that stored handler, so a nested emit does not re-enter the running callable. Writes a `mutable` lambda makes to its own captures land on the copy and are discarded, so they never become per-subscription state.
 
-> Index stale? Run `node .gitnexus/run.cjs analyze --index-only` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? Bootstrap with `npx`, `bunx`, or `pnpm dlx` — e.g. `bunx gitnexus@latest analyze` (npm 11 npx crash; #1939).
+```cpp
+// BAD - compiles, runs, and grew is just value > 0 every time:
+events | rpl::on_next([last = 0](int value) mutable {
+    const auto grew = (value > last);
+    last = value;
+    if (grew) {
+        // ...
+    }
+}, lifetime);
 
-## Always Do
+// GOOD - state lives beside the handler:
+const auto last = lifetime.make_state<int>(0);
+events | rpl::on_next([=](int value) {
+    const auto grew = (value > *last);
+    *last = value;
+    if (grew) {
+        // ...
+    }
+}, lifetime);
+```
 
-- **MUST run impact before editing.** Use `impact({target: "symbolName", direction: "upstream"})` or `node .gitnexus/run.cjs impact "symbolName" --direction upstream --repo .`; report callers, processes, and risk. Never substitute grep for graph analysis.
-- **MUST analyze graph changes before committing.** Use `detect_changes({scope: "all"})` (MCP) or `node .gitnexus/run.cjs detect-changes --scope all --repo .` (CLI fallback). `partial: true` or `truncated: true` is not a clean check — a zero means unseen, not unaffected; re-run it. For regression review: `detect_changes({scope: "compare", base_ref: "master"})` or `node .gitnexus/run.cjs detect-changes --scope compare --base-ref "master" --repo .`.
-- MUST warn on HIGH/CRITICAL `risk` pre-edit; never use `riskSharedAxes` to waive a HIGH/CRITICAL `risk` warning. Compare File/symbol: MCP File omits axes; Graph-RAG expands File.
-- **MUST treat `risk: UNKNOWN` as unresolved, not as low.** An empty caller set is not evidence the symbol is unused — it can also mean the callers are not resolvable by the index (plain-object property access, dynamic dispatch, cross-language calls). `impact` pairs `UNKNOWN` with a `riskNote` saying so. Confirm with a text search before treating the symbol as safe to change or delete; do not proceed on the strength of a zero.
-- **MUST use `query({search_query: "concept"})` for concepts/flows, `context({name: "symbolName"})` for a named symbol, or `impact` for blast radius, on read-only callers, dependencies, imports, or execution flow.** Graph first; text search only for empty/`UNKNOWN`/literals.
-- For security review, `explain({target: "fileOrSymbol"})` lists taint findings (source→sink flows; needs `analyze --pdg`).
-
-## Never Do
-
-- NEVER edit a function, class, or method before MCP/CLI impact analysis.
-- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis, and never read `UNKNOWN` as an all-clear — it means the walk could not answer, which is the one verdict that requires confirming by other means.
-- NEVER rename symbols with find-and-replace — use `rename` which understands the call graph.
-- NEVER commit before MCP/CLI graph change analysis.
-
-## Resources
-
-| Resource | Use for |
-| --- | --- |
-| `gitnexus://repo/FoxMesDesktop/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/FoxMesDesktop/clusters` | All functional areas |
-| `gitnexus://repo/FoxMesDesktop/processes` | All execution flows |
-| `gitnexus://repo/FoxMesDesktop/process/{name}` | Step-by-step execution trace |
-
-## Cross-Repo Groups
-
-This repository is listed under GitNexus **group(s): fxl** (see `~/.gitnexus/groups/`). For cross-repo analysis, use MCP tools `impact`, `query`, and `context` with `repo` set to `@<groupName>` or `@<groupName>/<memberPath>` (paths match keys in that group’s `group.yaml`). Use `group_list` / `group_sync` for membership and sync. From the project root: `node .gitnexus/run.cjs group list`, `node .gitnexus/run.cjs group sync <name>`, `node .gitnexus/run.cjs group impact <name> --target <symbol> --repo <group-path>` (the `.gitnexus/run.cjs` path is repo-root-relative).
-
-## CLI
-
-| Task | Read this skill file |
-| --- | --- |
-| Understand architecture / "How does X work?" | `.claude/skills/gitnexus-exploring/SKILL.md` |
-| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus-impact-analysis/SKILL.md` |
-| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus-debugging/SKILL.md` |
-| Rename / extract / split / refactor | `.claude/skills/gitnexus-refactoring/SKILL.md` |
-| Tools, resources, schema reference | `.claude/skills/gitnexus-guide/SKILL.md` |
-| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus-cli/SKILL.md` |
-
-<!-- gitnexus:end -->
+Keep per-subscription state in `lifetime.make_state<T>()`, behind a `shared_ptr`, or on the object that owns the subscription. A `mutable` lambda that is one-shot — `rpl::take(1)`, a self-destroying subscription, a `crl::on_main` or `crl::async` callback, a `done` or `error` callback — is not this trap.

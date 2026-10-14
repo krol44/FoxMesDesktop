@@ -381,10 +381,46 @@ void SendFavorite(not_null<Main::Session*> session, DocumentId id) {
 	}
 }
 
+void ApplyOrder(not_null<Main::Session*> session) {
+	const auto &state = StateFor(session);
+	auto &stickers = session->data().stickers();
+	auto &order = stickers.setsOrderRef();
+	auto desired = std::vector<uint64>();
+	for (const auto &item : Reactions::Catalog(session)) {
+		const auto setId = SetIdFor(item.category);
+		if (ranges::contains(state.setIds, setId)
+			&& ranges::contains(order, setId)
+			&& !ranges::contains(desired, setId)) {
+			desired.push_back(setId);
+		}
+	}
+	for (const auto setId : order) {
+		if (ranges::contains(state.setIds, setId)
+			&& !ranges::contains(desired, setId)) {
+			desired.push_back(setId);
+		}
+	}
+	auto index = 0;
+	auto changed = false;
+	for (auto &setId : order) {
+		if (ranges::contains(state.setIds, setId)) {
+			const auto desiredId = desired[index++];
+			if (setId != desiredId) {
+				setId = desiredId;
+				changed = true;
+			}
+		}
+	}
+	if (changed) {
+		stickers.notifyUpdated(Data::StickersType::Stickers);
+	}
+}
+
 void Apply(not_null<Main::Session*> session) {
 	for (const auto &item : Reactions::Catalog(session)) {
 		ApplyOne(session, item);
 	}
+	ApplyOrder(session);
 	ApplyFavorites(session);
 }
 

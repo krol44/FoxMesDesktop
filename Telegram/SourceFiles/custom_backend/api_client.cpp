@@ -144,6 +144,18 @@ bool IsTransportFailure(int status) {
 ApiClient::ApiClient(QUrl baseUrl, QObject *parent)
 : QObject(parent)
 , _baseUrl(normalizeBase(std::move(baseUrl))) {
+    QObject::connect(
+        &_network,
+        &QNetworkAccessManager::finished,
+        this,
+        [=](QNetworkReply *reply) {
+            const auto status = reply->attribute(
+                QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            if (reply->error() != QNetworkReply::NoError
+                && IsTransportFailure(status)) {
+                _transportFailures.fire({});
+            }
+        });
     if (DevInsecureTls()) {
         QObject::connect(
             &_network,
@@ -1411,6 +1423,21 @@ void ApiClient::appearanceRequest(const QByteArray &method, const QString &path,
                     else finish({}, error.isEmpty() ? u"Appearance confirmation unavailable"_q : error, 0);
                 });
         });
+}
+
+void ApiClient::peerStatusRequest(const QByteArray &method, const QString &path, QJsonObject body, Callback done) {
+    const auto identity = baseUrl().toString() + u":"_q + QString::number(meId()) + u":"_q + QString::fromLatin1(method) + path;
+    const auto key = u"FoxMes/appearancePending/"_q + QString::fromLatin1(QCryptographicHash::hash(identity.toUtf8(), QCryptographicHash::Sha256).toHex());
+    QSettings settings;
+    auto previous = QJsonDocument::fromJson(settings.value(key).toByteArray()).object();
+    previous.remove("operation_id");
+    auto previousIntent = previous;
+    previousIntent.remove("expected_revision");
+    auto intent = body;
+    intent.remove("expected_revision");
+    intent.remove("operation_id");
+    if (!previous.isEmpty() && previousIntent == intent) body = previous;
+    appearanceRequest(method, path, std::move(body), std::move(done));
 }
 
 void ApiClient::setChatAppearance(qint64 chatId, QJsonObject body, Callback done) {

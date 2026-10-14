@@ -14,6 +14,10 @@
 
 class QWebSocket;
 
+namespace base {
+class NetworkReachability;
+} // namespace base
+
 namespace CustomBackend {
 
 enum class LiveUpdatesState {
@@ -45,6 +49,7 @@ public:
 	void start();
 	void stop();
 	void restartNow();
+	void checkNow();
 	void setPresenceChat(qint64 chatId);
 
 	[[nodiscard]] LiveUpdatesStatus status() const;
@@ -56,6 +61,8 @@ private:
 	void failAttempt(QWebSocket *socket);
 	void socketConnected(QWebSocket *socket);
 	void socketMessage(QWebSocket *socket, QString message);
+	void pongTimedOut();
+	void stopHeartbeat();
 	void destroySocket();
 	void setStatus(LiveUpdatesStatus status);
 	void sendPresence();
@@ -65,12 +72,16 @@ private:
 	MessageCallback _message;
 	rpl::variable<LiveUpdatesStatus> _status;
 	QTimer _retryTimer;
+	QTimer _heartbeatTimer;
+	QTimer _pongTimer;
 	std::unique_ptr<QWebSocket> _webSocket;
+	const std::shared_ptr<base::NetworkReachability> _networkReachability;
 	int _retryTimeout = 1;
 	bool _running = false;
 	bool _stopped = false;
 	bool _attemptFailed = false;
 	qint64 _presenceChatId = 0;
+	rpl::lifetime _lifetime;
 
 };
 

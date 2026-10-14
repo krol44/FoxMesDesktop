@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/controls/history_view_bottom_controls.h"
 #include "history/view/controls/history_view_compose_controls.h"
 #include "history/view/controls/history_view_compose_search.h"
+#include "history/view/controls/history_view_compose_stash.h"
 #include "history/view/controls/history_view_draft_options.h"
 #include "history/view/controls/history_view_suggest_options.h"
 #include "history/view/history_view_about_view.h"
@@ -106,11 +107,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_replies_list.h"
 #include "data/data_peer_values.h"
 #include "data/data_changes.h"
+#include "data/data_compose_stash.h"
 #include "data/data_drafts.h"
 #include "data/data_shared_media.h"
 #include "data/data_send_action.h"
 #include "data/data_premium_limits.h"
 #include "data/notify/data_notify_settings.h"
+#include "storage/storage_folder_archive.h"
 #include "storage/storage_media_prepare.h"
 #include "storage/storage_account.h"
 #include "storage/localimageloader.h"
@@ -513,7 +516,6 @@ ChatWidget::ChatWidget(
 	}, lifetime());
 
 	setupRoot();
-	setupShortcuts();
 
 	_peer->updateFull();
 	if (const auto channel = _peer->asMegagroup()) {
@@ -575,7 +577,6 @@ ChatWidget::ChatWidget(
 			.repliesRootId = _repliesRootId,
 			.topic = _topic,
 			.sublist = _sublist,
-			.monoforumPeerId = _monoforumPeerId,
 			.scroll = _scroll.get(),
 			.list = _inner.data(),
 			.keyboardReservedHeight = [=] {
@@ -757,9 +758,15 @@ ChatWidget::ChatWidget(
 		if (_creatingBotTopic
 			&& action.history == _creatingBotTopic->owningHistory()
 			&& action.replyTo.topicRootId == _creatingBotTopic->rootId()) {
-			Ui::PostponeCall(_creatingBotTopic, [=] {
+			// Guard 'this' (the call reads _creatingBotTopic) and re-check
+			// the topic: it may be gone or already handled by another call.
+			const auto weak = base::make_weak(_creatingBotTopic);
+			Ui::PostponeCall(this, [=] {
 				using namespace HistoryView;
 				const auto topic = base::take(_creatingBotTopic);
+				if (!topic || topic != weak.get()) {
+					return;
+				}
 				controller->showSection(
 					std::make_shared<ChatMemento>(ChatViewId{
 						.history = topic->owningHistory(),
@@ -844,6 +851,8 @@ ChatWidget::ChatWidget(
 
 	setupTopicViewer();
 	setupComposeControls();
+	setupComposeStash();
+	setupShortcuts();
 	setupSwipeReplyAndBack();
 
 	if (mode() != Mode::Sublist) {
@@ -1305,7 +1314,7 @@ void ChatWidget::subscribeToTopic() {
 void ChatWidget::closeCurrent() {
 	const auto thread = controller()->windowId().chat();
 	if ((_sublist && thread == _sublist) || (_topic && thread == _topic)) {
-		controller()->window().close();
+		Core::App().closeWindow(&controller()->window());
 	} else {
 		controller()->showBackFromStack(Window::SectionShow(
 			anim::type::normal,
@@ -1607,8 +1616,8 @@ void ChatWidget::setupComposeControls() {
 	}, lifetime());
 
 	_composeControls->scrollToMaxRequests(
-	) | rpl::on_next([=] {
-		send({});
+	) | rpl::on_next([=](Api::SendOptions options) {
+		send(options);
 	}, lifetime());
 
 	_composeControls->sendVoiceRequests(
@@ -1794,6 +1803,9 @@ void ChatWidget::setupComposeControls() {
 	) | rpl::on_next([=] {
 		_cornerButtons.updateJumpDownVisibility();
 		_cornerButtons.updateUnreadThingsVisibility();
+		if (_stash) {
+			_stash->updateButton();
+		}
 	}, lifetime());
 
 	_composeControls->viewportEvents(
@@ -1882,7 +1894,8 @@ void ChatWidget::setupSwipeReplyAndBack() {
 				&& (!view->data()->isEphemeral()
 					|| view->data()->out()))
 			|| view->data()->showSimilarChannels()
-			|| view->data()->isService()) {
+			|| (view->data()->isService()
+				&& !ServiceAllowsSwipeReply(view->data()))) {
 			return result;
 		}
 		const auto item = _inner->lookupItemByPoint(
@@ -1997,6 +2010,33 @@ bool ChatWidget::confirmSendingFiles(
 	const auto premium = controller()->session().user()->isPremium();
 
 	if (const auto urls = Core::ReadMimeUrls(data); !urls.empty()) {
+		const auto folder = Storage::SingleFolderPath(urls);
+		if (!folder.isEmpty()) {
+			if (overrideSendImagesAsPhotos == false
+				&& !_composeControls->isEditingMessage()) {
+				const auto files = Storage::FolderFilesForSending(folder);
+				if (!files.isEmpty()) {
+					auto list = Storage::PrepareMediaList(
+						files,
+						st::sendMediaPreviewSize,
+						premium);
+					confirmSendingFiles(std::move(list), QString());
+				}
+			} else {
+				auto list = Ui::PreparedList();
+				list.files.push_back(Storage::PrepareFolderArchive(folder));
+				confirmSendingFiles(std::move(list), QString());
+			}
+			return true;
+		}
+		if (overrideSendImagesAsPhotos == true
+			&& (Storage::ComputeMimeDataState(data)
+				== Storage::MimeDataState::FilesArchive)) {
+			auto list = Ui::PreparedList();
+			list.files.push_back(Storage::PrepareFilesArchive(urls));
+			confirmSendingFiles(std::move(list), QString());
+			return true;
+		}
 		auto list = Storage::PrepareMediaList(
 			urls,
 			st::sendMediaPreviewSize,
@@ -2040,6 +2080,7 @@ bool ChatWidget::confirmSendingFiles(
 		Api::SendType::Normal,
 		sendMenuDetails());
 	box->setReplyTo(_composeControls->replyingToMessage());
+	_sendFilesBox = box.data();
 
 	box->setConfirmedCallback(crl::guard(this, [=](
 			std::shared_ptr<Ui::PreparedBundle> bundle,
@@ -2051,6 +2092,11 @@ bool ChatWidget::confirmSendingFiles(
 		}
 		sendingFilesConfirmed(std::move(bundle), options);
 	}));
+	box->setStashCallbacks(
+		crl::guard(this, [=] { return _stash->canTakeFromBox(); }),
+		crl::guard(this, [=](SendFilesStashed &&stashed) {
+			_stash->takeFromBox(std::move(stashed));
+		}));
 	box->setCancelledCallback(_composeControls->restoreTextCallback(
 		insertTextOnCancel));
 	box->takeTextWithTagsRequests() | rpl::on_next([=](TextWithTags &&text) {
@@ -3048,6 +3094,9 @@ void ChatWidget::updateControlsVisibility() {
 		}
 	});
 	_bottom->updateControlsVisibility();
+	if (_stash) {
+		_stash->updateButton();
+	}
 	const auto active = _bottom->isButtonActive();
 	const auto choosingTheme = isChoosingTheme();
 	const auto hasSublistReplacement = _bottom->hasOpenChatButton()
@@ -5748,7 +5797,7 @@ void ChatWidget::listOpenPhoto(
 		photo,
 		{
 			context,
-			(item && !_monoforumPeerId)
+			(item && _peer->isForum())
 				? item->topicRootId()
 				: _repliesRootId,
 			_monoforumPeerId,
@@ -5770,7 +5819,7 @@ void ChatWidget::listOpenDocument(
 		showInMediaView,
 		{
 			context,
-			(item && !_monoforumPeerId)
+			(item && _peer->isForum())
 				? item->topicRootId()
 				: _repliesRootId,
 			_monoforumPeerId,
@@ -5990,7 +6039,9 @@ void ChatWidget::setupDragArea() {
 		this,
 		filter,
 		nullptr,
-		[=] { updateControlsGeometry(); });
+		[=] { updateControlsGeometry(); },
+		nullptr,
+		[=] { return _composeControls->isEditingMessage(); });
 
 	const auto droppedCallback = [=](bool overrideSendImagesAsPhotos) {
 		return [=](const QMimeData *data) {
@@ -6000,6 +6051,15 @@ void ChatWidget::setupDragArea() {
 	};
 	areas.document->setDroppedCallback(droppedCallback(false));
 	areas.photo->setDroppedCallback(droppedCallback(true));
+	areas.photo->setArchiveDroppedCallback([=](const QMimeData *data) {
+		const auto urls = Core::ReadMimeUrls(data);
+		if (!urls.isEmpty()) {
+			auto list = Ui::PreparedList();
+			list.files.push_back(Storage::PrepareFilesArchive(urls));
+			confirmSendingFiles(std::move(list), QString());
+		}
+		Window::ActivateWindow(controller());
+	});
 }
 
 void ChatWidget::setupShortcuts() {
@@ -6029,18 +6089,23 @@ void ChatWidget::setupShortcuts() {
 						_history));
 				return true;
 			});
-		if (mode() == Mode::History) {
-			const auto channel = _peer->asChannel();
-			const auto hasRecentActions = channel
-				&& (channel->hasAdminRights() || channel->amCreator());
-			if (hasRecentActions) {
-				request->check(Command::ShowAdminLog, 1) && request->handle([=] {
-					controller()->showSection(
-						std::make_shared<AdminLog::SectionMemento>(channel));
-					return true;
-				});
-			}
+		const auto channel = _sublist ? nullptr : _peer->asChannel();
+		const auto hasRecentActions = channel
+			&& (channel->hasAdminRights() || channel->amCreator());
+		if (hasRecentActions) {
+			request->check(Command::ShowAdminLog, 1) && request->handle([=] {
+				controller()->showSection(
+					std::make_shared<AdminLog::SectionMemento>(channel));
+				return true;
+			});
 		}
+		_stash
+			&& _stash->canExchange()
+			&& request->check(Command::StashMessage, 1)
+			&& request->handle([=] {
+				_stash->exchange();
+				return true;
+			});
 		if ((mode() == Mode::History) && session().supportMode()) {
 			request->check(Command::SupportToggleMuted)
 				&& request->handle([=] {
@@ -6048,6 +6113,57 @@ void ChatWidget::setupShortcuts() {
 					return true;
 				});
 		}
+	}, lifetime());
+}
+
+void ChatWidget::setupComposeStash() {
+	using namespace HistoryView::Controls;
+	_stash = std::make_unique<StashManager>(StashManagerDescriptor{
+		.session = &session(),
+		.buttons = &_cornerButtons,
+		.show = controller()->uiShow(),
+		.history = [=] { return _history.get(); },
+		.key = [=] { return _composeControls->composeStashKey(); },
+		.allowed = [=] { return _composeControls->canUseComposeStash(); },
+		.hasContent = [=] {
+			return _composeControls->hasStashableContent();
+		},
+		.canSendTexts = [=] { return _composeControls->canSendTexts(); },
+		.take = [=] {
+			auto result = _composeControls->takeComposeStash();
+			if (result) {
+				cancelSuggestPost();
+			}
+			return result;
+		},
+		.apply = [=](Data::ComposeStash &&stash) {
+			_composeControls->applyComposeStash(std::move(stash));
+			refreshSuggestFromDraft();
+		},
+		.suggest = [=] { return suggestOptions(); },
+		.clearComposer = [=] {
+			_composeControls->cancelReplyMessage();
+			cancelSuggestPost();
+			_composeControls->updateForwarding();
+		},
+		.openFiles = [=](Ui::PreparedList &list) -> SendFilesBox* {
+			if (showSendingFilesError(list)) {
+				return nullptr;
+			}
+			return confirmSendingFiles(std::move(list), QString())
+				? _sendFilesBox.data()
+				: nullptr;
+		},
+		.filesError = [=](const Ui::PreparedList &list) {
+			return showSendingFilesError(list);
+		},
+		.menuDetails = [=] { return sendMenuDetails(); },
+		.send = [=](Api::SendOptions options) { send(options); },
+	});
+
+	_composeControls->recordingActiveValue(
+	) | rpl::skip(1) | rpl::on_next([=] {
+		_stash->updateButton();
 	}, lifetime());
 }
 

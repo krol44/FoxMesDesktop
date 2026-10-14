@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/markdown/iv_markdown_article.h"
 #include "ui/style/style_core_types.h"
 #include "ui/widgets/fields/input_field.h"
+#include "ui/widgets/tooltip.h"
 #include "ui/dragging_scroll_manager.h"
 #include "ui/rp_widget.h"
 #include "rpl/lifetime.h"
@@ -112,11 +113,13 @@ struct WidgetServices {
 	Fn<void(not_null<Widget*>, uint64 /*mediaId*/)> cancelMediaUpload;
 	Fn<void(not_null<Widget*>, State::BlockPath, QPointer<QWidget>)>
 		addMediaAndGroupWithBlock;
+	Fn<void()> submit;
 	rpl::producer<> imeCompositionStarts;
 };
 
 class Widget final
 	: public Ui::RpWidget
+	, public Ui::AbstractTooltipShower
 	, public Markdown::MediaBlockHost {
 public:
 	Widget(
@@ -145,6 +148,8 @@ public:
 	void insertPreparedBlock(RichPage::Block block);
 	void replacePreparedBlock(State::ReplaceTarget target, RichPage::Block block);
 	void insertPreparedBlocks(std::vector<RichPage::Block> blocks);
+	void pasteImportedBlocks(BlocksImportResult &&imported);
+	void pasteStructuredClipboardData(const ClipboardData &data);
 	[[nodiscard]] bool hasActiveSelection() const;
 	[[nodiscard]] rpl::producer<bool> hasSelectionValue() const;
 	[[nodiscard]] std::shared_ptr<const RichPage>
@@ -258,6 +263,10 @@ public:
 
 	int resizeGetHeight(int newWidth) override;
 
+	QString tooltipText() const override;
+	QPoint tooltipPos() const override;
+	bool tooltipWindowActive() const override;
+
 protected:
 	bool eventFilter(QObject *object, QEvent *event) override;
 	bool eventHook(QEvent *e) override;
@@ -271,6 +280,7 @@ protected:
 	void keyPressEvent(QKeyEvent *e) override;
 	void inputMethodEvent(QInputMethodEvent *e) override;
 	QVariant inputMethodQuery(Qt::InputMethodQuery query) const override;
+	void leaveEventHook(QEvent *e) override;
 	void mouseMoveEvent(QMouseEvent *e) override;
 	void mousePressEvent(QMouseEvent *e) override;
 	void mouseReleaseEvent(QMouseEvent *e) override;
@@ -618,6 +628,7 @@ private:
 	void applyStructuralMonospaceAction();
 	void insertCodeBlock();
 	[[nodiscard]] bool handleFieldKey(QKeyEvent *e);
+	[[nodiscard]] bool handleSubmitShortcut(QKeyEvent *e);
 
 	[[nodiscard]] bool handleFieldInputRule(QKeyEvent *e);
 	[[nodiscard]] bool undoLastInputRule();
@@ -666,7 +677,6 @@ private:
 	[[nodiscard]] bool moveVerticalDownBoundary();
 	void copyCurrentSelectionToClipboard();
 	[[nodiscard]] TextForMimeData currentSelectionTextForClipboard() const;
-	void pasteStructuredClipboardData(const ClipboardData &data);
 	[[nodiscard]] std::optional<TableImportResult> importTableFromMimeData(
 		not_null<const QMimeData*> data) const;
 	void pasteImportedTable(TableImportResult &&imported);
@@ -676,7 +686,6 @@ private:
 		const BlocksImportResult &imported,
 		not_null<const QMimeData*> data) const
 	-> std::optional<BlocksImportResult>;
-	void pasteImportedBlocks(BlocksImportResult &&imported);
 	void resolveImportedLocalMedia(BlocksImportResult &&imported);
 	[[nodiscard]] bool handleIvClipboardMime(
 		not_null<const QMimeData*> data,
@@ -856,6 +865,7 @@ private:
 	void handleFieldContextMenuRequest(
 		Ui::InputField::ContextMenuRequest request);
 	[[nodiscard]] bool handleFieldMouseEvent(QEvent *event);
+	void updateHoverTooltip(const QString &text);
 	[[nodiscard]] bool handleHorizontalScrollWheel(
 		QWheelEvent *e,
 		QPoint articlePoint);
@@ -1007,6 +1017,7 @@ private:
 	const Fn<void(not_null<Widget*>, uint64)> _cancelMediaUpload;
 	const Fn<void(not_null<Widget*>, State::BlockPath, QPointer<QWidget>)>
 		_addMediaAndGroupWithBlock;
+	const Fn<void()> _submit;
 	const not_null<PeerData*> _peer;
 	const std::shared_ptr<State> _state;
 	const Fn<void(RichMessageLimitError)> _showLimitToast;
@@ -1073,6 +1084,7 @@ private:
 	bool _settingField = false;
 	bool _preparedContentStaleAfterCommit = false;
 	bool _trackingPointerPress = false;
+	bool _fieldBandSelecting = false;
 	bool _inlineFieldExternalInteractionActive = false;
 	bool _keyboardStructuralSelectionActive = false;
 	Markdown::MarkdownArticleEditControlHit _pressedControl;
@@ -1081,6 +1093,7 @@ private:
 	std::optional<QPoint> _pressedMediaControlPoint;
 	std::optional<ButtonEditRequest> _pressedInlineButton;
 	std::optional<QPoint> _pressedInlineButtonPoint;
+	QString _hoverTooltip;
 	HorizontalScrollDrag _horizontalScrollDrag = HorizontalScrollDrag::None;
 	std::optional<QPoint> _pendingTouchHorizontalScrollPoint;
 	bool _syncingInlineFieldGeometry = false;
