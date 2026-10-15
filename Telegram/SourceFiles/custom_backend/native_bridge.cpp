@@ -3433,7 +3433,10 @@ HistoryItem *NativeBridge::applyMessage(
         }
     }
     applyMessagePayloadState(item, message);
-    history->setChatListTimeId(unixTime(message.value("created_at").toString()));
+    const auto date = unixTime(message.value("created_at").toString());
+    if (date > history->chatListTimeId()) {
+        history->setChatListTimeId(date);
+    }
     history->updateChatListExistence();
     _seenMessages.emplace(SeenKey(chatId, messageId));
     if (item && !isOwnMessage(history, message)) {
