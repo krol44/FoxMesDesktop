@@ -8,11 +8,11 @@ The Windows, macOS and Linux scripts produce the platform artifacts in `artifact
 
 A GitHub job runs for at most six hours, and a cold macOS or Windows job (all dependencies, then the app) may not fit. The dependency caches are keyed on `prepare.py` and `qt_version.py`, so they go cold after an upstream merge that touches either; the macOS ones also go cold when the runner image updates Xcode, because `prepare.py` keys every stage on the compiler and SDK. Linux builds its `centos_env` image whenever `centos_env/` changes, about two hours.
 
-The Linux and macOS compiler caches (ccache) are saved only by runs on the default branch: a cache saved by a tag run is visible to that tag alone, so no later release could use it. On macOS ccache enters through the Xcode `CC` setting, since the Xcode generator ignores `CMAKE_<LANG>_COMPILER_LAUNCHER`, and every C-family compile gets `-Xclang -fno-pch-timestamp`, without which ccache will not cache anything that uses a precompiled header.
+The Linux and macOS compiler caches (ccache) that later releases use are saved by runs on the default branch: a cache saved by a tag run is visible to that tag alone. A macOS tag run also saves its compiler cache when its build fails or hits the time limit, so that "Re-run failed jobs" on the same tag continues from the objects it already compiled. On macOS ccache enters through the Xcode `CC` setting, since the Xcode generator ignores `CMAKE_<LANG>_COMPILER_LAUNCHER`, and every C-family compile gets `-Xclang -fno-pch-timestamp`, without which ccache will not cache anything that uses a precompiled header.
 
 After a dependency change, release in three runs:
 
-1. `workflow_dispatch` on `master` with `only_cache` checked: macOS and Windows build only the dependencies and save them; Linux builds and publishes the `centos_env` image.
+1. `workflow_dispatch` on `master` with `only_cache` checked: Windows builds only the dependencies and saves them; macOS saves the dependencies, then builds an ad-hoc signed app to fill the compiler cache and uploads nothing; Linux builds and publishes the `centos_env` image.
 2. `workflow_dispatch` on `master` without `only_cache`: a full build that checks every package and fills the compiler caches. It publishes nothing, because publishing needs a tag.
 3. Push the `v*` tag.
 

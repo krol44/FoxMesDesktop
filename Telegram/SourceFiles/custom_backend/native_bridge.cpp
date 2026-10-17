@@ -3241,6 +3241,25 @@ std::optional<NativeBridge::PreparedMessage> NativeBridge::prepareServiceMessage
     if (isOwnMessage(history, message)) {
         flags |= Flag::f_out;
     }
+    auto replyTo = MTPMessageReplyHeader();
+    const auto pinnedId = (action.value("type").toString() == u"pinned"_q)
+        ? action.value("message_id").toVariant().toLongLong()
+        : 0;
+    if (pinnedId > 0 && pinnedId <= INT32_MAX) {
+        flags |= Flag::f_reply_to;
+        replyTo = MTP_messageReplyHeader(
+            MTP_flags(MTPDmessageReplyHeader::Flag::f_reply_to_msg_id),
+            MTP_int(int(pinnedId)),
+            MTPPeer(),
+            MTPMessageFwdHeader(),
+            MTPMessageMedia(),
+            MTPint(),
+            MTP_string(QString()),
+            MTPVector<MTPMessageEntity>(),
+            MTPint(),
+            MTPint(),
+            MTP_bytes(QByteArray()));
+    }
     return PreparedMessage{
         .mtp = MTP_messageService(
             MTP_flags(flags),
@@ -3248,7 +3267,7 @@ std::optional<NativeBridge::PreparedMessage> NativeBridge::prepareServiceMessage
             broadcast ? MTPPeer() : MTP_peerUser(MTP_long(senderId)),
             peerToMTP(history->peer->id),
             MTPPeer(),
-            MTPMessageReplyHeader(),
+            replyTo,
             MTP_int(unixTime(message.value("created_at").toString())),
             (action.value("type").toString() == u"photo_changed"_q
                 ? communityPhotoAction(action)

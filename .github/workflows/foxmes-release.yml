@@ -269,29 +269,30 @@ jobs:
           echo "SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
 
       - name: Restore the macOS compiler cache
-        if: ${{ github.event.inputs.only_cache != 'true' }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: ${{ runner.temp }}/foxmes-ccache
-          key: macOS-arm64-ccache-${{ github.run_id }}
-          restore-keys: macOS-arm64-ccache-
+          key: macOS-arm64-ccache-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            macOS-arm64-ccache-${{ github.run_id }}-
+            macOS-arm64-ccache-
 
-      - name: Build signed macOS package
+      - name: Build the macOS package
         id: app
-        if: ${{ github.event.inputs.only_cache != 'true' }}
         shell: bash
         env:
           FOXMES_CCACHE_DIR: ${{ runner.temp }}/foxmes-ccache
+          FOXMES_ADHOC_SIGN: ${{ github.event.inputs.only_cache == 'true' && '1' || '0' }}
         run: bash Telegram/build/foxmes/build-macos.sh app
 
       # Saved even when the build fails or hits the six-hour limit: a cold
       # build may not fit, and the objects it did compile let the next run finish.
       - name: Save the macOS compiler cache
-        if: always() && steps.app.outcome != 'skipped' && github.ref_name == github.event.repository.default_branch
+        if: always() && steps.app.outcome != 'skipped' && (github.ref_name == github.event.repository.default_branch || steps.app.outcome != 'success')
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: ${{ runner.temp }}/foxmes-ccache
-          key: macOS-arm64-ccache-${{ github.run_id }}
+          key: macOS-arm64-ccache-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Remove the signing keychain
         if: ${{ always() && env.SIGNING_KEYCHAIN != '' }}

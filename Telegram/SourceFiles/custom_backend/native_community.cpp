@@ -328,6 +328,8 @@ MTPMessageAction Action(
 		return MTP_messageActionInviteToGroupCall(
 			call,
 			MTP_vector<MTPlong>(users));
+	} else if (type == u"pinned"_q) {
+		return MTP_messageActionPinMessage();
 	} else if (type == u"call_scheduled"_q) {
 		return MTP_messageActionGroupCallScheduled(
 			call,
