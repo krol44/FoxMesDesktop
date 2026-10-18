@@ -3682,7 +3682,7 @@ std::vector<StickerIcon> StickersListWidget::fillIcons() {
 			? QSize(
 				s->thumbnailLocation().width(),
 				s->thumbnailLocation().height())
-			: QSize();
+			: s->dimensions;
 		const auto pix = size.scaled(side, side, Qt::KeepAspectRatio);
 		result.emplace_back(set, s, pix.width(), pix.height());
 	}

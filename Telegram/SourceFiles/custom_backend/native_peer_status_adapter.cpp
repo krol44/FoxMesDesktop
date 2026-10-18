@@ -4,7 +4,6 @@
 #include "custom_backend/api_client.h"
 #include "custom_backend/native_runtime.h"
 #include "custom_backend/native_bridge.h"
-#include "custom_backend/native_sticker_sets_adapter.h"
 #include "base/flat_map.h"
 #include "base/unixtime.h"
 #include "data/data_channel.h"
@@ -30,7 +29,6 @@ struct Mutation {
 };
 struct State {
     base::flat_map<PeerId, QJsonObject> peers;
-    base::flat_map<DocumentId, QJsonObject> assets;
     QJsonArray catalog;
     std::deque<Mutation> mutations;
 };
@@ -46,22 +44,6 @@ qint64 Number(const QJsonObject &value, const char *key) {
     return value.value(QLatin1String(key)).toVariant().toLongLong();
 }
 
-void RememberAsset(not_null<Main::Session*> session, const QJsonObject &asset) {
-    const auto dto = StatusAssetDto::Parse(asset);
-    const auto id = DocumentId(dto.documentId);
-    if (!id) return;
-    Get(session).assets[id] = asset;
-    if (!dto.url.isEmpty()) {
-        StickerSets::Register(session, StickerSets::Item{
-            .id = id,
-            .url = dto.url,
-            .mime = dto.mimeType,
-            .width = asset.value("width").toInt(),
-            .height = asset.value("height").toInt(),
-        });
-    }
-}
-
 void LoadCatalog(not_null<Main::Session*> session, Fn<void(bool)> done) {
     if (!Available(session)) { done(false); return; }
     const auto weak = base::make_weak(session);
@@ -75,7 +57,6 @@ void LoadCatalog(not_null<Main::Session*> session, Fn<void(bool)> done) {
         }
         auto &state = Get(weak.get());
         state.catalog = doc.object().value("items").toArray();
-        for (const auto &item : state.catalog) RememberAsset(weak.get(), item.toObject());
         done(true);
     });
 }
@@ -177,7 +158,6 @@ QJsonObject Merge(not_null<Main::Session*> session, PeerId peer, const QJsonObje
         const auto incoming = value.value("emoji_status").toObject();
         if (!current.contains("emoji_status") || Number(incoming, "revision") >= Number(current.value("emoji_status").toObject(), "revision")) {
             current.insert("emoji_status", incoming);
-            RememberAsset(session, incoming.value("asset").toObject());
         }
     }
     auto result = value;

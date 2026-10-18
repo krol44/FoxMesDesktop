@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "custom_backend/native_deep_link.h"
 
 #include "base/platform/base_platform_url_scheme.h"
+#include "core/application.h"
 #include "core/launcher.h"
 #include "core/version.h"
 #include "platform/platform_specific.h"
@@ -50,7 +51,14 @@ bool HandleStartUrl(const QUrl &url) {
 	if (url.isLocalFile() || url.scheme() == u"interpret"_q) {
 		return false;
 	}
-
+	if (url.scheme() == u"foxmes"_q && !IsOpenRoute(url)) {
+		if (!Core::App().activePrimaryWindow()) {
+			return false;
+		}
+		auto local = url;
+		local.setScheme(u"tg"_q);
+		Core::App().openLocalUrl(local.toString(), {});
+	}
 	return true;
 }
 
@@ -75,7 +83,7 @@ QString InternalLinksDomain(const QString &domain, const QString &query) {
 
 bool StartUrlRequiresActivate(const QString &url) {
 	const auto parsed = QUrl(url);
-	return IsOpenRoute(parsed)
+	return (parsed.scheme() == u"foxmes"_q)
 		|| parsed.isLocalFile()
 		|| parsed.scheme() == u"interpret"_q;
 }

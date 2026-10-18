@@ -2688,6 +2688,8 @@ StickersBox::Inner::Cover StickersBox::Inner::fillSetCover(
 		? QSize(
 			sticker->thumbnailLocation().width(),
 			sticker->thumbnailLocation().height())
+		: !sticker->dimensions.isEmpty()
+		? sticker->dimensions
 		: QSize(1, 1);
 	auto pixWidth = size.width();
 	auto pixHeight = size.height();

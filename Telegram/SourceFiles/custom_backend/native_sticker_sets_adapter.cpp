@@ -171,6 +171,18 @@ void RememberUrl(not_null<Main::Session*> session, const Item &item) {
 	const auto document = session->data().document(DocumentIdFor(item));
 	document->setContentUrl(item.url);
 	Streaming::RememberSource(document, item.url);
+	if (item.mime == u"image/webp"_q && item.width > 0 && item.height > 0) {
+		document->updateThumbnails(
+			InlineImageLocation(),
+			ImageWithLocation{
+				.location = ImageLocation(
+					DownloadLocation{ PlainUrlLocation{ item.url } },
+					item.width,
+					item.height),
+			},
+			ImageWithLocation(),
+			false);
+	}
 }
 
 [[nodiscard]] MTPStickerSet BuildSet(const State &state, const Set &set) {
