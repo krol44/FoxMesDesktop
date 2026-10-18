@@ -56,12 +56,21 @@ bool HandleStartUrl(const QUrl &url) {
 
 QString LocalizeInternalLink(const QString &url) {
 	static const auto Internal = QRegularExpression(
-		u"^(https?://)?(www\\.)?(foxtail\\.ing|fxl\\.ru)/@(.+)$"_q,
+		u"^(https?://)?(www\\.)?(foxtail\\.ing|fxl\\.ru)/(@|(?=(addemoji|addstickers)/))(.+)$"_q,
 		QRegularExpression::CaseInsensitiveOption);
 	const auto match = Internal.match(url);
 	return match.hasMatch()
-		? (match.captured(1) + u"t.me/"_q + match.captured(4))
+		? (match.captured(1) + u"t.me/"_q + match.captured(6))
 		: url;
+}
+
+QString InternalLinksDomain(const QString &domain, const QString &query) {
+	static const auto SetLink = QRegularExpression(
+		u"^(addemoji|addstickers)/"_q,
+		QRegularExpression::CaseInsensitiveOption);
+	return (domain.endsWith(u"/@"_q) && SetLink.match(query).hasMatch())
+		? domain.chopped(1)
+		: domain;
 }
 
 bool StartUrlRequiresActivate(const QString &url) {

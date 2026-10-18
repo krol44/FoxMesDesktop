@@ -220,6 +220,8 @@ PRIVATE
     custom_backend/native_wallpaper_adapter.h
     custom_backend/native_gifs_adapter.cpp
     custom_backend/native_gifs_adapter.h
+    custom_backend/native_sticker_sets_adapter.cpp
+    custom_backend/native_sticker_sets_adapter.h
     custom_backend/native_stickers_adapter.cpp
     custom_backend/native_stickers_adapter.h
     custom_backend/native_language_adapter.cpp

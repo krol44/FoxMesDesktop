@@ -4,7 +4,7 @@
 #include "custom_backend/api_client.h"
 #include "custom_backend/native_runtime.h"
 #include "custom_backend/native_bridge.h"
-#include "custom_backend/native_reactions_adapter.h"
+#include "custom_backend/native_sticker_sets_adapter.h"
 #include "base/flat_map.h"
 #include "base/unixtime.h"
 #include "data/data_channel.h"
@@ -51,7 +51,15 @@ void RememberAsset(not_null<Main::Session*> session, const QJsonObject &asset) {
     const auto id = DocumentId(dto.documentId);
     if (!id) return;
     Get(session).assets[id] = asset;
-    Reactions::RegisterStatusAsset(session, id, dto.url);
+    if (!dto.url.isEmpty()) {
+        StickerSets::Register(session, StickerSets::Item{
+            .id = id,
+            .url = dto.url,
+            .mime = dto.mimeType,
+            .width = asset.value("width").toInt(),
+            .height = asset.value("height").toInt(),
+        });
+    }
 }
 
 void LoadCatalog(not_null<Main::Session*> session, Fn<void(bool)> done) {

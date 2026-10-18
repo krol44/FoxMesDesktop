@@ -17,5 +17,8 @@ void RegisterScheme();
 [[nodiscard]] bool StartUrlRequiresActivate(const QString &url);
 
 [[nodiscard]] QString LocalizeInternalLink(const QString &url);
+[[nodiscard]] QString InternalLinksDomain(
+	const QString &domain,
+	const QString &query);
 
 }

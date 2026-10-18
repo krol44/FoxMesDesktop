@@ -403,6 +403,25 @@ public:
 
     void stickerFavorites(Callback done);
     void setStickerFavorite(qint64 emojiId, bool favorited, const QString &operationId, Callback done);
+    void stickerSets(Callback done);
+    void setStickerSetInstalled(qint64 setId, bool installed, const QString &operationId, Callback done);
+    void orderStickerSets(bool emoji, const QList<qint64> &setIds, const QString &operationId, Callback done);
+    void emojiDocuments(const QList<qint64> &ids, Callback done);
+    void sendSticker(
+        qint64 chatId,
+        qint64 stickerId,
+        qint64 replyToId,
+        const QString &clientNonce,
+        const SendOptions &options,
+        Callback done);
+    void createStickerReminder(
+        qint64 chatId,
+        qint64 stickerId,
+        qint64 replyToId,
+        const QString &clientNonce,
+        const SendOptions &options,
+        const QString &operationId,
+        Callback done);
     void savedGifs(int limit, qint64 beforeId, Callback done);
     void saveGif(
         qint64 chatId,

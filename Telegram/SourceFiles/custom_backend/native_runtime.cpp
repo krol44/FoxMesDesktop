@@ -6,6 +6,7 @@
 #include "custom_backend/native_peer_status_adapter.h"
 #include "custom_backend/native_wallpaper_adapter.h"
 #include "custom_backend/native_stickers_adapter.h"
+#include "custom_backend/native_sticker_sets_adapter.h"
 #include "custom_backend/native_streaming_loader.h"
 #include "custom_backend/native_topic_channels.h"
 
@@ -450,6 +451,7 @@ void AttachSession(Main::Session *session) {
     if (gBridges.find(session) == gBridges.end()) {
         gBridges.emplace(session, std::make_unique<NativeBridge>(session));
         Appearance::Load(session);
+        StickerSets::Load(session);
 		gBridgeChanges.fire_copy(session);
     }
 }
@@ -458,6 +460,7 @@ void DetachSession(Main::Session *session) {
     if (session) {
         Gifs::ClearSession(session);
         Stickers::ClearSession(session);
+        StickerSets::ClearSession(session);
         Wallpapers::ClearSession(session);
         Streaming::ClearSession(session);
     }

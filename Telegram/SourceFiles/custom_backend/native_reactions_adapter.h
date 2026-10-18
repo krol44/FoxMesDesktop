@@ -1,6 +1,7 @@
 #pragma once
 
 #include "custom_backend/native_mtp_router.h"
+#include "custom_backend/native_sticker_sets_adapter.h"
 #include <QJsonArray>
 #include <QString>
 #include <QStringList>
@@ -17,17 +18,7 @@ class Session;
 
 namespace CustomBackend::Reactions {
 
-struct CatalogItem final {
-	DocumentId id = 0;
-	QString emoji;
-	QString assetUrl;
-	QString category;
-};
-
-struct Asset final {
-	QByteArray content;
-	QString mime;
-};
+using CatalogItem = StickerSets::Item;
 
 [[nodiscard]] MTPMessageReactions Build(
     Main::Session *session,
@@ -47,15 +38,6 @@ void SetUsageLists(
 [[nodiscard]] rpl::producer<> CatalogChanged(
 	not_null<Main::Session*> session);
 
-[[nodiscard]] Asset AssetFor(
-	not_null<Main::Session*> session,
-	DocumentId id);
-[[nodiscard]] bool IsSourceWebm(
-	not_null<Main::Session*> session,
-	DocumentId id);
-[[nodiscard]] rpl::producer<DocumentId> AssetLoaded(
-	not_null<Main::Session*> session);
-
 [[nodiscard]] QString EmojiFor(
 	not_null<Main::Session*> session,
 	DocumentId id);
@@ -73,6 +55,5 @@ void ReceiveFavorite(not_null<Main::Session*> session, const QJsonObject &state)
 [[nodiscard]] bool Intercepts(const MTP::details::SerializedRequest &request);
 void Intercept(not_null<MTP::Instance*> instance, mtpRequestId requestId, const MTP::details::SerializedRequest &request);
 void ClearSession(not_null<Main::Session*> session);
-void RegisterStatusAsset(not_null<Main::Session*> session, DocumentId id, const QString &url);
 
 }

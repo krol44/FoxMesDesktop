@@ -28,6 +28,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_document.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "data/stickers/data_stickers.h"
+#include "custom_backend/native_runtime.h"
 #include "styles/style_chat_helpers.h"
 
 #include <QtWidgets/QApplication>
@@ -239,7 +240,15 @@ auto SuggestionsWidget::lookupCustom(const std::vector<Row> &rows) const
 	auto custom = base::flat_multi_map<int, Custom>();
 	const auto premium = _session->premium();
 	const auto stickers = &_session->data().stickers();
-	for (const auto setId : stickers->emojiSetsOrder()) {
+	auto order = stickers->emojiSetsOrder();
+	if (CustomBackend::Enabled()) {
+		for (const auto setId : stickers->featuredEmojiSetsOrder()) {
+			if (!ranges::contains(order, setId)) {
+				order.push_back(setId);
+			}
+		}
+	}
+	for (const auto setId : order) {
 		const auto i = stickers->sets().find(setId);
 		if (i == end(stickers->sets())) {
 			continue;

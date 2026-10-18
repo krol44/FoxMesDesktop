@@ -1786,19 +1786,10 @@ void NativeBridge::refreshReactionsCatalog() {
             ReactionUsageIds(object.value("recent_reactions")));
         const auto array = object.value("available_reactions").toArray();
         for (const auto &entry : array) {
-            const auto reaction = entry.toObject();
-            const auto id = DocumentId(
-                reaction.value("id").toVariant().toLongLong());
-            const auto emoji = reaction.value("emoji").toString();
-            if (!id || emoji.isEmpty()) {
-                continue;
+            if (auto item = StickerSets::ParseItem(entry.toObject(), false)
+                ; item && !item->emoji.isEmpty()) {
+                values.push_back(std::move(*item));
             }
-            values.push_back(Reactions::CatalogItem{
-                .id = id,
-                .emoji = emoji,
-                .assetUrl = reaction.value("asset_url").toString(),
-                .category = reaction.value("category").toString(),
-            });
         }
         Reactions::SetAvailableCatalog(weak->_session, values);
         const auto maxSelected = object.value("max_selected").toInt();
@@ -3097,6 +3088,12 @@ std::optional<NativeBridge::PreparedMessage> NativeBridge::prepareMessage(
                     ? std::make_optional(message.value("video_timestamp").toInt())
                     : std::nullopt,
                 ephemeralTtl));
+    if (const auto sticker = message.value("sticker").toObject()
+        ; !sticker.isEmpty() && attachment.isEmpty() && ephemeral.isEmpty()) {
+        if (auto stickerMedia = StickerSets::MessageMedia(_session, sticker)) {
+            media = std::move(stickerMedia);
+        }
+    }
     if (media && webPage.value("above").toBool()) {
         mtpFlags |= Flag::f_invert_media;
     }
@@ -4310,6 +4307,117 @@ void NativeBridge::sendText(
     });
 }
 
+void NativeBridge::sendSticker(
+        History *history,
+        const StickerSets::Item &sticker,
+        ReplyTarget replyTo,
+        const QString &reuseClientNonce,
+        const SendOptions &options) {
+    if (!history || TopicChannels::IsDiscussionPeer(history->peer)) {
+        return;
+    }
+    const auto weak = QPointer<NativeBridge>(this);
+    const auto media = MTP_messageMediaDocument(
+        MTP_flags(MTPDmessageMediaDocument::Flag::f_document),
+        StickerSets::Document(_session, sticker),
+        MTPVector<MTPDocument>(),
+        MTPPhoto(),
+        MTPint(),
+        MTPint());
+    if (options.scheduled()) {
+        const auto raw = history;
+        const auto nonce = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        const auto operationId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        ensureChat(raw, [weak, raw, sticker, replyTo, options, nonce, operationId](qint64 chatId) {
+            if (!weak || !raw) return;
+            if (chatId <= 0) {
+                LOG(("FoxMes: scheduled sticker has no chat id"));
+                return;
+            }
+            weak->client().createStickerReminder(
+                chatId,
+                qint64(sticker.id),
+                replyTo.messageId,
+                nonce,
+                options,
+                operationId,
+                [weak, raw](QJsonDocument doc, QString error, int status) {
+                    if (!weak || !raw) return;
+                    weak->applyReminderResponse(raw, doc, error, status);
+                });
+        });
+        return;
+    }
+    const auto author = LocalMessageAuthor(history);
+    auto flags = author.flags;
+    if (replyTo) {
+        flags |= MessageFlag::HasReplyInfo;
+    }
+    const auto item = history->addNewLocalMessage({
+        .id = _session->data().nextLocalMessageId(),
+        .flags = flags,
+        .from = author.from,
+        .replyTo = ReplyToFromServerId(history, replyTo),
+        .date = base::unixtime::now(),
+        .postAuthor = author.postAuthor,
+    }, TextWithEntities(), media).get();
+    if (!item) {
+        return;
+    }
+    const auto clientNonce = reuseClientNonce.isEmpty()
+        ? QUuid::createUuid().toString(QUuid::WithoutBraces)
+        : reuseClientNonce;
+    rememberPendingSend(
+        item,
+        clientNonce,
+        replyTo,
+        QString(),
+        {},
+        {},
+        TextWithEntities(),
+        {},
+        {},
+        false,
+        MsgId(),
+        PeerId());
+    _pendingSends[item->id.bare].sticker = sticker;
+    _session->data().sendHistoryChangeNotifications();
+    const auto localId = item->id.bare;
+    ensureChat(history, [weak, history, sticker, replyTo, clientNonce, localId, options](qint64 chatId) {
+        if (!weak || !history) return;
+        if (chatId <= 0) {
+            weak->failPendingSend(localId, kSendNoStatus);
+            return;
+        }
+        if (const auto i = weak->_pendingSends.find(localId)
+            ; i != weak->_pendingSends.end()) {
+            i->second.committing = true;
+        }
+        weak->client().sendSticker(chatId, qint64(sticker.id), replyTo.messageId, clientNonce, options, [weak, history, localId](QJsonDocument doc, QString error, int status) {
+            if (!weak || !history) return;
+            if (!error.isEmpty() || !doc.isObject()) {
+                weak->failPendingSend(localId, status);
+                return;
+            }
+            if (weak->finishCancelledCommit(localId, doc.object())) {
+                return;
+            }
+            weak->applyMessage(
+                history,
+                doc.object(),
+                false,
+                NewMessageType::Existing,
+                localId);
+            if (weak->_pendingSends.contains(localId)) {
+                weak->failPendingSend(localId, kSendServerAccepted);
+            }
+            if (!history->folderKnown()) history->clearFolder();
+            history->setUnreadCount(0);
+            weak->_session->data().sendHistoryChangeNotifications();
+        });
+    });
+}
+
 void NativeBridge::scheduleText(
         History *history,
         const QString &text,
@@ -5067,6 +5175,7 @@ void NativeBridge::resendPendingGroup(const std::vector<qint64> &localIds) {
     const auto text = first->second.text;
     const auto entities = first->second.entities;
     const auto webPage = first->second.webPage;
+    const auto sticker = first->second.sticker;
 
     auto files = std::vector<UploadSpec>();
     auto nonces = std::vector<QString>();
@@ -5102,7 +5211,9 @@ void NativeBridge::resendPendingGroup(const std::vector<qint64> &localIds) {
     for (const auto &item : items) {
         item->destroy();
     }
-    if (files.empty()) {
+    if (sticker) {
+        sendSticker(history, *sticker, replyTo, nonces.front());
+    } else if (files.empty()) {
         sendText(
             history,
             text,
@@ -5136,7 +5247,13 @@ bool NativeBridge::retryFailedMessage(HistoryItem *item) {
     if (!request.history) {
         return false;
     }
-    if (request.files.empty()) {
+    if (request.sticker) {
+        sendSticker(
+            request.history,
+            *request.sticker,
+            request.replyTo,
+            request.clientNonce);
+    } else if (request.files.empty()) {
         sendText(
             request.history,
             request.text,
@@ -6701,6 +6818,8 @@ void NativeBridge::handleEvent(const QJsonObject &event) {
         Folders::Receive(_session, data);
     } else if (type == u"stickers.favorites.updated"_q) {
         Stickers::ReceiveFavorites(_session, data);
+    } else if (type == u"sticker_sets.updated"_q) {
+        StickerSets::ApplyEvent(_session, data);
     } else if (type == u"reaction.default_updated"_q) {
         Reactions::ReceiveFavorite(_session, data);
     } else if (type == u"reaction.updated"_q) {
@@ -6894,6 +7013,7 @@ void NativeBridge::resyncAfterGap(qint64 resumeFrom, qint64 observedSeq) {
 	}
 	_lastGapResumeFrom = resumeFrom;
     Stickers::ResetFavorites(_session);
+    StickerSets::Reload(_session);
     Folders::Refresh(_session, true);
 
 	_messageRevisions.clear();

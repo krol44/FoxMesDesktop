@@ -7,7 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/media/history_view_sticker.h"
 
-#include "custom_backend/native_reactions_adapter.h"
 #include "base/options.h"
 #include "boxes/sticker_set_box.h"
 #include "history/history.h"
@@ -157,12 +156,7 @@ void Sticker::initSize(int customSize) {
 	if (customSize > 0) {
 		const auto original = Size(_data);
 		const auto proposed = QSize{ customSize, customSize };
-		const auto webmCustomEmoji = customEmojiPart()
-			&& _data->sticker()
-			&& _data->sticker()->isWebm()
-			&& CustomBackend::Reactions::IsSourceWebm(
-				&_parent->history()->session(), _data->id);
-		_size = (webmCustomEmoji || original.isEmpty())
+		_size = original.isEmpty()
 			? proposed
 			: DownscaledSize(original, proposed);
 	} else if (emojiSticker() || _diceIndex >= 0) {

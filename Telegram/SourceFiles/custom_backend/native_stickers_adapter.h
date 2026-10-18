@@ -20,7 +20,6 @@ struct SendAction;
 
 namespace CustomBackend::Stickers {
 
-void Request(not_null<Main::Session*> session);
 void RequestFavorites(not_null<Main::Session*> session);
 void ReceiveFavorites(
 	not_null<Main::Session*> session,

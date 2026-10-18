@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "main/main_session.h"
+#include "custom_backend/native_deep_link.h"
 #include "custom_backend/native_runtime.h"
 
 #include "apiwrap.h"
@@ -513,8 +514,13 @@ TextWithEntities Session::createInternalLink(
 
 TextWithEntities Session::createInternalLinkFull(
 		TextWithEntities query) const {
-	return TextWithEntities::Simple(ValidatedInternalLinksDomain(this))
-		.append(std::move(query));
+	auto domain = ValidatedInternalLinksDomain(this);
+	if (CustomBackend::Enabled()) {
+		domain = CustomBackend::DeepLinks::InternalLinksDomain(
+			domain,
+			query.text);
+	}
+	return TextWithEntities::Simple(domain).append(std::move(query));
 }
 
 bool Session::supportMode() const {

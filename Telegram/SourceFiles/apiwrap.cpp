@@ -3278,10 +3278,6 @@ void ApiWrap::requestStickers(TimeId now) {
 		|| _stickersUpdateRequest) {
 		return;
 	}
-	if (CustomBackend::Enabled()) {
-		CustomBackend::Stickers::Request(_session);
-		return;
-	}
 	const auto done = [=](const MTPmessages_AllStickers &result) {
 		_session->data().stickers().setLastUpdate(crl::now());
 		_stickersUpdateRequest = 0;

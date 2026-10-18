@@ -13,37 +13,18 @@
 #include "data/data_message_reaction_id.h"
 #include "data/data_peer_id.h"
 #include "data/data_document.h"
-#include "data/data_document_media.h"
 #include "data/data_session.h"
 #include "data/stickers/data_custom_emoji.h"
-#include "storage/file_download.h"
 #include "ui/emoji_config.h"
 #include "ui/text/text_utilities.h"
 #include "main/main_session.h"
 
-#include <QBuffer>
-#include <QGuiApplication>
 #include <QHash>
-#include <QImage>
-#include <QNetworkAccessManager>
-#include <QNetworkReply>
-#include <QNetworkRequest>
-#include <QPainter>
 #include <QPointer>
 #include <QSet>
-#include <QUrl>
 
 namespace CustomBackend::Reactions {
 namespace {
-
-constexpr auto kStaticEmojiSize = 100;
-
-struct PendingAsset final {
-    QByteArray source;
-    QByteArray animated;
-    bool sourceDone = false;
-    bool animatedDone = false;
-};
 
 struct State final {
     Data::Reactions *reactions = nullptr;
@@ -57,17 +38,6 @@ struct State final {
     std::vector<DocumentId> recentUsage;
 
     base::flat_map<DocumentId, QString> emojiByDocumentId;
-    base::flat_map<DocumentId, QString> statusUrls;
-
-    base::flat_map<DocumentId, std::shared_ptr<Data::DocumentMedia>> media;
-    base::flat_map<DocumentId, not_null<DocumentData*>> documents;
-
-    base::flat_map<DocumentId, Asset> assets;
-    base::flat_map<DocumentId, PendingAsset> pending;
-    QSet<DocumentId> sourceWebmIds;
-    QSet<QString> requested;
-
-    rpl::event_stream<DocumentId> assetLoaded;
     rpl::event_stream<> catalogChanged;
 };
 
@@ -153,271 +123,6 @@ void DispatchFavorite(not_null<Main::Session*> session) {
                     });
             } else finish(doc, error, status);
         });
-}
-
-[[nodiscard]] QByteArray RasterizeNativeEmoji(const QString &emoji) {
-    const auto found = Ui::Emoji::Find(emoji);
-    if (!found) {
-        return {};
-    }
-    const auto images = Ui::Emoji::SourceImages();
-    if (!images || !images->ensureLoaded()) {
-        return {};
-    }
-    auto image = QImage(
-        kStaticEmojiSize,
-        kStaticEmojiSize,
-        QImage::Format_ARGB32_Premultiplied);
-    image.fill(Qt::transparent);
-    auto p = QPainter(&image);
-    p.setRenderHint(QPainter::Antialiasing);
-    p.setRenderHint(QPainter::SmoothPixmapTransform);
-    images->draw(p, found, kStaticEmojiSize, 0, 0);
-    p.end();
-    auto buffer = QByteArray();
-    auto sink = QBuffer(&buffer);
-    sink.open(QIODevice::WriteOnly);
-    if (!image.save(&sink, "WEBP", 90)) {
-        return {};
-    }
-    return buffer;
-}
-
-[[nodiscard]] QByteArray NormalizeToSquareWebp(QByteArray bytes) {
-    auto image = QImage::fromData(bytes, "WEBP");
-    if (image.isNull()) {
-        image = QImage::fromData(bytes);
-    }
-    if (image.isNull()) {
-        return {};
-    }
-    const auto side = std::max(image.width(), image.height());
-    auto square = QImage(side, side, QImage::Format_ARGB32_Premultiplied);
-    square.fill(Qt::transparent);
-    auto p = QPainter(&square);
-    p.setRenderHint(QPainter::SmoothPixmapTransform);
-    p.drawImage(
-        QRect(
-            (side - image.width()) / 2,
-            (side - image.height()) / 2,
-            image.width(),
-            image.height()),
-        image);
-    p.end();
-    auto buffer = QByteArray();
-    auto sink = QBuffer(&buffer);
-    sink.open(QIODevice::WriteOnly);
-    if (!square.save(&sink, "WEBP", 90)) {
-        return {};
-    }
-    return buffer;
-}
-
-[[nodiscard]] DocumentData *CustomEmojiDocument(
-        not_null<Main::Session*> session,
-        State &state,
-        DocumentId id,
-        const QString &emoji,
-        const QByteArray &content,
-        const QString &mime) {
-    if (content.isEmpty()) {
-        return nullptr;
-    }
-    using Flag = MTPDdocumentAttributeCustomEmoji::Flag;
-    const auto attributes = QVector<MTPDocumentAttribute>{
-        MTP_documentAttributeFilename(MTP_string(u"reaction"_q)),
-        MTP_documentAttributeImageSize(
-            MTP_int(kStaticEmojiSize),
-            MTP_int(kStaticEmojiSize)),
-        MTP_documentAttributeCustomEmoji(
-            MTP_flags(Flag::f_free),
-            MTP_string(emoji),
-            MTP_inputStickerSetEmpty()),
-    };
-    const auto document = session->data().document(
-        id,
-        uint64(0),
-        QByteArray(),
-        base::unixtime::now(),
-        attributes,
-        mime,
-        InlineImageLocation(),
-        ImageWithLocation(),
-        ImageWithLocation(),
-        false,
-        0,
-        int64(content.size()));
-    if (!document->sticker()) {
-        return nullptr;
-    }
-    auto media = document->createMediaView();
-    media->setBytes(content);
-    state.media[id] = std::move(media);
-    state.documents.insert_or_assign(id, document);
-    session->data().customEmojiManager().resolveLocalDocument(document);
-    return document;
-}
-
-[[nodiscard]] QString AnimatedUrl(const QString &assetUrl) {
-    return assetUrl + u"/-/emoji_webm/"_q;
-}
-
-
-QNetworkAccessManager &AssetManager() {
-    static auto manager = std::make_unique<QNetworkAccessManager>();
-    [[maybe_unused]] static const auto release = [] {
-        ReleaseOnQuit([] { manager = nullptr; });
-        return true;
-    }();
-
-    Ensures(manager != nullptr);
-    return *manager;
-}
-
-void FetchAsset(
-        base::weak_ptr<Main::Session> weakSession,
-        const QString &url,
-        Fn<bool(
-            not_null<Main::Session*> session,
-            State &state,
-            bool ok,
-            const QByteArray &body,
-            const QString &contentType)> apply) {
-    const auto session = weakSession.get();
-    const auto state = FindState(session);
-    if (!state || state->requested.contains(url)) {
-        return;
-    }
-    state->requested.insert(url);
-    const auto auth = DownloadAuth{ .insecureTls = DevInsecureTls() };
-    auto request = QNetworkRequest(QUrl(url));
-    ApplyDownloadAuth(request, auth);
-    const auto reply = AssetManager().get(request);
-    QObject::connect(reply, &QNetworkReply::sslErrors, reply, [reply, auth] {
-        AllowDownloadTls(reply, auth);
-    });
-    QObject::connect(reply, &QNetworkReply::finished, reply, [=] {
-        reply->deleteLater();
-        const auto session = weakSession.get();
-        const auto state = FindState(session);
-        if (!state) {
-            return;
-        }
-        const auto ok = (reply->error() == QNetworkReply::NoError);
-        const auto contentType = ok
-            ? reply->header(QNetworkRequest::ContentTypeHeader).toString()
-            : QString();
-        const auto body = ok ? reply->readAll() : QByteArray();
-        if (!apply(session, *state, ok, body, contentType)) {
-            state->requested.remove(url);
-        }
-    });
-}
-
-void RefreshReactions(not_null<Main::Session*> session) {
-    crl::on_main(session.get(), [=] {
-        session->data().reactions().refreshDefault();
-    });
-}
-
-void AssetBuilt(
-        not_null<Main::Session*> session,
-        State &state,
-        DocumentId id,
-        Asset asset) {
-    state.assets[id] = std::move(asset);
-    RefreshReactions(session);
-    state.assetLoaded.fire_copy(id);
-}
-
-void BuildDownloadedAsset(
-        not_null<Main::Session*> session,
-        State &state,
-        DocumentId id,
-        const QString &emoji) {
-    const auto i = state.pending.find(id);
-    if (i == state.pending.end()
-        || !i->second.sourceDone
-        || !i->second.animatedDone) {
-        return;
-    }
-    const auto pending = i->second;
-    state.pending.erase(i);
-    const auto animated = !pending.animated.isEmpty();
-    const auto content = animated ? pending.animated : pending.source;
-    const auto mime = animated ? u"video/webm"_q : u"image/webp"_q;
-    if (CustomEmojiDocument(session, state, id, emoji, content, mime)) {
-        AssetBuilt(session, state, id, { .content = content, .mime = mime });
-    }
-}
-
-void DownloadAsset(
-        not_null<Main::Session*> session,
-        State &state,
-        DocumentId id,
-        const QString &emoji,
-        const QString &url) {
-    if (!state.pending.contains(id)) {
-        state.pending.emplace(id, PendingAsset());
-    }
-    const auto weak = base::make_weak(session);
-
-    FetchAsset(weak, url, [id, emoji](
-            not_null<Main::Session*> session,
-            State &state,
-            bool ok,
-            const QByteArray &body,
-            const QString &contentType) {
-        const auto video = ok && contentType.startsWith(u"video/webm"_q);
-        const auto normalized = (ok && !video)
-            ? NormalizeToSquareWebp(body)
-            : QByteArray();
-        const auto i = state.pending.find(id);
-        if (i == state.pending.end()) {
-            return ok;
-        }
-        if (video) {
-            state.sourceWebmIds.insert(id);
-        } else {
-            state.sourceWebmIds.remove(id);
-        }
-        i->second.source = normalized;
-        if (video) {
-            i->second.animated = body;
-        }
-        i->second.sourceDone = true;
-        BuildDownloadedAsset(session, state, id, emoji);
-        return ok && (video || !normalized.isEmpty());
-    });
-
-    FetchAsset(weak, AnimatedUrl(url), [id, emoji](
-            not_null<Main::Session*> session,
-            State &state,
-            bool ok,
-            const QByteArray &body,
-            const QString &contentType) {
-        const auto webm = (ok && contentType.startsWith(u"video/webm"_q))
-            ? body
-            : QByteArray();
-        const auto i = state.pending.find(id);
-        if (i != state.pending.end()) {
-            if (!webm.isEmpty()) {
-                i->second.animated = webm;
-            }
-            i->second.animatedDone = true;
-            BuildDownloadedAsset(session, state, id, emoji);
-        } else if (!webm.isEmpty()) {
-            const auto mime = u"video/webm"_q;
-            if (CustomEmojiDocument(session, state, id, emoji, webm, mime)) {
-                AssetBuilt(
-                    session,
-                    state,
-                    id,
-                    { .content = webm, .mime = mime });
-            }
-        }
-        return ok;
-    });
 }
 
 struct Aggregate final {
@@ -591,37 +296,10 @@ std::vector<Data::Reaction> BuildAvailableReactions(
 	auto result = std::vector<Data::Reaction>();
 	result.reserve(state.catalog.size());
 	for (const auto &entry : state.catalog) {
-		if (entry.emoji.isEmpty()) {
+		if (entry.emoji.isEmpty() || entry.url.isEmpty()) {
 			continue;
 		}
-		const auto i = state.documents.find(entry.id);
-		auto icon = (i == state.documents.end())
-			? nullptr
-			: i->second.get();
-		if (!icon) {
-			if (!entry.assetUrl.isEmpty()) {
-				DownloadAsset(
-					session,
-					state,
-					entry.id,
-					entry.emoji,
-					entry.assetUrl);
-			} else if (Ui::Emoji::Find(entry.emoji)) {
-				if (auto webp = RasterizeNativeEmoji(entry.emoji)
-					; !webp.isEmpty()) {
-					icon = CustomEmojiDocument(
-						session,
-						state,
-						entry.id,
-						entry.emoji,
-						webp,
-						u"image/webp"_q);
-				}
-			}
-		}
-		if (!icon) {
-			continue;
-		}
+		const auto icon = StickerSets::Register(session, entry);
 		result.push_back(Data::Reaction{
 			.id = Data::ReactionId{ entry.id },
 			.title = entry.emoji,
@@ -761,7 +439,7 @@ void Intercept(not_null<MTP::Instance*> instance, mtpRequestId requestId, const 
         const auto session = Mtp::SessionFor(instance.data());
         if (!session) { answer.fail(u"SESSION_REVOKED"_q, 401); return; }
         auto &state = StateFor(session);
-        if (!ranges::contains(state.catalog, id, &CatalogItem::id)) { answer.fail(u"REACTION_INVALID"_q); return; }
+        if (!id) { answer.fail(u"REACTION_INVALID"_q); return; }
         state.favorite.desired = id;
         state.favoriteAnswers.push_back(answer);
         DispatchFavorite(session);
@@ -792,40 +470,17 @@ QString AssetUrlFor(not_null<Main::Session*> session, DocumentId id) {
     }
     for (const auto &entry : StateFor(session).catalog) {
         if (entry.id == id) {
-            return entry.assetUrl;
+            return entry.url;
         }
     }
-    const auto &urls = StateFor(session).statusUrls;
-    const auto i = urls.find(id);
-    return i == urls.end() ? QString() : i->second;
-}
-
-void RegisterStatusAsset(not_null<Main::Session*> session, DocumentId id, const QString &url) {
-    if (!id || url.isEmpty()) return;
-    auto &state = StateFor(session);
-    state.statusUrls[id] = url;
-    if (!state.assets.contains(id)) DownloadAsset(session, state, id, u"🙂"_q, url);
+    const auto item = StickerSets::Find(session, id);
+    return item ? item->url : QString();
 }
 
 QString EmojiFor(not_null<Main::Session*> session, DocumentId id) {
     const auto &map = StateFor(session).emojiByDocumentId;
     const auto i = map.find(id);
     return (i == map.end()) ? QString() : i->second;
-}
-
-Asset AssetFor(not_null<Main::Session*> session, DocumentId id) {
-    const auto &assets = StateFor(session).assets;
-    const auto i = assets.find(id);
-    return (i == assets.end()) ? Asset() : i->second;
-}
-
-bool IsSourceWebm(not_null<Main::Session*> session, DocumentId id) {
-    const auto state = FindState(session);
-    return state && state->sourceWebmIds.contains(id);
-}
-
-rpl::producer<DocumentId> AssetLoaded(not_null<Main::Session*> session) {
-    return StateFor(session).assetLoaded.events();
 }
 
 rpl::producer<> CatalogChanged(not_null<Main::Session*> session) {

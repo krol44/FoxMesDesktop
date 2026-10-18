@@ -1467,6 +1467,68 @@ void ApiClient::setStickerFavorite(qint64 emojiId, bool favorited, const QString
     }), std::move(done));
 }
 
+void ApiClient::stickerSets(Callback done) {
+    jsonRequest("GET", "/sticker-sets", {}, std::move(done));
+}
+
+void ApiClient::setStickerSetInstalled(qint64 setId, bool installed, const QString &operationId, Callback done) {
+    jsonRequest("PUT", QString("/sticker-sets/%1/installed").arg(setId), QJsonDocument(QJsonObject{
+        {"installed", installed}, {"operation_id", operationId},
+    }), std::move(done));
+}
+
+void ApiClient::orderStickerSets(bool emoji, const QList<qint64> &setIds, const QString &operationId, Callback done) {
+    jsonRequest("PUT", "/sticker-sets/order", QJsonDocument(QJsonObject{
+        {"kind", emoji ? u"emoji"_q : u"sticker"_q},
+        {"set_ids", idArray(setIds)},
+        {"operation_id", operationId},
+    }), std::move(done));
+}
+
+void ApiClient::emojiDocuments(const QList<qint64> &ids, Callback done) {
+    auto list = QStringList();
+    for (const auto id : ids) {
+        list.push_back(QString::number(id));
+    }
+    jsonRequest("GET", u"/emoji-documents?ids="_q + list.join(','), {}, std::move(done));
+}
+
+void ApiClient::sendSticker(
+        qint64 chatId,
+        qint64 stickerId,
+        qint64 replyToId,
+        const QString &clientNonce,
+        const SendOptions &options,
+        Callback done) {
+    auto body = QJsonObject{
+        {"sticker_id", stickerId},
+        {"reply_to_id", replyToId},
+        {"client_nonce", clientNonce},
+    };
+    if (options.silent) {
+        body.insert("silent", true);
+    }
+    jsonRequest("POST", QString("/chats/%1/messages").arg(chatId), QJsonDocument(body), std::move(done));
+}
+
+void ApiClient::createStickerReminder(
+        qint64 chatId,
+        qint64 stickerId,
+        qint64 replyToId,
+        const QString &clientNonce,
+        const SendOptions &options,
+        const QString &operationId,
+        Callback done) {
+    auto body = QJsonObject{
+        {"sticker_id", stickerId},
+        {"reply_to_id", replyToId},
+        {"client_nonce", clientNonce},
+        {"operation_id", operationId},
+    };
+    ApplySendOptions(body, options);
+    jsonRequest("POST", QString("/chats/%1/reminders").arg(chatId), QJsonDocument(body), std::move(done));
+}
+
 void ApiClient::savedGifs(int limit, qint64 beforeId, Callback done) {
     auto path = QString("/gifs?limit=%1").arg(limit > 0 ? limit : 60);
     if (beforeId > 0) {

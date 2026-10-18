@@ -3,6 +3,7 @@
 #include "api/api_common.h"
 #include "custom_backend/api_client.h"
 #include "custom_backend/live_updates_connection.h"
+#include "custom_backend/native_sticker_sets_adapter.h"
 #include "data/data_drafts.h"
 #include "data/data_messages.h"
 #include "mtproto/mtproto_response.h"
@@ -197,6 +198,12 @@ public:
         bool clearDraft = false,
         MsgId draftTopicRootId = MsgId(),
         PeerId draftMonoforumPeerId = PeerId());
+    void sendSticker(
+        History *history,
+        const StickerSets::Item &sticker,
+        ReplyTarget replyTo = {},
+        const QString &reuseClientNonce = QString(),
+        const SendOptions &options = {});
     void sendComment(
         History *history,
         const TextWithEntities &text,
@@ -629,6 +636,7 @@ private:
         PeerId draftMonoforumPeerId;
         bool draftSaving = false;
         std::vector<UploadSpec> files;
+        std::optional<StickerSets::Item> sticker;
         uint64 groupedId = 0;
         LocalAttachment localAttachment;
         std::shared_ptr<Data::DocumentMedia> localMedia;

@@ -6,6 +6,7 @@ This file is part of FoxMes Desktop.
 #include "custom_backend/native_appearance_adapter.h"
 #include "custom_backend/native_folders_adapter.h"
 #include "custom_backend/native_peer_status_adapter.h"
+#include "custom_backend/native_sticker_sets_adapter.h"
 
 #include "base/unixtime.h"
 #include "core/application.h"
@@ -109,6 +110,7 @@ bool Intercepts(const SerializedRequest &request) {
 		|| Contacts::Intercepts(request)
 		|| ChatRequests::Intercepts(request)
 		|| TopicChannels::Intercepts(request)
+		|| StickerSets::Intercepts(request)
 		|| Channels::Intercepts(request);
 }
 
@@ -134,6 +136,8 @@ void Intercept(
 		ChatRequests::Intercept(instance, requestId, request);
 	} else if (TopicChannels::Intercepts(request)) {
 		TopicChannels::Intercept(instance, requestId, request);
+	} else if (StickerSets::Intercepts(request)) {
+		StickerSets::Intercept(instance, requestId, request);
 	} else {
 		Channels::Intercept(instance, requestId, request);
 	}
