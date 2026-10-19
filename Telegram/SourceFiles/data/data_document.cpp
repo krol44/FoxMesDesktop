@@ -724,12 +724,15 @@ not_null<DocumentData*> DocumentData::chooseQuality(
 }
 
 void DocumentData::validateLottieSticker() {
-	if (type == FileDocument
-		&& hasMimeType(u"application/x-tgsticker"_q)) {
+	if (!hasMimeType(u"application/x-tgsticker"_q)) {
+		return;
+	} else if (type == FileDocument) {
 		type = StickerDocument;
 		_additional = std::make_unique<StickerData>();
 		sticker()->type = StickerType::Tgs;
 		dimensions = kLottieStickerDimensions;
+	} else if (const auto info = sticker()) {
+		info->type = StickerType::Tgs;
 	}
 }
 

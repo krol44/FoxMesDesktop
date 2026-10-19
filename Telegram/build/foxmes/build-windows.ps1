@@ -6,7 +6,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$version = "1.12.2"
+$version = "1.12.3"
 $telegramRoot = Join-Path $SourceRoot "Telegram"
 $buildRoot = Join-Path $SourceRoot "out"
 $librariesPath = Join-Path (Split-Path -Parent $SourceRoot) "Libraries\win64"
@@ -193,7 +193,7 @@ if ($OnlyCache) {
 }
 $versionInfo = (Get-Item $executable).VersionInfo
 if ("$($versionInfo.CompanyName)".Trim() -ne "Foxtail") { throw "Unexpected executable publisher." }
-if ($versionInfo.ProductVersion -notlike "1.12.2*") { throw "Unexpected executable version." }
+if ($versionInfo.ProductVersion -notlike "1.12.3*") { throw "Unexpected executable version." }
 
 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $ArtifactRoot
 New-Item -ItemType Directory -Force -Path $ArtifactRoot | Out-Null
@@ -238,7 +238,7 @@ if ($observedVersion -ne $version) {
     throw "Unexpected installer version: '$($observedVersion)'."
 }
 if ((Get-AuthenticodeSignature $setup).Status -ne "NotSigned") {
-    throw "The version 1.12.2 installer must be unsigned."
+    throw "The version 1.12.3 installer must be unsigned."
 }
 
 $temporaryRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { $env:TEMP }

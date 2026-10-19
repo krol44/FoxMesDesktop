@@ -20,8 +20,8 @@ concurrency:
 
 env:
   FOXMES_DEPS_REVISION: '1'
-  FOXMES_VERSION: 1.12.2
-  FOXMES_VERSION_CODE: '1012002'
+  FOXMES_VERSION: 1.12.3
+  FOXMES_VERSION_CODE: '1012003'
 
 jobs:
   validate:
@@ -757,7 +757,7 @@ jobs:
         run: |
           desktop-file-validate out/FoxMes.AppDir/usr/share/applications/ing.foxtail.FoxMes.desktop
           appstreamcli validate --no-net out/FoxMes.AppDir/usr/share/metainfo/ing.foxtail.FoxMes.metainfo.xml
-          artifacts/linux/FoxMes-1.12.2-linux-x86_64.AppImage --appimage-extract >/dev/null
+          artifacts/linux/FoxMes-1.12.3-linux-x86_64.AppImage --appimage-extract >/dev/null
           ldd out/FoxMes.AppDir/usr/bin/FoxMes | tee /tmp/foxmes-ldd.txt
           ! grep -q 'not found' /tmp/foxmes-ldd.txt
       - name: Upload Linux packages
@@ -804,12 +804,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          ref="$GITHUB_REF"
           stale() {
-            gh cache list --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF" \
+            gh cache list --repo "$GITHUB_REPOSITORY" --ref "$ref" \
               --limit 100 --sort created_at --order desc "$@"
           }
           if [ "$GITHUB_REF_TYPE" = tag ]; then
-            ids="$(stale --json id --jq '.[].id')"
+            # The cache service files a tag's caches under
+            # refs/heads/refs/tags/<tag>, and the plain tag ref matches none.
+            ids="$(for ref in "$GITHUB_REF" "refs/heads/$GITHUB_REF"; do
+              stale --json id --jq '.[].id'
+            done)"
           elif [ "$GITHUB_REF_NAME" = "$DEFAULT_BRANCH" ]; then
             ids="$(for prefix in Windows-x64-ccache- macOS-arm64-ccache- Linux-x64-ccache-; do
               stale --key "$prefix" --json id --jq '.[1:][].id'

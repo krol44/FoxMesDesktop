@@ -111,14 +111,19 @@ base::flat_map<not_null<Main::Session*>, std::unique_ptr<State>> &States() {
 
 [[nodiscard]] MTPDocument BuildDocument(const Item &item) {
 	const auto webm = (item.mime == u"video/webm"_q);
-	const auto mime = webm ? u"video/webm"_q : u"image/webp"_q;
+	const auto lottie = (item.mime == u"application/x-tgsticker"_q);
+	const auto mime = webm
+		? u"video/webm"_q
+		: lottie
+		? u"application/x-tgsticker"_q
+		: u"image/webp"_q;
 	const auto fallback = item.sticker ? 512 : 100;
 	const auto width = (item.width > 0) ? item.width : fallback;
 	const auto height = (item.height > 0) ? item.height : fallback;
 	auto attributes = QVector<MTPDocumentAttribute>{
 		MTP_documentAttributeFilename(MTP_string(
 			(item.sticker ? u"sticker"_q : u"emoji"_q)
-				+ (webm ? u".webm"_q : u".webp"_q))),
+				+ (webm ? u".webm"_q : lottie ? u".tgs"_q : u".webp"_q))),
 	};
 	if (webm) {
 		attributes.push_back(MTP_documentAttributeVideo(
