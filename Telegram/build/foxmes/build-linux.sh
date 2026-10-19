@@ -4,14 +4,22 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 source_root="${FOXMES_SOURCE_ROOT:-$(cd "$script_dir/../../.." && pwd)}"
 artifact_root="${FOXMES_ARTIFACT_ROOT:-$source_root/artifacts/linux}"
-version="1.12.1"
+version="1.12.2"
 image_tag="foxmes:centos_env"
 appdir="$source_root/out/FoxMes.AppDir"
 tools="$source_root/out/foxmes-tools"
 
+phase="${1:-all}"
+case "$phase" in
+  all|image|compile) ;;
+  *) echo "usage: $(basename "$0") [all|image|compile]" >&2; exit 1 ;;
+esac
+
 "$source_root/Telegram/patches/apply.sh"
 
-if [ -n "${FOXMES_CENTOS_ENV_IMAGE:-}" ] && docker pull "$FOXMES_CENTOS_ENV_IMAGE"
+if docker image inspect "$image_tag" >/dev/null 2>&1; then
+  echo "using the $image_tag image already present here"
+elif [ -n "${FOXMES_CENTOS_ENV_IMAGE:-}" ] && docker pull "$FOXMES_CENTOS_ENV_IMAGE"
 then
   echo "using the published image $FOXMES_CENTOS_ENV_IMAGE"
   docker tag "$FOXMES_CENTOS_ENV_IMAGE" "$image_tag"
@@ -62,16 +70,26 @@ else
   fi
 fi
 
+[ "$phase" = image ] && exit 0
+
 ccache_dir="${FOXMES_CCACHE_DIR:-$HOME/.cache/foxmes-ccache}"
 mkdir -p "$ccache_dir"
+ccache_tool=(docker run --rm -u "$(id -u):$(id -g)"
+  -v "$ccache_dir:/var/cache/ccache" "$image_tag" ccache)
+"${ccache_tool[@]}" --zero-stats
 
+# The image sets CCACHE_DISABLE for its own dependency stages, and ccache
+# treats the variable as on whatever its value, so it is removed here.
 docker run --rm \
   -u "$(id -u):$(id -g)" \
   -v "$source_root:/usr/src/tdesktop" \
   -v "$ccache_dir:/var/cache/ccache" \
-  -e CCACHE_MAXSIZE=2G \
+  -e CCACHE_MAXSIZE=5G \
+  -e CCACHE_COMPILERCHECK=content \
+  -e CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime \
   -e CONFIG=Release \
   "$image_tag" \
+  env -u CCACHE_DISABLE \
   /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
   -D CMAKE_CONFIGURATION_TYPES=Release \
   -D CMAKE_INSTALL_PREFIX=/usr \
@@ -79,6 +97,8 @@ docker run --rm \
   -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON \
   -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON \
   -D FOXMES_ALLOW_ENDPOINT_OVERRIDE=OFF
+"${ccache_tool[@]}" --show-stats
+[ "$phase" = compile ] && exit 0
 
 rm -rf "$appdir"
 docker run --rm \

@@ -1,11 +1,12 @@
 param(
     [string]$SourceRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")),
     [string]$ArtifactRoot = (Join-Path $SourceRoot "artifacts\windows"),
-    [switch]$OnlyCache
+    [switch]$OnlyCache,
+    [switch]$DepsOnly
 )
 
 $ErrorActionPreference = "Stop"
-$version = "1.12.1"
+$version = "1.12.2"
 $telegramRoot = Join-Path $SourceRoot "Telegram"
 $buildRoot = Join-Path $SourceRoot "out"
 $librariesPath = Join-Path (Split-Path -Parent $SourceRoot) "Libraries\win64"
@@ -121,9 +122,28 @@ try {
             -Path (Join-Path $env:RUNNER_TEMP "foxmes-deps-complete") | Out-Null
     }
 
-    if ($OnlyCache) {
-        Write-Host "OnlyCache: dependencies are ready, stopping before the app."
+    if ($DepsOnly) {
+        Write-Host "DepsOnly: dependencies are ready, stopping before the app."
         return
+    }
+
+    $ccacheArgs = @()
+    if ($env:FOXMES_CCACHE_DIR) {
+        $ccache = (Get-Command ccache -ErrorAction Stop).Source
+        New-Item -ItemType Directory -Force -Path $env:FOXMES_CCACHE_DIR | Out-Null
+        $env:CCACHE_DIR = $env:FOXMES_CCACHE_DIR
+        if (-not $env:CCACHE_MAXSIZE) { $env:CCACHE_MAXSIZE = "5G" }
+        $env:CCACHE_BASEDIR = Split-Path -Parent $SourceRoot
+        $env:CCACHE_COMPILERCHECK = "content"
+        $env:CCACHE_DEPEND = "true"
+        $env:CCACHE_SLOPPINESS = "time_macros,include_file_mtime,include_file_ctime"
+        & $ccache --zero-stats
+        if ($LASTEXITCODE -ne 0) { throw "ccache is not usable." }
+        $forceInclude = (Join-Path $PSScriptRoot "force-include-pch.cmake").Replace('\', '/')
+        $ccacheArgs = @(
+            "-D", "CMAKE_C_COMPILER_LAUNCHER=$ccache",
+            "-D", "CMAKE_CXX_COMPILER_LAUNCHER=$ccache",
+            "-D", "CMAKE_PROJECT_INCLUDE=$forceInclude")
     }
 
     & ".\configure.bat" "-G" "Ninja Multi-Config" "qt6" `
@@ -132,7 +152,8 @@ try {
         "-D" "TDESKTOP_API_TEST=ON" `
         "-D" "DESKTOP_APP_DISABLE_AUTOUPDATE=ON" `
         "-D" "DESKTOP_APP_DISABLE_CRASH_REPORTS=ON" `
-        "-D" "FOXMES_ALLOW_ENDPOINT_OVERRIDE=OFF"
+        "-D" "FOXMES_ALLOW_ENDPOINT_OVERRIDE=OFF" `
+        @ccacheArgs
     if ($LASTEXITCODE -ne 0) { throw "Windows configuration failed." }
 
     if ($env:FOXMES_EXPECTED_TOOLSET) {
@@ -162,11 +183,17 @@ try {
 }
 
 cmake --build $buildRoot --config Release --parallel
-if ($LASTEXITCODE -ne 0) { throw "Windows build failed." }
+$buildExit = $LASTEXITCODE
+if ($env:FOXMES_CCACHE_DIR) { & ccache --show-stats }
+if ($buildExit -ne 0) { throw "Windows build failed." }
 if (-not (Test-Path $executable)) { throw "FoxMes.exe was not produced." }
+if ($OnlyCache) {
+    Write-Host "OnlyCache: the app is compiled, stopping before packaging."
+    return
+}
 $versionInfo = (Get-Item $executable).VersionInfo
 if ("$($versionInfo.CompanyName)".Trim() -ne "Foxtail") { throw "Unexpected executable publisher." }
-if ($versionInfo.ProductVersion -notlike "1.12.1*") { throw "Unexpected executable version." }
+if ($versionInfo.ProductVersion -notlike "1.12.2*") { throw "Unexpected executable version." }
 
 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $ArtifactRoot
 New-Item -ItemType Directory -Force -Path $ArtifactRoot | Out-Null
@@ -211,7 +238,7 @@ if ($observedVersion -ne $version) {
     throw "Unexpected installer version: '$($observedVersion)'."
 }
 if ((Get-AuthenticodeSignature $setup).Status -ne "NotSigned") {
-    throw "The version 1.12.1 installer must be unsigned."
+    throw "The version 1.12.2 installer must be unsigned."
 }
 
 $temporaryRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { $env:TEMP }

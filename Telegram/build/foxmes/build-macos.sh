@@ -5,12 +5,12 @@ script_dir="$(cd "$(dirname "$0")" && pwd)"
 source_root="${FOXMES_SOURCE_ROOT:-$(cd "$script_dir/../../.." && pwd)}"
 artifact_root="${FOXMES_ARTIFACT_ROOT:-$source_root/artifacts/macos}"
 libraries_root="${FOXMES_LIBRARIES_ROOT:-$(cd "$source_root/.." && pwd)/Libraries}"
-version="1.12.1"
+version="1.12.2"
 
 phase="${1:-all}"
 case "$phase" in
-  all|deps|app) ;;
-  *) echo "usage: $(basename "$0") [all|deps|app]" >&2; exit 1 ;;
+  all|deps|compile|app) ;;
+  *) echo "usage: $(basename "$0") [all|deps|compile|app]" >&2; exit 1 ;;
 esac
 
 prune_libraries() {
@@ -134,7 +134,7 @@ setup_ccache() {
 	)
 }
 
-build_app() {
+compile_app() {
 	setup_ccache
 	cd "$source_root/Telegram"
 	./configure.sh \
@@ -151,7 +151,9 @@ build_app() {
 	if [ -n "${FOXMES_CCACHE_DIR:-}" ]; then
 		ccache --show-stats
 	fi
+}
 
+package_app() {
 	local app="$source_root/out/Release/FoxMes.app"
 	local binary="$app/Contents/MacOS/FoxMes"
 	test -x "$binary"
@@ -222,7 +224,8 @@ build_app() {
 }
 
 case "$phase" in
-  deps) build_deps ;;
-  app)  build_app ;;
-  all)  build_deps; build_app ;;
+  deps)    build_deps ;;
+  compile) compile_app ;;
+  app)     compile_app; package_app ;;
+  all)     build_deps; compile_app; package_app ;;
 esac
