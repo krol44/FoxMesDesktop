@@ -3437,11 +3437,10 @@ HistoryItem *NativeBridge::applyMessage(
         const auto alreadyAccounted = savedReminder
             && readState != _appliedReadStates.end()
             && messageId <= qMax(readState->second.snapshotTopId, readState->second.readThroughId);
-        // Ordinary self messages must not advance the inbox past unread reminders.
         const auto messageType = (type == NewMessageType::Unread)
             && own
             && history->peer->isSelf()
-            && (!savedReminder || alreadyAccounted)
+            && savedReminder && alreadyAccounted
             ? NewMessageType::Existing
             : type;
         const auto unreadBefore = history->unreadCountKnown()
@@ -3706,6 +3705,23 @@ void NativeBridge::applyMessageReactions(
     auto reactionsArray = message.value("reactions").toArray();
     if (reactionsArray.isEmpty()) {
         reactionsArray = message.value("reactions").toObject().value("recent").toArray();
+    }
+    const auto notice = message.value("reaction_notification").toObject();
+    const auto date = notice.value("date").toVariant().toLongLong();
+    const auto now = base::unixtime::now();
+    const auto recipient = notice.value("recipient_id").toVariant().toLongLong();
+    const auto actor = notice.value("actor_id").toVariant().toLongLong();
+    if (recipient == client().meId() && actor > 0 && actor != recipient
+            && date >= now - (48 * 60 * 60) && date <= now + 300) {
+        const auto added = notice.value("emoji_ids").toArray();
+        for (auto index = 0; index != reactionsArray.size(); ++index) {
+            auto reaction = reactionsArray[index].toObject();
+            if (reaction.value("user_id").toVariant().toLongLong() == actor
+                    && added.contains(reaction.value("emoji_id"))) {
+                reaction.insert("unread", true);
+                reactionsArray[index] = reaction;
+            }
+        }
     }
     const auto reactions = Reactions::Build(
         _session,
@@ -6791,6 +6807,9 @@ void NativeBridge::updateProfile(
 
 void NativeBridge::handleEvent(const QJsonObject &event) {
     const auto sequence = event.value("seq").toVariant().toLongLong();
+    if (sequence > 0 && sequence <= _eventSeq) {
+        return;
+    }
     const auto type = event.value("type").toString();
     const auto data = event.value("data").toObject();
 	if (sequence > 0 && _eventSeq > 0 && sequence > (_eventSeq + 1)) {
@@ -6836,10 +6855,7 @@ void NativeBridge::handleEvent(const QJsonObject &event) {
         const auto messageId = data.value("id").toVariant().toLongLong();
         if (chatId > 0 && messageId > 0 && messageId <= INT32_MAX) {
             if (const auto history = historyForChatId(chatId)) {
-                if (const auto item = _session->data().message(
-                        history->peer,
-                        MsgId(int32(messageId)))) {
-                    applyMessagePayloadState(item, data);
+                if (applyDependencyMessage(history, data)) {
                     _session->data().sendHistoryChangeNotifications();
                 }
             }

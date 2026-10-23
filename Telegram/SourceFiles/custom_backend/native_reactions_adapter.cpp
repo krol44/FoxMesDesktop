@@ -129,6 +129,7 @@ struct Aggregate final {
     int count = 0;
     bool chosen = false;
     QVector<qint64> recentUserIds;
+    QVector<qint64> unreadUserIds;
 };
 
 QVector<MTPReactionCount> BuildCounts(
@@ -175,6 +176,12 @@ QVector<MTPMessagePeerReaction> BuildRecent(
             if (userId == myUserId) {
                 flags |= Flag::f_my;
             }
+            const auto unread = ranges::any_of(i->unreadUserIds, [=](qint64 id) {
+                return id == userId;
+            });
+            if (unread && userId != myUserId) {
+                flags |= Flag::f_unread;
+            }
             result.push_back(MTP_messagePeerReaction(
                 MTP_flags(flags),
                 peerToMTP(peerFromUser(UserId(userId))),
@@ -216,6 +223,9 @@ QPair<QHash<DocumentId, Aggregate>, QVector<DocumentId>> Normalize(
         const auto legacyUserId = object.value("user_id").toVariant().toLongLong();
         if (legacyUserId > 0) {
             aggregate.recentUserIds.push_back(legacyUserId);
+            if (object.value("unread").toBool()) {
+                aggregate.unreadUserIds.push_back(legacyUserId);
+            }
         }
     }
     return { aggregates, order };
