@@ -333,7 +333,7 @@ not_null<QNetworkReply*> WebLoadManager::send(
 		const CustomBackend::DownloadAuth &auth) {
 	auto request = QNetworkRequest(url);
 	CustomBackend::ApplyDownloadAuth(request, auth);
-	const auto result = _network->get(request);
+	const auto result = CustomBackend::GetDownload(*_network, request, auth);
 	CustomBackend::AllowDownloadTls(result, auth);
 	const auto handleProgress = [=](qint64 ready, qint64 total) {
 		progress(id, result, ready, total);

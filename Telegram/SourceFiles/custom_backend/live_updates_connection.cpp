@@ -1,6 +1,7 @@
 #include "custom_backend/live_updates_connection.h"
 
 #include "base/network_reachability.h"
+#include "custom_backend/sealed_transport.h"
 
 #include <QtNetwork/QAbstractSocket>
 #include <QtNetwork/QSslConfiguration>
@@ -171,8 +172,15 @@ void LiveUpdatesConnection::connectNow() {
 		socket,
 		&QWebSocket::textMessageReceived,
 		this,
-		[=](const QString &message) {
-			socketMessage(socket, message);
+		[=](const QString &) {
+			failAttempt(socket);
+		});
+	QObject::connect(
+		socket,
+		&QWebSocket::binaryMessageReceived,
+		this,
+		[=](const QByteArray &message) {
+			socketBinary(socket, message);
 		});
 	QObject::connect(
 		socket,
@@ -189,7 +197,25 @@ void LiveUpdatesConnection::connectNow() {
 			_pongTimer.stop();
 		}
 	});
-	const auto request = _requestFactory();
+	const auto fresh = (_failuresSinceConnect >= 2);
+	_codec = nullptr;
+	_requestFactory(fresh, crl::guard(this, [=](
+			std::optional<QNetworkRequest> request,
+			std::shared_ptr<Sealed::SocketCodec> codec) {
+		if (!_running || _webSocket.get() != socket) {
+			return;
+		} else if (!request || !codec) {
+			failAttempt(socket);
+			return;
+		}
+		_codec = std::move(codec);
+		openSocket(socket, *request);
+	}));
+}
+
+void LiveUpdatesConnection::openSocket(
+		QWebSocket *socket,
+		const QNetworkRequest &request) {
 	const auto configuration = request.sslConfiguration();
 	socket->setSslConfiguration(configuration);
 	if (configuration.peerVerifyMode() == QSslSocket::VerifyNone) {
@@ -217,6 +243,7 @@ void LiveUpdatesConnection::failAttempt(QWebSocket *socket) {
 		return;
 	}
 	_attemptFailed = true;
+	++_failuresSinceConnect;
 	stopHeartbeat();
 	setStatus({
 		.state = LiveUpdatesState::Waiting,
@@ -230,6 +257,7 @@ void LiveUpdatesConnection::socketConnected(QWebSocket *socket) {
 		return;
 	}
 	_attemptFailed = false;
+	_failuresSinceConnect = 0;
 	_retryTimer.stop();
 	_retryTimeout = 1;
 	_heartbeatTimer.start();
@@ -246,7 +274,10 @@ void LiveUpdatesConnection::sendPresence() {
 		|| _webSocket->state() != QAbstractSocket::ConnectedState) {
 		return;
 	}
-	_webSocket->sendTextMessage(QString::fromUtf8(QJsonDocument(QJsonObject{
+	if (!_codec) {
+		return;
+	}
+	_webSocket->sendBinaryMessage(_codec->seal(QJsonDocument(QJsonObject{
 		{ "type", "presence.set" },
 		{ "chat_id", _presenceChatId },
 		{ "active", _presenceChatId > 0 },
@@ -264,6 +295,20 @@ void LiveUpdatesConnection::socketMessage(
 	}
 	_pongTimer.stop();
 	_message(std::move(message));
+}
+
+void LiveUpdatesConnection::socketBinary(
+		QWebSocket *socket,
+		const QByteArray &message) {
+	if (!_running || _webSocket.get() != socket || !_codec) {
+		return;
+	}
+	const auto plain = _codec->open(message);
+	if (!plain) {
+		failAttempt(socket);
+		return;
+	}
+	socketMessage(socket, QString::fromUtf8(*plain));
 }
 
 void LiveUpdatesConnection::stopHeartbeat() {

@@ -94,9 +94,11 @@ void SaveContext(qint64 userId) {
     if (i == gContexts.end() || !i->second || !i->second->client) return;
 	const auto &context = *i->second;
 	if (const auto account = context.account.get()) {
+		const auto credentials = context.client->credentials();
 		SaveStoredAuth(
 			account,
-			context.client->accessToken(),
+			credentials.sid,
+			credentials.secret,
 			context.user);
 	}
 	SaveEventSequence(userId, context.client->eventSequence());
@@ -125,7 +127,10 @@ AuthContext &EnsureContext(Main::Account *account, qint64 userId) {
         }();
         auto stored = LoadStoredAuth(account);
         context.user = std::move(stored.user);
-        context.client->setTokens(std::move(stored.access));
+        context.client->setCredentials({
+            .sid = stored.sid,
+            .secret = stored.secret,
+        });
         context.client->setMeId(userId);
         context.client->setEventSequence(Settings().value(
             Prefix(userId) + u"/event_seq_v2"_q).toLongLong());
@@ -200,31 +205,36 @@ bool DevInsecureTls() {
     return !EnvBaseUrl().isEmpty();
 }
 
-DownloadAuth AuthorizeDownload(Main::Session *session, const QUrl &url) {
-    if (!session || !url.isValid()) {
-        return {};
+bool IsOurHost(const QUrl &url) {
+    if (!url.isValid()) {
+        return false;
     }
     const auto host = url.host().toLower();
     const auto api = QUrl(BaseUrl()).host().toLower();
-    const auto ours = (host == u"cdn.foxtail.ing"_q)
+    return (host == u"cdn.foxtail.ing"_q)
         || (host == u"cdn.fxl.ru"_q)
         || (!api.isEmpty() && (host == api))
         || (DevInsecureTls() && (host == u"cdn.fxl.test"_q));
-    if (!ours) {
+}
+
+DownloadAuth AuthorizeDownload(Main::Session *session, const QUrl &url) {
+    if (!session || !IsOurHost(url)) {
         return {};
     }
-    auto result = DownloadAuth{ .insecureTls = DevInsecureTls() };
-    const auto token = ClientFor(session).accessToken();
-    if (!token.isEmpty()) {
-        result.authorization = "Bearer " + token.toUtf8();
-    }
-    return result;
+    return DownloadAuth{
+        .signer = ClientFor(session).signer(),
+        .insecureTls = DevInsecureTls(),
+    };
+}
+
+QNetworkReply *GetDownload(
+        QNetworkAccessManager &network,
+        const QNetworkRequest &request,
+        const DownloadAuth &auth) {
+    return Sealed::Get(network, request, auth.signer);
 }
 
 void ApplyDownloadAuth(QNetworkRequest &request, const DownloadAuth &auth) {
-    if (!auth.authorization.isEmpty()) {
-        request.setRawHeader("Authorization", auth.authorization);
-    }
     if (auth.insecureTls) {
         auto configuration = request.sslConfiguration();
         configuration.setPeerVerifyMode(QSslSocket::VerifyNone);
@@ -282,7 +292,7 @@ QJsonObject CurrentUser(Main::Session *session) {
 bool HasStoredAuth(Main::Session *session) {
     if (!session) return false;
     auto &client = ClientFor(session);
-    return !client.accessToken().isEmpty();
+    return client.authorized();
 }
 
 void RememberLogin(
@@ -297,7 +307,7 @@ void RememberLogin(
     gLoginUser = user;
     auto &context = EnsureContext(account, id);
     context.user = user;
-    context.client->setTokens(Client().accessToken());
+    context.client->setCredentials(Client().credentials());
     context.client->setMeId(id);
     SaveContext(id);
 }
@@ -431,7 +441,7 @@ void Logout(Main::Session *session, std::function<void()> done) {
     const auto id = SessionUserId(session);
     const auto account = base::make_weak(&session->account());
     auto &client = ClientFor(session);
-    if (client.accessToken().isEmpty()) {
+    if (!client.authorized()) {
         ClearContext(account.get(), id);
         if (done) done();
         return;

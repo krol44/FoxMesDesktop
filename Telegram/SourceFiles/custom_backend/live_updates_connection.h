@@ -11,8 +11,14 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 
 class QWebSocket;
+
+namespace CustomBackend::Sealed {
+class SocketCodec;
+struct SocketRequest;
+} // namespace CustomBackend::Sealed
 
 namespace base {
 class NetworkReachability;
@@ -35,7 +41,10 @@ struct LiveUpdatesStatus {
 
 class LiveUpdatesConnection final : public QObject {
 public:
-	using RequestFactory = std::function<QNetworkRequest()>;
+	using RequestReady = std::function<void(
+		std::optional<QNetworkRequest> request,
+		std::shared_ptr<Sealed::SocketCodec> codec)>;
+	using RequestFactory = std::function<void(bool fresh, RequestReady ready)>;
 	using ConnectedCallback = std::function<void()>;
 	using MessageCallback = std::function<void(QString)>;
 
@@ -60,6 +69,8 @@ private:
 	void retryByTimer();
 	void failAttempt(QWebSocket *socket);
 	void socketConnected(QWebSocket *socket);
+	void openSocket(QWebSocket *socket, const QNetworkRequest &request);
+	void socketBinary(QWebSocket *socket, const QByteArray &message);
 	void socketMessage(QWebSocket *socket, QString message);
 	void pongTimedOut();
 	void stopHeartbeat();
@@ -75,6 +86,8 @@ private:
 	QTimer _heartbeatTimer;
 	QTimer _pongTimer;
 	std::unique_ptr<QWebSocket> _webSocket;
+	std::shared_ptr<Sealed::SocketCodec> _codec;
+	int _failuresSinceConnect = 0;
 	const std::shared_ptr<base::NetworkReachability> _networkReachability;
 	int _retryTimeout = 1;
 	bool _running = false;

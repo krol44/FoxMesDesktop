@@ -469,7 +469,7 @@ void Loader::sendPiece(int64 offset) {
 			+ QByteArray::number(piece.till - 1));
 	const auto auth = AuthorizeDownload(_session, request.url());
 	ApplyDownloadAuth(request, auth);
-	const auto reply = _manager->get(request);
+	const auto reply = GetDownload(*_manager, request, auth);
 	AllowDownloadTls(reply, auth);
 
 	state.reply = reply;

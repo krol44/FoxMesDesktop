@@ -3,6 +3,7 @@
 #include "custom_backend/live_updates_connection.h"
 
 #include <functional>
+#include <memory>
 
 #include "base/flat_set.h"
 
@@ -14,6 +15,7 @@
 #include <QtGlobal>
 #include <QtNetwork/QNetworkRequest>
 
+class QNetworkAccessManager;
 class QNetworkReply;
 
 class PeerData;
@@ -33,6 +35,10 @@ class Session;
 namespace Window {
 class SessionController;
 }
+
+namespace CustomBackend::Sealed {
+class Signer;
+} // namespace CustomBackend::Sealed
 
 namespace CustomBackend {
 
@@ -56,18 +62,24 @@ inline constexpr auto kAutoDeletePeriod = TimeId(30 * 86400);
 [[nodiscard]] bool DevInsecureTls();
 
 struct DownloadAuth {
-	QByteArray authorization;
+	std::weak_ptr<Sealed::Signer> signer;
 	bool insecureTls = false;
 
 	[[nodiscard]] bool empty() const {
-		return authorization.isEmpty() && !insecureTls;
+		return signer.expired() && !insecureTls;
 	}
 };
+
+[[nodiscard]] bool IsOurHost(const QUrl &url);
 
 [[nodiscard]] DownloadAuth AuthorizeDownload(
 	Main::Session *session,
 	const QUrl &url);
 void ApplyDownloadAuth(QNetworkRequest &request, const DownloadAuth &auth);
+[[nodiscard]] QNetworkReply *GetDownload(
+	QNetworkAccessManager &network,
+	const QNetworkRequest &request,
+	const DownloadAuth &auth);
 bool AllowDownloadTls(QNetworkReply *reply, const DownloadAuth &auth);
 
 void ReleaseOnQuit(std::function<void()> release);

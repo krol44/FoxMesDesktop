@@ -18,7 +18,6 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QUrlQuery>
-#include <QtNetwork/QHttpMultiPart>
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkRequest>
 #include <QtNetwork/QSslConfiguration>
@@ -126,6 +125,38 @@ void ApplyDevTls(QNetworkRequest &request) {
     request.setSslConfiguration(configuration);
 }
 
+struct MultipartPart {
+    QByteArray disposition;
+    QByteArray contentType;
+    QByteArray body;
+};
+
+[[nodiscard]] QByteArray MultipartBoundary() {
+    return "foxmes-" + QUuid::createUuid().toString(QUuid::Id128).toLatin1();
+}
+
+[[nodiscard]] QByteArray MultipartBody(
+        const std::vector<MultipartPart> &parts,
+        const QByteArray &boundary) {
+    auto result = QByteArray();
+    for (const auto &part : parts) {
+        result += "--" + boundary + "\r\n";
+        result += "Content-Disposition: " + part.disposition + "\r\n";
+        if (!part.contentType.isEmpty()) {
+            result += "Content-Type: " + part.contentType + "\r\n";
+        }
+        result += "\r\n";
+        result += part.body;
+        result += "\r\n";
+    }
+    result += "--" + boundary + "--\r\n";
+    return result;
+}
+
+[[nodiscard]] QByteArray MultipartType(const QByteArray &boundary) {
+    return "multipart/form-data; boundary=" + boundary;
+}
+
 void AddUploadTarget(QUrlQuery &query, const UploadTarget &target) {
     if (target.chatId > 0) {
         query.addQueryItem(u"chatId"_q, QString::number(target.chatId));
@@ -144,6 +175,10 @@ bool IsTransportFailure(int status) {
 ApiClient::ApiClient(QUrl baseUrl, QObject *parent)
 : QObject(parent)
 , _baseUrl(normalizeBase(std::move(baseUrl))) {
+    _sealed = std::make_shared<Sealed::Session>(
+        &_network,
+        _baseUrl,
+        [](QNetworkRequest &request) { ApplyDevTls(request); });
     QObject::connect(
         &_network,
         &QNetworkAccessManager::finished,
@@ -167,14 +202,77 @@ ApiClient::ApiClient(QUrl baseUrl, QObject *parent)
     }
 }
 
-void ApiClient::setTokens(QString access) {
-    _accessToken = std::move(access);
+Credentials ApiClient::credentials() const {
+    const auto secret = _sealed->secret();
+    return {
+        .sid = _sealed->sid(),
+        .secret = QByteArray(secret.data(), qsizetype(secret.size())),
+    };
+}
+
+bool ApiClient::authorized() const {
+    return _sealed->authorized();
+}
+
+std::weak_ptr<Sealed::Signer> ApiClient::signer() const {
+    return _sealed->authorized()
+        ? std::weak_ptr<Sealed::Signer>(_sealed)
+        : std::weak_ptr<Sealed::Signer>();
+}
+
+void ApiClient::setCredentials(const Credentials &credentials) {
+    if (credentials.empty()) {
+        _sealed->clear();
+        return;
+    }
+    _sealed->setCredentials(
+        credentials.sid,
+        Sealed::Bytes(credentials.secret.constData(), credentials.secret.size()));
+    _sealed->prepare();
 }
 
 void ApiClient::clearTokens() {
-    _accessToken.clear();
+    _sealed->clear();
+    _login = nullptr;
     _meId = 0;
     if (_tokensChanged) _tokensChanged();
+}
+
+QNetworkReply *ApiClient::send(
+        const QByteArray &method,
+        const QNetworkRequest &request,
+        const QByteArray &type,
+        const QByteArray &body,
+        bool authorize) {
+    if (authorize) {
+        return sendWith(_sealed, method, request, type, body);
+    }
+    auto plain = request;
+    if (!type.isEmpty()) {
+        plain.setHeader(QNetworkRequest::ContentTypeHeader, type);
+    }
+    if (method == "GET") {
+        return _network.get(plain);
+    } else if (method == "POST") {
+        return _network.post(plain, body);
+    } else if (method == "PUT") {
+        return _network.put(plain, body);
+    }
+    return _network.sendCustomRequest(plain, method, body);
+}
+
+QNetworkReply *ApiClient::sendWith(
+        std::weak_ptr<Sealed::Signer> signer,
+        const QByteArray &method,
+        const QNetworkRequest &request,
+        const QByteArray &type,
+        const QByteArray &body) {
+    return new Sealed::Reply(&_network, Sealed::Spec{
+        .method = method,
+        .request = request,
+        .type = type,
+        .body = body,
+    }, std::move(signer));
 }
 
 QNetworkRequest ApiClient::makeRequest(
@@ -189,9 +287,6 @@ QNetworkRequest ApiClient::makeRequest(
     result.setRawHeader("Accept", "application/json");
     if (lane && !lane->value.isEmpty()) {
         result.setRawHeader(kLaneHeader, lane->value);
-    }
-	if (authorize && !_accessToken.isEmpty()) {
-        result.setRawHeader("Authorization", "Bearer " + _accessToken.toUtf8());
     }
     ApplyDevTls(result);
     return result;
@@ -230,25 +325,20 @@ void ApiClient::jsonRequest(
         bool authorize,
         const LanePtr &lane,
         int timeoutMs) {
-	auto request = makeRequest(path, true, authorize, lane, timeoutMs);
+	auto request = makeRequest(path, false, authorize, lane, timeoutMs);
     const auto payload = body.isNull() ? QByteArray() : body.toJson(QJsonDocument::Compact);
-    QNetworkReply *reply = nullptr;
-    if (method == "GET") {
-        reply = _network.get(request);
-    } else if (method == "POST") {
-        reply = _network.post(request, payload);
-    } else if (method == "PATCH") {
-        reply = _network.sendCustomRequest(request, "PATCH", payload);
-    } else if (method == "PUT") {
-        reply = _network.sendCustomRequest(request, "PUT", payload);
-    } else if (method == "DELETE") {
-        reply = _network.sendCustomRequest(request, "DELETE", payload);
-    }
-    if (!reply) {
+    if (method != "GET"
+        && method != "POST"
+        && method != "PATCH"
+        && method != "PUT"
+        && method != "DELETE") {
         if (done) done({}, u"unsupported HTTP method"_q, 0);
         return;
     }
-
+    const auto type = payload.isEmpty()
+        ? QByteArray()
+        : QByteArray("application/json");
+    const auto reply = send(method, request, type, payload, authorize);
     finish(reply, std::move(done), lane);
 }
 
@@ -260,35 +350,79 @@ void ApiClient::markEphemeralViewed(qint64 messageId, Callback done) {
         std::move(done));
 }
 
-void ApiClient::acceptTokens(const QJsonDocument &document) {
+void ApiClient::acceptSession(const QJsonDocument &document) {
     if (!document.isObject()) return;
     const auto object = document.object();
-    const auto access = object.value("access_token").toString();
-    if (!access.isEmpty()) _accessToken = access;
+    const auto sid = object.value("session_id").toVariant().toLongLong();
+    const auto secret = QByteArray::fromBase64(
+        object.value("session_secret").toString().toLatin1(),
+        QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals);
+    if (sid > 0 && secret.size() == SealedCrypto::kKeySize) {
+        _login = nullptr;
+        setCredentials({ .sid = sid, .secret = secret });
+    }
     const auto user = object.value("user").toObject();
     if (!user.isEmpty()) _meId = user.value("id").toVariant().toLongLong();
     if (_tokensChanged) _tokensChanged();
 }
 
 void ApiClient::startDevice(Callback done) {
-    auto device = QSysInfo::prettyProductName();
-    if (device.isEmpty()) device = u"Unknown OS"_q;
-    device += u" FoxMes Desktop"_q;
-    jsonRequest("POST", "/auth/device/start", QJsonDocument(QJsonObject{
-        {"device_name", device},
-    }),
-        [done = std::move(done)](QJsonDocument doc, QString err, int status) mutable {
-        if (done) done(std::move(doc), std::move(err), status);
+    jsonRequest("GET", "/auth/login-key", {}, [this, done = std::move(done)](
+            QJsonDocument doc,
+            QString err,
+            int status) mutable {
+        if (!err.isEmpty() || status != 200) {
+            if (done) done(std::move(doc), std::move(err), status);
+            return;
+        }
+        startDeviceWithKey(doc, std::move(done));
     }, false);
 }
 
+void ApiClient::startDeviceWithKey(const QJsonDocument &keys, Callback done) {
+    const auto key = Sealed::VerifyLoginDocument(
+        keys.object(),
+        QUrl(_baseUrl).host());
+    const auto credential = key ? Sealed::StartLogin(*key) : std::nullopt;
+    if (!credential) {
+        LOG(("FoxMes Error: login key chain is not trusted."));
+        if (done) done({}, u"login key is not trusted"_q, 0);
+        return;
+    }
+    _login = std::make_shared<Sealed::FixedSigner>(*credential);
+    auto device = QSysInfo::prettyProductName();
+    if (device.isEmpty()) device = u"Unknown OS"_q;
+    device += u" FoxMes Desktop"_q;
+    const auto payload = QJsonDocument(QJsonObject{
+        {"device_name", device},
+    }).toJson(QJsonDocument::Compact);
+    const auto reply = sendWith(
+        _login,
+        "POST",
+        makeRequest(u"/auth/device/start"_q, false, false),
+        "application/json",
+        payload);
+    finish(reply, std::move(done));
+}
+
 void ApiClient::pollDevice(const QString &request, Callback done) {
-    jsonRequest("POST", "/auth/device/exchange", QJsonDocument(QJsonObject{
+    if (!_login) {
+        if (done) done({}, u"login is not started"_q, 0);
+        return;
+    }
+    const auto payload = QJsonDocument(QJsonObject{
         {"request", request},
-    }), [this, done = std::move(done)](QJsonDocument doc, QString err, int status) mutable {
-        if (err.isEmpty() && status == 200) acceptTokens(doc);
+    }).toJson(QJsonDocument::Compact);
+    const auto reply = sendWith(
+        _login,
+        "POST",
+        makeRequest(u"/auth/device/exchange"_q, false, false),
+        "application/json",
+        payload);
+    finish(reply, [this, done = std::move(done)](QJsonDocument doc, QString err, int status) mutable {
+        if (err.isEmpty() && status == 200) acceptSession(doc);
         if (done) done(std::move(doc), std::move(err), status);
-    }, false);
+    });
 }
 
 void ApiClient::logout(Callback done) {
@@ -1080,37 +1214,35 @@ void ApiClient::communityPhoto(
         const QByteArray &video,
         double videoStartTs,
         Callback done) {
-    auto multipart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
-    QHttpPart part;
-    part.setHeader(
-        QNetworkRequest::ContentDispositionHeader,
-        u"form-data; name=\"file\"; filename=\"photo.jpg\""_q);
-    part.setHeader(QNetworkRequest::ContentTypeHeader, u"image/jpeg"_q);
-    part.setBody(jpeg);
-    multipart->append(part);
+    auto parts = std::vector<MultipartPart>{ {
+        .disposition = R"(form-data; name="file"; filename="photo.jpg")",
+        .contentType = "image/jpeg",
+        .body = jpeg,
+    } };
     if (!video.isEmpty()) {
-        QHttpPart videoPart;
-        videoPart.setHeader(
-            QNetworkRequest::ContentDispositionHeader,
-            u"form-data; name=\"video\"; filename=\"photo.mp4\""_q);
-        videoPart.setHeader(QNetworkRequest::ContentTypeHeader, u"video/mp4"_q);
-        videoPart.setBody(video);
-        multipart->append(videoPart);
-        QHttpPart startPart;
-        startPart.setHeader(
-            QNetworkRequest::ContentDispositionHeader,
-            u"form-data; name=\"video_start_ts\""_q);
-        startPart.setBody(QByteArray::number(videoStartTs, 'f', 3));
-        multipart->append(startPart);
+        parts.push_back({
+            .disposition = R"(form-data; name="video"; filename="photo.mp4")",
+            .contentType = "video/mp4",
+            .body = video,
+        });
+        parts.push_back({
+            .disposition = R"(form-data; name="video_start_ts")",
+            .body = QByteArray::number(videoStartTs, 'f', 3),
+        });
     }
+    const auto boundary = MultipartBoundary();
     const auto lane = std::make_shared<UploadLane>();
     auto request = makeRequest(
         QString("/chats/%1/photo").arg(chatId),
         false,
         true,
         lane);
-    auto reply = _network.put(request, multipart);
-    multipart->setParent(reply);
+    const auto reply = send(
+        "PUT",
+        request,
+        MultipartType(boundary),
+        MultipartBody(parts, boundary),
+        true);
     finish(reply, std::move(done), lane);
 }
 
@@ -1576,24 +1708,29 @@ ApiClient::CancelHandle ApiClient::uploadDevice(
         if (done) done({}, u"file device is null"_q, 0);
         return {};
     }
-    auto multipart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
-    QHttpPart part;
-    part.setHeader(
-        QNetworkRequest::ContentDispositionHeader,
-        QString("form-data; name=\"file\"; filename=\"%1\"")
-            .arg(name.isEmpty() ? u"upload.bin"_q : name));
-    if (!mime.isEmpty()) {
-        part.setHeader(QNetworkRequest::ContentTypeHeader, mime);
+    const auto owned = std::unique_ptr<QIODevice>(device);
+    if (!device->isOpen() && !device->open(QIODevice::ReadOnly)) {
+        if (done) done({}, u"cannot read the upload source"_q, 0);
+        return {};
     }
-    part.setBodyDevice(device);
-    device->setParent(multipart);
-    multipart->append(part);
+    auto filename = (name.isEmpty() ? u"upload.bin"_q : name);
+    filename.replace('"', '_');
+    filename.replace('\r', '_');
+    filename.replace('\n', '_');
+    auto parts = std::vector<MultipartPart>{ {
+        .disposition = "form-data; name=\"file\"; filename=\""
+            + filename.toUtf8()
+            + "\"",
+        .contentType = mime.toUtf8(),
+        .body = device->readAll(),
+    } };
     if (kind == u"avatar"_q) {
-        QHttpPart operation;
-        operation.setHeader(QNetworkRequest::ContentDispositionHeader, u"form-data; name=\"operation_id\""_q);
-        operation.setBody(QUuid::createUuid().toString(QUuid::WithoutBraces).toUtf8());
-        multipart->append(operation);
+        parts.push_back({
+            .disposition = R"(form-data; name="operation_id")",
+            .body = QUuid::createUuid().toString(QUuid::WithoutBraces).toUtf8(),
+        });
     }
+    const auto boundary = MultipartBoundary();
 
 
     QUrlQuery query;
@@ -1605,8 +1742,12 @@ ApiClient::CancelHandle ApiClient::uploadDevice(
         : base + u"?"_q + query.toString(QUrl::FullyEncoded);
     const auto lane = std::make_shared<UploadLane>();
     auto request = makeRequest(path, false, true, lane);
-    auto reply = _network.post(request, multipart);
-    multipart->setParent(reply);
+    const auto reply = send(
+        "POST",
+        request,
+        MultipartType(boundary),
+        MultipartBody(parts, boundary),
+        true);
     if (progress) {
         QObject::connect(
             reply,
@@ -1877,13 +2018,15 @@ void ApiClient::sendNextChunk(std::shared_ptr<ChunkedUpload> state) {
         false,
         true,
         state->lane);
-    request.setHeader(
-        QNetworkRequest::ContentTypeHeader,
-        u"application/octet-stream"_q);
     request.setRawHeader("X-Upload-ID", state->uploadId.toUtf8());
     request.setRawHeader("X-Chunk-Index", QByteArray::number(state->index));
     request.setRawHeader("X-Total-Chunks", QByteArray::number(state->totalChunks));
-    const auto reply = _network.post(request, body);
+    const auto reply = send(
+        "POST",
+        request,
+        "application/octet-stream",
+        body,
+        true);
     state->reply = reply;
     const auto weak = QPointer<ApiClient>(this);
     const auto chunkBytes = qint64(body.size());
@@ -2136,7 +2279,7 @@ ApiClient::CancelHandle ApiClient::uploadData(
 }
 
 void ApiClient::downloadFile(const QString &path, BytesCallback done) {
-    auto reply = _network.get(makeRequest(path, false));
+    const auto reply = send("GET", makeRequest(path, false), {}, {}, true);
     QObject::connect(reply, &QNetworkReply::finished, this,
         [reply, done = std::move(done)]() mutable {
             const auto status = reply->attribute(
@@ -2160,11 +2303,10 @@ void ApiClient::downloadUrl(const QUrl &url, BytesCallback done) {
     request.setAttribute(
         QNetworkRequest::RedirectPolicyAttribute,
         QNetworkRequest::ManualRedirectPolicy);
-    if (!_accessToken.isEmpty()) {
-        request.setRawHeader("Authorization", "Bearer " + _accessToken.toUtf8());
-    }
     ApplyDevTls(request);
-    auto reply = _network.get(request);
+    const auto reply = IsOurHost(url)
+        ? send("GET", request, {}, {}, true)
+        : _network.get(request);
     QObject::connect(reply, &QNetworkReply::finished, this,
         [reply, done = std::move(done)]() mutable {
             const auto status = reply->attribute(
@@ -2199,15 +2341,26 @@ QUrl ApiClient::websocketUrl(qint64 since) const {
     return url;
 }
 
-QNetworkRequest ApiClient::websocketRequest(qint64 since) const {
+void ApiClient::websocketRequest(
+		qint64 since,
+		bool fresh,
+		Fn<void(std::optional<Sealed::SocketRequest>)> done) {
 	auto request = QNetworkRequest(websocketUrl(since));
 	request.setTransferTimeout(kRequestTimeoutMs);
 	request.setRawHeader("Accept", "application/json");
-	if (!_accessToken.isEmpty()) {
-		request.setRawHeader("Authorization", "Bearer " + _accessToken.toUtf8());
-	}
 	ApplyDevTls(request);
-	return request;
+	if (fresh) {
+		_sealed->dropTemp();
+	}
+	const auto weak = QPointer<ApiClient>(this);
+	_sealed->credential([=](std::optional<Sealed::Credential> credential) {
+		if (!weak) {
+			return;
+		}
+		done(credential
+			? Sealed::SignSocket(request, *credential)
+			: std::nullopt);
+	});
 }
 
 }

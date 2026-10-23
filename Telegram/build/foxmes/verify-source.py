@@ -174,6 +174,12 @@ def main() -> int:
         failures.append("native_runtime.cpp does not compile-time guard FOXMES_URL")
     if 'u"https://foxmes.foxtail.ing"_q' not in runtime:
         failures.append("native_runtime.cpp has no baked-in production endpoint")
+    roots = (ROOT / "Telegram/SourceFiles/custom_backend/sealed_roots.h").read_text(
+        encoding="utf-8"
+    )
+    guarded = roots.split("#if FOXMES_ALLOW_ENDPOINT_OVERRIDE", 1)
+    if len(guarded) != 2 or '"stage"' in guarded[0] or '"stage"' not in guarded[1].split("#endif", 1)[0]:
+        failures.append("sealed_roots.h does not keep the stage root behind FOXMES_ALLOW_ENDPOINT_OVERRIDE")
 
     for expected, path in EXPECTED_CONSTANTS.items():
         if expected not in path.read_text(encoding="utf-8"):
@@ -183,9 +189,9 @@ def main() -> int:
     for line in (ROOT / "Telegram/build/version").read_text(encoding="utf-8").splitlines():
         key, value = line.split(maxsplit=1)
         version_values[key] = value
-    if version_values.get("AppVersion") != "1012003":
+    if version_values.get("AppVersion") != "1013000":
         failures.append("Telegram/build/version has an unexpected version code")
-    if version_values.get("AppVersionStr") != "1.12.3":
+    if version_values.get("AppVersionStr") != "1.13.0":
         failures.append("Telegram/build/version has an unexpected version string")
 
     startup_task = (

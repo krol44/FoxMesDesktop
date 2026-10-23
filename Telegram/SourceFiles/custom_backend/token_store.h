@@ -15,13 +15,15 @@
 namespace CustomBackend {
 
 struct StoredAuth {
-	QString access;
+	qint64 sid = 0;
+	QByteArray secret;
 	QJsonObject user;
 };
 
 namespace details {
 
-inline constexpr auto kAccessPref = std::string_view("foxmes_access");
+inline constexpr auto kSidPref = std::string_view("foxmes_sid");
+inline constexpr auto kSecretPref = std::string_view("foxmes_secret");
 inline constexpr auto kUserPref = std::string_view("foxmes_user");
 inline constexpr auto kChatsCachePref = std::string_view("foxmes_chats_cache");
 inline constexpr auto kReadJournalPref = std::string_view(
@@ -69,17 +71,28 @@ inline StoredAuth LoadStoredAuth(not_null<Main::Account*> account) {
 	const auto user = QJsonDocument::fromJson(
 		local.readPref<QString>(details::kUserPref).toUtf8());
 	return {
-		.access = local.readPref<QString>(details::kAccessPref),
+		.sid = local.readPref<QString>(details::kSidPref).toLongLong(),
+		.secret = QByteArray::fromBase64(
+			local.readPref<QString>(details::kSecretPref).toLatin1()),
 		.user = user.isObject() ? user.object() : QJsonObject(),
 	};
 }
 
 inline void SaveStoredAuth(
 		not_null<Main::Account*> account,
-		const QString &access,
+		qint64 sid,
+		const QByteArray &secret,
 		const QJsonObject &user) {
 	auto &local = account->local();
-	local.writePref<QString>(details::kAccessPref, access);
+	if (sid > 0 && !secret.isEmpty()) {
+		local.writePref<QString>(details::kSidPref, QString::number(sid));
+		local.writePref<QString>(
+			details::kSecretPref,
+			QString::fromLatin1(secret.toBase64()));
+	} else {
+		local.clearPref(details::kSidPref);
+		local.clearPref(details::kSecretPref);
+	}
 	local.writePref<QString>(
 		details::kUserPref,
 		QString::fromUtf8(
@@ -88,7 +101,8 @@ inline void SaveStoredAuth(
 
 inline void ClearStoredAuth(not_null<Main::Account*> account) {
 	auto &local = account->local();
-	local.clearPref(details::kAccessPref);
+	local.clearPref(details::kSidPref);
+	local.clearPref(details::kSecretPref);
 	local.clearPref(details::kUserPref);
 }
 

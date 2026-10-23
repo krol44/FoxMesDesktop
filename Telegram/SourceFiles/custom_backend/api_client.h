@@ -19,6 +19,7 @@
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkRequest>
 
+#include "custom_backend/sealed_transport.h"
 #include "data/data_messages.h"
 
 #include <rpl/event_stream.h>
@@ -69,6 +70,15 @@ struct UploadLane {
 
 [[nodiscard]] bool IsTransportFailure(int status);
 
+struct Credentials {
+    qint64 sid = 0;
+    QByteArray secret;
+
+    [[nodiscard]] bool empty() const {
+        return (sid <= 0) || secret.isEmpty();
+    }
+};
+
 class ApiClient final : public QObject {
 public:
     using Callback = std::function<void(QJsonDocument, QString, int)>;
@@ -79,7 +89,9 @@ public:
     explicit ApiClient(QUrl baseUrl, QObject *parent = nullptr);
 
     [[nodiscard]] QUrl baseUrl() const { return _baseUrl; }
-    [[nodiscard]] QString accessToken() const { return _accessToken; }
+    [[nodiscard]] Credentials credentials() const;
+    [[nodiscard]] bool authorized() const;
+    [[nodiscard]] std::weak_ptr<Sealed::Signer> signer() const;
     [[nodiscard]] qint64 meId() const { return _meId; }
     [[nodiscard]] qint64 eventSequence() const { return _eventSequence; }
     void setMeId(qint64 id) { _meId = id; }
@@ -87,7 +99,7 @@ public:
     void setTokensChangedCallback(TokensChanged callback) { _tokensChanged = std::move(callback); }
     [[nodiscard]] rpl::producer<> transportFailures() const { return _transportFailures.events(); }
 
-    void setTokens(QString access);
+    void setCredentials(const Credentials &credentials);
     void clearTokens();
 
     void startDevice(Callback done);
@@ -441,7 +453,10 @@ public:
     void downloadFile(const QString &path, BytesCallback done);
     void downloadUrl(const QUrl &url, BytesCallback done);
     [[nodiscard]] QUrl websocketUrl(qint64 since) const;
-    [[nodiscard]] QNetworkRequest websocketRequest(qint64 since) const;
+    void websocketRequest(
+        qint64 since,
+        bool fresh,
+        Fn<void(std::optional<Sealed::SocketRequest>)> done);
 
 private:
     QNetworkRequest makeRequest(
@@ -491,13 +506,27 @@ private:
         QNetworkReply *reply,
         Callback done,
         const LanePtr &lane = nullptr);
-    void acceptTokens(const QJsonDocument &document);
+    [[nodiscard]] QNetworkReply *send(
+        const QByteArray &method,
+        const QNetworkRequest &request,
+        const QByteArray &type,
+        const QByteArray &body,
+        bool authorize);
+    [[nodiscard]] QNetworkReply *sendWith(
+        std::weak_ptr<Sealed::Signer> signer,
+        const QByteArray &method,
+        const QNetworkRequest &request,
+        const QByteArray &type,
+        const QByteArray &body);
+    void startDeviceWithKey(const QJsonDocument &keys, Callback done);
+    void acceptSession(const QJsonDocument &document);
     CancelHandle uploadDevice(const QString &name, QIODevice *device, const QString &mime, const UploadTarget &target, bool forceFile, Callback done, ProgressCallback progress, const QString &kind);
     CancelHandle uploadPrepared(const QString &name, QIODevice *device, const QString &mime, const UploadTarget &target, bool forceFile, Callback done, ProgressCallback progress, const QString &kind);
     CancelHandle uploadDeviceChunked(const QString &name, QIODevice *device, const QString &mime, const UploadTarget &target, const QString &type, Callback done, ProgressCallback progress);
 
     QUrl _baseUrl;
-    QString _accessToken;
+    std::shared_ptr<Sealed::Session> _sealed;
+    std::shared_ptr<Sealed::Signer> _login;
     qint64 _meId = 0;
     qint64 _eventSequence = 0;
     TokensChanged _tokensChanged;

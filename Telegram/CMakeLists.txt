@@ -155,6 +155,11 @@ PRIVATE
      custom_backend/native_runtime.cpp
      custom_backend/native_runtime.h
     custom_backend/token_store.h
+    custom_backend/sealed_crypto.cpp
+    custom_backend/sealed_crypto.h
+    custom_backend/sealed_roots.h
+    custom_backend/sealed_transport.cpp
+    custom_backend/sealed_transport.h
     custom_backend/native_bridge.cpp
     custom_backend/native_bridge.h
     custom_backend/native_history_loader.cpp

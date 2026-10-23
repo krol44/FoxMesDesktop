@@ -1062,7 +1062,16 @@ NativeBridge::NativeBridge(Main::Session *session)
 	_eventSeq = std::max<qint64>(0, client().eventSequence());
 	_liveUpdates = std::make_unique<LiveUpdatesConnection>(
 		this,
-		[=] { return client().websocketRequest(_eventSeq); },
+		[=](bool fresh, LiveUpdatesConnection::RequestReady ready) {
+			client().websocketRequest(_eventSeq, fresh, [=](
+					std::optional<Sealed::SocketRequest> request) {
+				if (request) {
+					ready(request->request, request->codec);
+				} else {
+					ready(std::nullopt, nullptr);
+				}
+			});
+		},
 		[=] {
 			reloadChats();
 			updatePresence();
@@ -1079,7 +1088,7 @@ NativeBridge::NativeBridge(Main::Session *session)
 	for (const auto &controller : _session->windows()) {
 		trackWindow(controller);
 	}
-	if (!client().accessToken().isEmpty()) {
+	if (client().authorized()) {
 		startLiveUpdates();
 		QTimer::singleShot(0, this, [this] { flushReadJournal(); });
 	}
