@@ -112,6 +112,26 @@ def untracked_build_sources() -> list:
     return failures
 
 
+def unguarded_release_uploads(workflow: str) -> list:
+    failures = []
+    jobs = re.findall(
+        r"^  ([a-z][a-z0-9-]*):\n(.*?)(?=^  [a-z][a-z0-9-]*:\n|\Z)",
+        workflow, re.M | re.S)
+    for job_name, job in jobs:
+        steps = re.findall(r"^      - .*?(?=^      - |\Z)", job, re.M | re.S)
+        for step in steps:
+            if "uses: actions/upload-artifact@" not in step:
+                continue
+            if re.search(r"^        if:.*only_cache != 'true'", step, re.M):
+                continue
+            dependency = re.search(
+                r"^          name: intermediate-(windows|macos)-deps$", step, re.M)
+            if dependency and job_name == dependency.group(1) + "-deps":
+                continue
+            failures.append(job_name)
+    return failures
+
+
 def main() -> int:
     failures = []
     combined = ""
@@ -189,9 +209,9 @@ def main() -> int:
     for line in (ROOT / "Telegram/build/version").read_text(encoding="utf-8").splitlines():
         key, value = line.split(maxsplit=1)
         version_values[key] = value
-    if version_values.get("AppVersion") != "1013001":
+    if version_values.get("AppVersion") != "1013002":
         failures.append("Telegram/build/version has an unexpected version code")
-    if version_values.get("AppVersionStr") != "1.13.1":
+    if version_values.get("AppVersionStr") != "1.13.2":
         failures.append("Telegram/build/version has an unexpected version string")
 
     startup_task = (
@@ -364,14 +384,8 @@ def main() -> int:
         failures.append(
             "the Windows dependency patch hardcodes a libwebp architecture")
 
-    uploads = re.findall(
-        r"- name: Upload [^\n]*\n(?:\s+if:[^\n]*\n)?\s+uses: actions/upload-artifact",
-        workflow,
-    )
-    guarded = [u for u in uploads if "only_cache != 'true'" in u]
-    if len(uploads) != len(guarded):
-        failures.append(
-            f"{len(uploads) - len(guarded)} upload step(s) are not guarded by only_cache")
+    for job in unguarded_release_uploads(workflow):
+        failures.append(f"{job} uploads a release artifact without an only_cache guard")
 
     if "centos_env:latest" in workflow:
         failures.append("release workflow refers to a floating centos_env tag")

@@ -2,7 +2,7 @@
 #define MyAppShortName "FoxMes"
 #define MyAppPublisher "Foxtail"
 #define MyAppURL "https://foxtail.ing"
-#define MyAppVersion "1.13.1"
+#define MyAppVersion "1.13.2"
 #define MyAppExeName "FoxMes.exe"
 #define MyAppId "F65B4EBE-8E1B-58C8-AED1-B3E8E207EA5C"
 
@@ -26,7 +26,7 @@ DefaultDirName={localappdata}\FoxMes
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir={#OutputPath}
-OutputBaseFilename=FoxMes-1.13.1-windows-x64-setup
+OutputBaseFilename=FoxMes-1.13.2-windows-x64-setup
 SetupIconFile={#SourcePath}\..\..\Resources\art\icon256.ico
 UninstallDisplayName={#MyAppName}
 UninstallDisplayIcon={app}\{#MyAppExeName}
@@ -56,7 +56,7 @@ Source: "{#ReleasePath}\FoxMes.exe"; DestDir: "{app}"; Flags: ignoreversion
 [Icons]
 Name: "{group}\{#MyAppShortName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{group}\{cm:UninstallProgram,{#MyAppShortName}}"; Filename: "{uninstallexe}"
-Name: "{userdesktop}\{#MyAppShortName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{userdesktop}\{#MyAppShortName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon; Check: not WizardSilent
 
 [Registry]
 Root: HKCU; Subkey: "Software\Classes\foxmes"; ValueType: string; ValueName: ""; ValueData: "URL:FoxMes Link"; Flags: uninsdeletekey

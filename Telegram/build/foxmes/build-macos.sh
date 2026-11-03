@@ -5,12 +5,12 @@ script_dir="$(cd "$(dirname "$0")" && pwd)"
 source_root="${FOXMES_SOURCE_ROOT:-$(cd "$script_dir/../../.." && pwd)}"
 artifact_root="${FOXMES_ARTIFACT_ROOT:-$source_root/artifacts/macos}"
 libraries_root="${FOXMES_LIBRARIES_ROOT:-$(cd "$source_root/.." && pwd)/Libraries}"
-version="1.13.1"
+version="1.13.2"
 
 phase="${1:-all}"
 case "$phase" in
-  all|deps|compile|app) ;;
-  *) echo "usage: $(basename "$0") [all|deps|compile|app]" >&2; exit 1 ;;
+  all|deps|compile|app|package) ;;
+  *) echo "usage: $(basename "$0") [all|deps|compile|app|package]" >&2; exit 1 ;;
 esac
 
 prune_libraries() {
@@ -135,6 +135,7 @@ setup_ccache() {
 }
 
 compile_app() {
+	"$source_root/Telegram/patches/apply.sh"
 	setup_ccache
 	cd "$source_root/Telegram"
 	./configure.sh \
@@ -147,7 +148,13 @@ compile_app() {
 	  -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON \
 	  -D FOXMES_ALLOW_ENDPOINT_OVERRIDE=OFF \
 	  ${ccache_args[@]+"${ccache_args[@]}"}
-	cmake --build "$source_root/out" --config Release --parallel
+	local jobs="${FOXMES_BUILD_JOBS:-$(sysctl -n hw.ncpu)}"
+	if ! [[ "$jobs" =~ ^[1-9][0-9]*$ ]]; then
+		echo "FOXMES_BUILD_JOBS must be a positive integer." >&2
+		return 1
+	fi
+	echo "Building the Telegram target with $jobs parallel tasks."
+	cmake --build "$source_root/out" --config Release --target Telegram --parallel "$jobs"
 	if [ -n "${FOXMES_CCACHE_DIR:-}" ]; then
 		ccache --show-stats
 	fi
@@ -227,5 +234,6 @@ case "$phase" in
   deps)    build_deps ;;
   compile) compile_app ;;
   app)     compile_app; package_app ;;
+  package) package_app ;;
   all)     build_deps; compile_app; package_app ;;
 esac

@@ -2,11 +2,17 @@ param(
     [string]$SourceRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")),
     [string]$ArtifactRoot = (Join-Path $SourceRoot "artifacts\windows"),
     [switch]$OnlyCache,
-    [switch]$DepsOnly
+    [switch]$DepsOnly,
+    [switch]$SkipDeps,
+    [switch]$PackageOnly
 )
 
 $ErrorActionPreference = "Stop"
-$version = "1.13.1"
+$version = "1.13.2"
+if ($PackageOnly -and ($OnlyCache -or $DepsOnly -or $SkipDeps)) {
+    throw "PackageOnly cannot be combined with a build phase."
+}
+if ($DepsOnly -and $SkipDeps) { throw "DepsOnly cannot be combined with SkipDeps." }
 $telegramRoot = Join-Path $SourceRoot "Telegram"
 $buildRoot = Join-Path $SourceRoot "out"
 $librariesPath = Join-Path (Split-Path -Parent $SourceRoot) "Libraries\win64"
@@ -100,100 +106,106 @@ function Remove-UnusedLibraryFiles() {
     Write-Host "prune removed $removed files"
 }
 
-Apply-Patch "lib_ui-animated-icon-webm.patch" "Telegram\lib_ui"
-Apply-Patch "lib_base-screen-capture-settings-mac.patch" "Telegram\lib_base"
-Apply-Patch "lib_webrtc-screen-capture-permission-mac.patch" "Telegram\lib_webrtc"
-Apply-Patch "lib_webrtc-system-audio.patch" "Telegram\lib_webrtc"
-Apply-Patch "tgcalls-screen-share-quality.patch" "Telegram\ThirdParty\tgcalls"
-Apply-Patch "tgcalls-call-recovery.patch" "Telegram\ThirdParty\tgcalls"
-Apply-Patch "cmake-bzip2-stub.patch" "cmake"
-Apply-Patch "cmake-gcc-restrict-warning.patch" "cmake"
-Apply-Patch "cmake-qt-win-dep-paths.patch" "cmake"
+if (-not $PackageOnly) {
+    Apply-Patch "lib_ui-animated-icon-webm.patch" "Telegram\lib_ui"
+    Apply-Patch "lib_base-screen-capture-settings-mac.patch" "Telegram\lib_base"
+    Apply-Patch "lib_webrtc-screen-capture-permission-mac.patch" "Telegram\lib_webrtc"
+    Apply-Patch "lib_webrtc-system-audio.patch" "Telegram\lib_webrtc"
+    Apply-Patch "tgcalls-screen-share-quality.patch" "Telegram\ThirdParty\tgcalls"
+    Apply-Patch "tgcalls-call-recovery.patch" "Telegram\ThirdParty\tgcalls"
+    Apply-Patch "cmake-bzip2-stub.patch" "cmake"
+    Apply-Patch "cmake-gcc-restrict-warning.patch" "cmake"
+    Apply-Patch "cmake-qt-win-dep-paths.patch" "cmake"
 
-Push-Location $telegramRoot
-try {
-    & ".\build\prepare\win.bat" "skip-debug" "skip-dump-syms" "silent" "qt6"
-    if ($LASTEXITCODE -ne 0) { throw "Windows dependency preparation failed." }
+    Push-Location $telegramRoot
+    try {
+        if (-not $SkipDeps) {
+            & ".\build\prepare\win.bat" "skip-debug" "skip-dump-syms" "silent" "qt6"
+            if ($LASTEXITCODE -ne 0) { throw "Windows dependency preparation failed." }
 
-    Remove-UnusedLibraryFiles
+            Remove-UnusedLibraryFiles
 
-    if ($env:RUNNER_TEMP) {
-        New-Item -ItemType File -Force `
-            -Path (Join-Path $env:RUNNER_TEMP "foxmes-deps-complete") | Out-Null
+            if ($env:RUNNER_TEMP) {
+                New-Item -ItemType File -Force `
+                    -Path (Join-Path $env:RUNNER_TEMP "foxmes-deps-complete") | Out-Null
+            }
+
+            if ($DepsOnly) {
+                Write-Host "DepsOnly: dependencies are ready, stopping before the app."
+                return
+            }
+        }
+
+        $ccacheArgs = @()
+        if ($env:FOXMES_CCACHE_DIR) {
+            $ccache = (Get-Command ccache -ErrorAction Stop).Source
+            New-Item -ItemType Directory -Force -Path $env:FOXMES_CCACHE_DIR | Out-Null
+            $env:CCACHE_DIR = $env:FOXMES_CCACHE_DIR
+            if (-not $env:CCACHE_MAXSIZE) { $env:CCACHE_MAXSIZE = "5G" }
+            $env:CCACHE_BASEDIR = Split-Path -Parent $SourceRoot
+            $env:CCACHE_COMPILERCHECK = "content"
+            $env:CCACHE_DEPEND = "true"
+            $env:CCACHE_SLOPPINESS = "time_macros,include_file_mtime,include_file_ctime"
+            & $ccache --zero-stats
+            if ($LASTEXITCODE -ne 0) { throw "ccache is not usable." }
+            $forceInclude = (Join-Path $PSScriptRoot "force-include-pch.cmake").Replace('\', '/')
+            $ccacheArgs = @(
+                "-D", "CMAKE_C_COMPILER_LAUNCHER=$ccache",
+                "-D", "CMAKE_CXX_COMPILER_LAUNCHER=$ccache",
+                "-D", "CMAKE_PROJECT_INCLUDE=$forceInclude")
+        }
+
+        & ".\configure.bat" "-G" "Ninja Multi-Config" "qt6" `
+            "-D" "CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=" `
+            "-D" "CMAKE_CONFIGURATION_TYPES=Release" `
+            "-D" "TDESKTOP_API_TEST=ON" `
+            "-D" "DESKTOP_APP_DISABLE_AUTOUPDATE=ON" `
+            "-D" "DESKTOP_APP_DISABLE_CRASH_REPORTS=ON" `
+            "-D" "FOXMES_ALLOW_ENDPOINT_OVERRIDE=OFF" `
+            @ccacheArgs
+        if ($LASTEXITCODE -ne 0) { throw "Windows configuration failed." }
+
+        if ($env:FOXMES_EXPECTED_TOOLSET) {
+            $compiler = $null
+            $record = Get-ChildItem -LiteralPath $buildRoot -Recurse -File `
+                -Filter "CMakeCXXCompiler.cmake" -ErrorAction SilentlyContinue |
+                Select-Object -First 1
+            if ($record) {
+                $entry = Select-String -LiteralPath $record.FullName `
+                    -Pattern 'set\(CMAKE_CXX_COMPILER\s+"([^"]+)"' | Select-Object -First 1
+                if ($entry) { $compiler = $entry.Matches[0].Groups[1].Value }
+            }
+            if (-not $compiler) {
+                Write-Warning ("Could not determine the app compiler under $buildRoot; " +
+                    "skipping the toolset check.")
+            } elseif ($compiler -notmatch [regex]::Escape($env:FOXMES_EXPECTED_TOOLSET)) {
+                throw ("Toolset mismatch: dependencies were built with " +
+                    "$($env:FOXMES_EXPECTED_TOOLSET), but CMake resolved the app " +
+                    "compiler to $compiler. Qt and the app would link against " +
+                    "different STLs.")
+            } else {
+                Write-Host "app compiler: $compiler"
+            }
+        }
+    } finally {
+        Pop-Location
     }
 
-    if ($DepsOnly) {
-        Write-Host "DepsOnly: dependencies are ready, stopping before the app."
+    cmake --build $buildRoot --config Release --parallel
+    $buildExit = $LASTEXITCODE
+    if ($env:FOXMES_CCACHE_DIR) { & ccache --show-stats }
+    if ($buildExit -ne 0) { throw "Windows build failed." }
+    if (-not (Test-Path $executable)) { throw "FoxMes.exe was not produced." }
+    if ($OnlyCache) {
+        Write-Host "OnlyCache: the app is compiled, stopping before packaging."
         return
     }
-
-    $ccacheArgs = @()
-    if ($env:FOXMES_CCACHE_DIR) {
-        $ccache = (Get-Command ccache -ErrorAction Stop).Source
-        New-Item -ItemType Directory -Force -Path $env:FOXMES_CCACHE_DIR | Out-Null
-        $env:CCACHE_DIR = $env:FOXMES_CCACHE_DIR
-        if (-not $env:CCACHE_MAXSIZE) { $env:CCACHE_MAXSIZE = "5G" }
-        $env:CCACHE_BASEDIR = Split-Path -Parent $SourceRoot
-        $env:CCACHE_COMPILERCHECK = "content"
-        $env:CCACHE_DEPEND = "true"
-        $env:CCACHE_SLOPPINESS = "time_macros,include_file_mtime,include_file_ctime"
-        & $ccache --zero-stats
-        if ($LASTEXITCODE -ne 0) { throw "ccache is not usable." }
-        $forceInclude = (Join-Path $PSScriptRoot "force-include-pch.cmake").Replace('\', '/')
-        $ccacheArgs = @(
-            "-D", "CMAKE_C_COMPILER_LAUNCHER=$ccache",
-            "-D", "CMAKE_CXX_COMPILER_LAUNCHER=$ccache",
-            "-D", "CMAKE_PROJECT_INCLUDE=$forceInclude")
-    }
-
-    & ".\configure.bat" "-G" "Ninja Multi-Config" "qt6" `
-        "-D" "CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=" `
-        "-D" "CMAKE_CONFIGURATION_TYPES=Release" `
-        "-D" "TDESKTOP_API_TEST=ON" `
-        "-D" "DESKTOP_APP_DISABLE_AUTOUPDATE=ON" `
-        "-D" "DESKTOP_APP_DISABLE_CRASH_REPORTS=ON" `
-        "-D" "FOXMES_ALLOW_ENDPOINT_OVERRIDE=OFF" `
-        @ccacheArgs
-    if ($LASTEXITCODE -ne 0) { throw "Windows configuration failed." }
-
-    if ($env:FOXMES_EXPECTED_TOOLSET) {
-        $compiler = $null
-        $record = Get-ChildItem -LiteralPath $buildRoot -Recurse -File `
-            -Filter "CMakeCXXCompiler.cmake" -ErrorAction SilentlyContinue |
-            Select-Object -First 1
-        if ($record) {
-            $entry = Select-String -LiteralPath $record.FullName `
-                -Pattern 'set\(CMAKE_CXX_COMPILER\s+"([^"]+)"' | Select-Object -First 1
-            if ($entry) { $compiler = $entry.Matches[0].Groups[1].Value }
-        }
-        if (-not $compiler) {
-            Write-Warning ("Could not determine the app compiler under $buildRoot; " +
-                "skipping the toolset check.")
-        } elseif ($compiler -notmatch [regex]::Escape($env:FOXMES_EXPECTED_TOOLSET)) {
-            throw ("Toolset mismatch: dependencies were built with " +
-                "$($env:FOXMES_EXPECTED_TOOLSET), but CMake resolved the app " +
-                "compiler to $compiler. Qt and the app would link against " +
-                "different STLs.")
-        } else {
-            Write-Host "app compiler: $compiler"
-        }
-    }
-} finally {
-    Pop-Location
 }
 
-cmake --build $buildRoot --config Release --parallel
-$buildExit = $LASTEXITCODE
-if ($env:FOXMES_CCACHE_DIR) { & ccache --show-stats }
-if ($buildExit -ne 0) { throw "Windows build failed." }
-if (-not (Test-Path $executable)) { throw "FoxMes.exe was not produced." }
-if ($OnlyCache) {
-    Write-Host "OnlyCache: the app is compiled, stopping before packaging."
-    return
-}
+if (-not (Test-Path $executable)) { throw "FoxMes.exe was not found." }
 $versionInfo = (Get-Item $executable).VersionInfo
 if ("$($versionInfo.CompanyName)".Trim() -ne "Foxtail") { throw "Unexpected executable publisher." }
-if ($versionInfo.ProductVersion -notlike "1.13.1*") { throw "Unexpected executable version." }
+if ($versionInfo.ProductVersion -notlike "1.13.2*") { throw "Unexpected executable version." }
 
 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $ArtifactRoot
 New-Item -ItemType Directory -Force -Path $ArtifactRoot | Out-Null
@@ -238,38 +250,98 @@ if ($observedVersion -ne $version) {
     throw "Unexpected installer version: '$($observedVersion)'."
 }
 if ((Get-AuthenticodeSignature $setup).Status -ne "NotSigned") {
-    throw "The version 1.13.1 installer must be unsigned."
+    throw "The version 1.13.2 installer must be unsigned."
 }
 
 $temporaryRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { $env:TEMP }
 $testInstall = Join-Path $temporaryRoot "FoxMesInstallTest"
 $installedExecutable = Join-Path $testInstall "FoxMes.exe"
 $telegramProtocolBefore = Test-Path "HKCU:\Software\Classes\tg"
-$installer = Start-Process -FilePath $setup -PassThru -ArgumentList `
-    "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$testInstall"
-if (-not $installer.WaitForExit(600000)) {
-    Stop-Process -InputObject $installer -Force -ErrorAction SilentlyContinue
-    throw "The silent installation did not finish within ten minutes."
-}
-if ($installer.ExitCode -ne 0) { throw "Silent installation failed." }
-if (-not (Test-Path $installedExecutable)) {
-    throw "Installed FoxMes.exe was not found."
+function Invoke-InstallerSmokeTest {
+    $installer = Start-Process -FilePath $setup -PassThru -ArgumentList `
+        "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/TASKS=desktopicon", "/DIR=`"$testInstall`""
+    if (-not $installer.WaitForExit(600000)) {
+        Stop-Process -InputObject $installer -Force -ErrorAction SilentlyContinue
+        throw "The silent installation did not finish within ten minutes."
+    }
+    if ($installer.ExitCode -ne 0) { throw "Silent installation failed." }
+    if (-not (Test-Path $installedExecutable)) {
+        throw "Installed FoxMes.exe was not found."
+    }
+
+    $launched = $null
+    foreach ($attempt in 1..60) {
+        $launched = Get-Process -Name "FoxMes" -ErrorAction SilentlyContinue |
+            Where-Object { $_.Path -eq $installedExecutable }
+        if ($launched) { break }
+        Start-Sleep -Seconds 1
+    }
+    if (-not $launched) {
+        throw ("The silent installation did not start $installedExecutable. " +
+            "Self-update replaces the files and relies on this [Run] entry to " +
+            "bring the client back, so it would update and stay closed.")
+    }
+    Stop-Process -InputObject $launched -Force -ErrorAction SilentlyContinue
+    Wait-Process -InputObject $launched -Timeout 60 -ErrorAction SilentlyContinue
 }
 
-$launched = $null
-foreach ($attempt in 1..60) {
-    $launched = Get-Process -Name "FoxMes" -ErrorAction SilentlyContinue |
-        Where-Object { $_.Path -eq $installedExecutable }
-    if ($launched) { break }
-    Start-Sleep -Seconds 1
+$desktopShortcut = $null
+$desktopShortcutHash = $null
+if ($env:GITHUB_ACTIONS -eq "true") {
+    $desktopDirectory = [Environment]::GetFolderPath(
+        [Environment+SpecialFolder]::DesktopDirectory,
+        [Environment+SpecialFolderOption]::DoNotVerify)
+    if (-not $desktopDirectory) { throw "The desktop directory could not be resolved." }
+    New-Item -ItemType Directory -Force -Path $desktopDirectory | Out-Null
+    $desktopShortcut = Join-Path $desktopDirectory "FoxMes.lnk"
+    if (Test-Path -LiteralPath $desktopShortcut) {
+        $desktopShortcutHash = (Get-FileHash -LiteralPath $desktopShortcut -Algorithm SHA256).Hash
+    }
 }
-if (-not $launched) {
-    throw ("The silent installation did not start $installedExecutable. " +
-        "Self-update replaces the files and relies on this [Run] entry to " +
-        "bring the client back, so it would update and stay closed.")
+
+Invoke-InstallerSmokeTest
+
+if ($desktopShortcut) {
+    if ($desktopShortcutHash) {
+        if (-not (Test-Path -LiteralPath $desktopShortcut) -or
+                (Get-FileHash -LiteralPath $desktopShortcut -Algorithm SHA256).Hash -ne $desktopShortcutHash) {
+            throw "Silent installation changed the existing desktop shortcut."
+        }
+    } elseif (Test-Path -LiteralPath $desktopShortcut) {
+        throw "Silent installation created a desktop shortcut."
+    }
+
+    $shortcutBackup = Join-Path $temporaryRoot ("FoxMesShortcut-" + [guid]::NewGuid() + ".lnk")
+    if ($desktopShortcutHash) {
+        Copy-Item -LiteralPath $desktopShortcut -Destination $shortcutBackup
+    }
+    try {
+        $shell = New-Object -ComObject WScript.Shell
+        $shortcut = $shell.CreateShortcut($desktopShortcut)
+        $shortcut.TargetPath = $installedExecutable
+        $shortcut.WorkingDirectory = $testInstall
+        $shortcut.Description = "FoxMes installer smoke-test shortcut"
+        $shortcut.Save()
+        $existingShortcutHash = (Get-FileHash -LiteralPath $desktopShortcut -Algorithm SHA256).Hash
+
+        Invoke-InstallerSmokeTest
+        if (-not (Test-Path -LiteralPath $desktopShortcut) -or
+                (Get-FileHash -LiteralPath $desktopShortcut -Algorithm SHA256).Hash -ne $existingShortcutHash) {
+            throw "Silent update changed the existing desktop shortcut."
+        }
+
+        Remove-Item -LiteralPath $desktopShortcut -Force
+        Invoke-InstallerSmokeTest
+        if (Test-Path -LiteralPath $desktopShortcut) {
+            throw "Silent update restored a deleted desktop shortcut."
+        }
+    } finally {
+        Remove-Item -LiteralPath $desktopShortcut -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $shortcutBackup) {
+            Move-Item -LiteralPath $shortcutBackup -Destination $desktopShortcut -Force
+        }
+    }
 }
-Stop-Process -InputObject $launched -Force -ErrorAction SilentlyContinue
-Wait-Process -InputObject $launched -Timeout 60 -ErrorAction SilentlyContinue
 
 $foxmesCommand = (Get-Item `
     "HKCU:\Software\Classes\foxmes\shell\open\command").GetValue("")
