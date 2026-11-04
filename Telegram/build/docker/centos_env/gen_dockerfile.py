@@ -15,6 +15,7 @@ def main():
         LTO=checkEnv("LTO", True),
         ASAN=checkEnv("ASAN", False),
         JOBS=checkEnv("JOBS", ""),
+        COLD_BUILD=environ.get("FOXMES_DOCKER_NO_CACHE") == "1",
     ))
 
 if __name__ == '__main__':

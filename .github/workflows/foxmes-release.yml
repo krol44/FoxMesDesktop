@@ -7,6 +7,10 @@ on:
         description: Build the dependencies, populate the caches and stop.
         type: boolean
         default: false
+      cold_build:
+        description: Build dependencies and all object shards without caches; upload packages without publishing a release.
+        type: boolean
+        default: false
   push:
     tags:
       - 'v*'
@@ -20,6 +24,7 @@ concurrency:
 
 env:
   FOXMES_DEPS_REVISION: '1'
+  FOXMES_COLD_BUILD: ${{ github.event.inputs.cold_build == 'true' && '1' || '0' }}
   FOXMES_VERSION: 1.13.2
   FOXMES_VERSION_CODE: '1013002'
 
@@ -31,6 +36,16 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           submodules: recursive
+      - name: Install distributed build test prerequisites
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes cmake ninja-build qt6-base-dev-tools
+      - name: Test distributed object transfer
+        shell: bash
+        env:
+          FOXMES_TEST_RCC: /usr/lib/qt6/libexec/rcc
+        run: python3 -m unittest discover -s Telegram/build/foxmes/tests -v
       - name: Validate product metadata and tag
         shell: bash
         run: |
@@ -47,6 +62,7 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 360
     outputs:
+      artifact_digest: ${{ steps.prepared-deps.outputs.artifact-digest }}
       toolset: ${{ steps.toolchain.outputs.toolset }}
     steps:
       - name: Record the job start
@@ -90,6 +106,7 @@ jobs:
           echo "CACHE_KEY=$(sha256sum "$RUNNER_TEMP/cache_key.txt" | cut -d' ' -f1)" >> "$GITHUB_ENV"
       - name: Restore the ThirdParty cache
         id: tp-cache
+        if: env.FOXMES_COLD_BUILD != '1'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: ${{ env.TBUILD }}/ThirdParty
@@ -97,6 +114,7 @@ jobs:
           restore-keys: Windows-x64-third-party-
       - name: Restore the Libraries cache
         id: libs-cache
+        if: env.FOXMES_COLD_BUILD != '1'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: |
@@ -109,6 +127,7 @@ jobs:
           restore-keys: Windows-x64-libs-
       - name: Restore the Qt cache
         id: qt-cache
+        if: env.FOXMES_COLD_BUILD != '1'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: |
@@ -122,13 +141,13 @@ jobs:
           FOXMES_PRUNE_LIBRARIES: '1'
         run: call Telegram\build\foxmes\build-windows.bat -DepsOnly
       - name: Save the ThirdParty cache
-        if: always() && steps.deps.outcome == 'success' && steps.tp-cache.outputs.cache-hit != 'true'
+        if: env.FOXMES_COLD_BUILD != '1' && always() && steps.deps.outcome == 'success' && steps.tp-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: ${{ env.TBUILD }}/ThirdParty
           key: Windows-x64-third-party-${{ env.CACHE_KEY }}
       - name: Save the Libraries cache
-        if: always() && steps.deps.outcome == 'success' && steps.libs-cache.outputs.cache-hit != 'true'
+        if: env.FOXMES_COLD_BUILD != '1' && always() && steps.deps.outcome == 'success' && steps.libs-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: |
@@ -139,7 +158,7 @@ jobs:
             !${{ env.LibrariesPath }}/cache_keys/[qQ]t[_-]*
           key: Windows-x64-libs-${{ env.CACHE_KEY }}
       - name: Save the Qt cache
-        if: always() && steps.deps.outcome == 'success' && steps.qt-cache.outputs.cache-hit != 'true'
+        if: env.FOXMES_COLD_BUILD != '1' && always() && steps.deps.outcome == 'success' && steps.qt-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: |
@@ -161,6 +180,7 @@ jobs:
           print("Windows dependency archive contains no symbolic or hard links.")
           PYCODE
       - name: Upload windows-deps
+        id: prepared-deps
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: intermediate-windows-deps
@@ -170,10 +190,19 @@ jobs:
           compression-level: 0
           overwrite: true
 
-  windows-build:
+  windows-prepare:
     needs: windows-deps
     runs-on: windows-2025
     timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        shard: ['prepare']
+    env:
+      FOXMES_SHARD_INDEX: ${{ matrix.shard }}
+      FOXMES_SHARD_COUNT: '4'
+      FOXMES_DEPENDENCY_CONTEXT: ${{ needs.windows-deps.outputs.artifact_digest }}
     steps:
       - name: Record the job start
         shell: bash
@@ -227,74 +256,12 @@ jobs:
         run: |
           set -euo pipefail
           tar -xzf "$(cygpath -u "$RUNNER_TEMP")/foxmes-transfer/windows-deps.tar.gz" -C "$(cygpath -u "$TBUILD")"
-          if [ "$(cat "$(cygpath -u "$TBUILD")/foxmes-deps-key.txt")" = "$CACHE_KEY" ]; then
-            echo "rebuild=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "The dependency toolchain changed; rebuilding dependencies for this runner."
-            rm -rf "$(cygpath -u "$TBUILD")/Libraries" "$(cygpath -u "$TBUILD")/ThirdParty"
-            echo "rebuild=true" >> "$GITHUB_OUTPUT"
+          if [ "$(cat "$(cygpath -u "$TBUILD")/foxmes-deps-key.txt")" != "$CACHE_KEY" ]; then
+            echo "Prepared dependencies do not match this runner toolchain." >&2
+            exit 1
           fi
-      - name: Restore the ThirdParty cache
-        id: tp-cache
-        if: steps.deps-transfer.outputs.rebuild == 'true'
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
-        with:
-          path: ${{ env.TBUILD }}/ThirdParty
-          key: Windows-x64-third-party-${{ env.CACHE_KEY }}
-      - name: Restore the Libraries cache
-        id: libs-cache
-        if: steps.deps-transfer.outputs.rebuild == 'true'
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
-        with:
-          path: |
-            ${{ env.LibrariesPath }}/*
-            !${{ env.LibrariesPath }}/cache_keys
-            !${{ env.LibrariesPath }}/[qQ]t[_-]*
-            ${{ env.LibrariesPath }}/cache_keys/*
-            !${{ env.LibrariesPath }}/cache_keys/[qQ]t[_-]*
-          key: Windows-x64-libs-${{ env.CACHE_KEY }}
-      - name: Restore the Qt cache
-        id: qt-cache
-        if: steps.deps-transfer.outputs.rebuild == 'true'
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
-        with:
-          path: |
-            ${{ env.LibrariesPath }}/[qQ]t[_-]*
-            ${{ env.LibrariesPath }}/cache_keys/[qQ]t[_-]*
-          key: Windows-x64-qt-${{ env.CACHE_KEY }}
-      - name: Rebuild dependencies for the selected toolchain
-        id: rebuild-deps
-        if: steps.deps-transfer.outputs.rebuild == 'true'
-        shell: cmd
-        env:
-          FOXMES_PRUNE_LIBRARIES: '1'
-        run: call Telegram\build\foxmes\build-windows.bat -DepsOnly
-      - name: Save the ThirdParty cache
-        if: always() && steps.rebuild-deps.outcome == 'success' && steps.tp-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
-        with:
-          path: ${{ env.TBUILD }}/ThirdParty
-          key: Windows-x64-third-party-${{ env.CACHE_KEY }}
-      - name: Save the Libraries cache
-        if: always() && steps.rebuild-deps.outcome == 'success' && steps.libs-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
-        with:
-          path: |
-            ${{ env.LibrariesPath }}/*
-            !${{ env.LibrariesPath }}/cache_keys
-            !${{ env.LibrariesPath }}/[qQ]t[_-]*
-            ${{ env.LibrariesPath }}/cache_keys/*
-            !${{ env.LibrariesPath }}/cache_keys/[qQ]t[_-]*
-          key: Windows-x64-libs-${{ env.CACHE_KEY }}
-      - name: Save the Qt cache
-        if: always() && steps.rebuild-deps.outcome == 'success' && steps.qt-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
-        with:
-          path: |
-            ${{ env.LibrariesPath }}/[qQ]t[_-]*
-            ${{ env.LibrariesPath }}/cache_keys/[qQ]t[_-]*
-          key: Windows-x64-qt-${{ env.CACHE_KEY }}
       - name: Install ccache
+        if: env.FOXMES_COLD_BUILD != '1'
         shell: pwsh
         env:
           CCACHE_VERSION: 4.14.2
@@ -308,13 +275,13 @@ jobs:
           Expand-Archive -Path $zip -DestinationPath $env:RUNNER_TEMP -Force
           Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $env:RUNNER_TEMP $name)
       - name: Restore the Windows compiler cache
+        if: env.FOXMES_COLD_BUILD != '1'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: ${{ runner.temp }}/foxmes-ccache
-          key: Windows-x64-ccache-${{ github.run_id }}-${{ github.run_attempt }}
+          key: Windows-x64-ccache-shard-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            Windows-x64-ccache-${{ github.run_id }}-
-            Windows-x64-ccache-
+            Windows-x64-ccache-shard-${{ matrix.shard }}-
       - name: Budget the compile step
         id: budget
         shell: bash
@@ -323,20 +290,247 @@ jobs:
           [ "$minutes" -ge 15 ] || minutes=15
           echo "The compile step may run for $minutes minutes"
           echo "minutes=$minutes" >> "$GITHUB_OUTPUT"
-      - name: Compile the app
+      - name: Prepare shared build objects
         id: compile
         timeout-minutes: ${{ fromJSON(steps.budget.outputs.minutes) }}
         shell: cmd
         env:
           FOXMES_CCACHE_DIR: ${{ runner.temp }}/foxmes-ccache
           FOXMES_PRUNE_LIBRARIES: '1'
-        run: call Telegram\build\foxmes\build-windows.bat -OnlyCache -SkipDeps
+          FOXMES_OBJECT_ARCHIVE: ${{ github.workspace }}/windows-objects-${{ matrix.shard }}.tar.gz
+        run: call Telegram\build\foxmes\build-windows.bat -PrepareObjects -SkipDeps
       - name: Save the Windows compiler cache
-        if: always() && steps.compile.outcome != 'skipped'
+        if: env.FOXMES_COLD_BUILD != '1' && always() && steps.compile.outcome != 'skipped'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: ${{ runner.temp }}/foxmes-ccache
-          key: Windows-x64-ccache-${{ github.run_id }}-${{ github.run_attempt }}
+          key: Windows-x64-ccache-shard-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Upload windows prepared objects
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: intermediate-windows-objects-${{ matrix.shard }}
+          path: windows-objects-${{ matrix.shard }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          overwrite: true
+
+  windows-compile:
+    needs: [windows-deps, windows-prepare]
+    runs-on: windows-2025
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        shard: [0, 1, 2, 3]
+    env:
+      FOXMES_SHARD_INDEX: ${{ matrix.shard }}
+      FOXMES_SHARD_COUNT: '4'
+      FOXMES_DEPENDENCY_CONTEXT: ${{ needs.windows-deps.outputs.artifact_digest }}
+    steps:
+      - name: Record the job start
+        shell: bash
+        run: echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+      - name: Check out submodules with LF endings
+        shell: cmd
+        run: git config --global core.autocrlf false
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          submodules: recursive
+      - name: Resolve the dependency roots and cache key
+        shell: bash
+        env:
+          PREPARED_TOOLSET: ${{ needs.windows-deps.outputs.toolset }}
+          DEPS_DIGEST: "${{ hashFiles('Telegram/build/prepare/prepare.py', 'Telegram/build/qt_version.py') }}"
+        run: |
+          set -euo pipefail
+          TBUILD="$(cd "$GITHUB_WORKSPACE/.." && pwd -W)"
+          echo "TBUILD=$TBUILD" >> "$GITHUB_ENV"
+          echo "LibrariesPath=$TBUILD/Libraries/win64" >> "$GITHUB_ENV"
+
+          vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+          test -x "$vswhere" || { echo "vswhere.exe was not found."; exit 1; }
+          vspath="$("$vswhere" -latest -products '*' -property installationPath | tr -d '\r')"
+          test -n "$vspath" || { echo "No Visual Studio installation was found."; exit 1; }
+          build_dir="$(cygpath -u "$vspath")/VC/Auxiliary/Build"
+          toolset_file="$build_dir/Microsoft.VCToolsVersion.v143.default.txt"
+          test -f "$toolset_file" || toolset_file="$build_dir/Microsoft.VCToolsVersion.default.txt"
+          test -f "$toolset_file" || { echo "No toolset version file under $build_dir."; exit 1; }
+          echo "Toolset version file: $toolset_file"
+          toolset="$(tr -d ' \r\n' < "$toolset_file")"
+          test -n "$toolset" || { echo "$toolset_file is empty."; exit 1; }
+          if [ -n "${PREPARED_TOOLSET:-}" ] && [ -x "$(cygpath -u "$vspath")/VC/Tools/MSVC/$PREPARED_TOOLSET/bin/Hostx64/x64/cl.exe" ]; then
+            toolset="$PREPARED_TOOLSET"
+          fi
+          echo "Caching against MSVC toolset $toolset"
+          echo "FOXMES_MSVC_TOOLSET=$toolset" >> "$GITHUB_ENV"
+
+          { echo "$DEPS_DIGEST"; echo "$FOXMES_DEPS_REVISION"; echo "$toolset"; } \
+            > "$RUNNER_TEMP/cache_key.txt"
+          echo "CACHE_KEY=$(sha256sum "$RUNNER_TEMP/cache_key.txt" | cut -d' ' -f1)" >> "$GITHUB_ENV"
+      - name: Download windows-deps
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3
+        with:
+          name: intermediate-windows-deps
+          path: ${{ runner.temp }}/foxmes-transfer
+      - name: Restore prepared windows dependencies
+        id: deps-transfer
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -xzf "$(cygpath -u "$RUNNER_TEMP")/foxmes-transfer/windows-deps.tar.gz" -C "$(cygpath -u "$TBUILD")"
+          if [ "$(cat "$(cygpath -u "$TBUILD")/foxmes-deps-key.txt")" != "$CACHE_KEY" ]; then
+            echo "Prepared dependencies do not match this runner toolchain." >&2
+            exit 1
+          fi
+      - name: Install ccache
+        if: env.FOXMES_COLD_BUILD != '1'
+        shell: pwsh
+        env:
+          CCACHE_VERSION: 4.14.2
+          CCACHE_SHA256: 6993ce645e53192cec592ee23186200b574ac4c59097ecde8d9cfd681b47ae84
+        run: |
+          $name = "ccache-$env:CCACHE_VERSION-windows-x86_64"
+          $zip = Join-Path $env:RUNNER_TEMP "$name.zip"
+          Invoke-WebRequest -Uri "https://github.com/ccache/ccache/releases/download/v$env:CCACHE_VERSION/$name.zip" -OutFile $zip
+          $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+          if ($hash -ne $env:CCACHE_SHA256) { throw "ccache archive checksum mismatch: $hash" }
+          Expand-Archive -Path $zip -DestinationPath $env:RUNNER_TEMP -Force
+          Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $env:RUNNER_TEMP $name)
+      - name: Download shared windows build objects
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3
+        with:
+          name: intermediate-windows-objects-prepare
+          path: ${{ runner.temp }}/foxmes-prepare
+      - name: Restore the Windows compiler cache
+        if: env.FOXMES_COLD_BUILD != '1'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ runner.temp }}/foxmes-ccache
+          key: Windows-x64-ccache-shard-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            Windows-x64-ccache-shard-${{ matrix.shard }}-
+      - name: Budget the compile step
+        id: budget
+        shell: bash
+        run: |
+          minutes=$(( 330 - ($(date +%s) - JOB_STARTED) / 60 ))
+          [ "$minutes" -ge 15 ] || minutes=15
+          echo "The compile step may run for $minutes minutes"
+          echo "minutes=$minutes" >> "$GITHUB_OUTPUT"
+      - name: Compile the object shard
+        id: compile
+        timeout-minutes: ${{ fromJSON(steps.budget.outputs.minutes) }}
+        shell: cmd
+        env:
+          FOXMES_CCACHE_DIR: ${{ runner.temp }}/foxmes-ccache
+          FOXMES_PREPARED_OBJECTS_DIR: ${{ runner.temp }}/foxmes-prepare
+          FOXMES_PRUNE_LIBRARIES: '1'
+          FOXMES_OBJECT_ARCHIVE: ${{ github.workspace }}/windows-objects-${{ matrix.shard }}.tar.gz
+        run: call Telegram\build\foxmes\build-windows.bat -CompileShard -SkipDeps
+      - name: Save the Windows compiler cache
+        if: env.FOXMES_COLD_BUILD != '1' && always() && steps.compile.outcome != 'skipped'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ runner.temp }}/foxmes-ccache
+          key: Windows-x64-ccache-shard-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Upload windows object shard
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: intermediate-windows-objects-${{ matrix.shard }}
+          path: windows-objects-${{ matrix.shard }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          overwrite: true
+
+  windows-build:
+    needs: [windows-deps, windows-prepare, windows-compile]
+    runs-on: windows-2025
+    timeout-minutes: 360
+    env:
+      FOXMES_DEPENDENCY_CONTEXT: ${{ needs.windows-deps.outputs.artifact_digest }}
+    steps:
+      - name: Record the job start
+        shell: bash
+        run: echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+      - name: Check out submodules with LF endings
+        shell: cmd
+        run: git config --global core.autocrlf false
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          submodules: recursive
+      - name: Resolve the dependency roots and cache key
+        shell: bash
+        env:
+          PREPARED_TOOLSET: ${{ needs.windows-deps.outputs.toolset }}
+          DEPS_DIGEST: "${{ hashFiles('Telegram/build/prepare/prepare.py', 'Telegram/build/qt_version.py') }}"
+        run: |
+          set -euo pipefail
+          TBUILD="$(cd "$GITHUB_WORKSPACE/.." && pwd -W)"
+          echo "TBUILD=$TBUILD" >> "$GITHUB_ENV"
+          echo "LibrariesPath=$TBUILD/Libraries/win64" >> "$GITHUB_ENV"
+
+          vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+          test -x "$vswhere" || { echo "vswhere.exe was not found."; exit 1; }
+          vspath="$("$vswhere" -latest -products '*' -property installationPath | tr -d '\r')"
+          test -n "$vspath" || { echo "No Visual Studio installation was found."; exit 1; }
+          build_dir="$(cygpath -u "$vspath")/VC/Auxiliary/Build"
+          toolset_file="$build_dir/Microsoft.VCToolsVersion.v143.default.txt"
+          test -f "$toolset_file" || toolset_file="$build_dir/Microsoft.VCToolsVersion.default.txt"
+          test -f "$toolset_file" || { echo "No toolset version file under $build_dir."; exit 1; }
+          echo "Toolset version file: $toolset_file"
+          toolset="$(tr -d ' \r\n' < "$toolset_file")"
+          test -n "$toolset" || { echo "$toolset_file is empty."; exit 1; }
+          if [ -n "${PREPARED_TOOLSET:-}" ] && [ -x "$(cygpath -u "$vspath")/VC/Tools/MSVC/$PREPARED_TOOLSET/bin/Hostx64/x64/cl.exe" ]; then
+            toolset="$PREPARED_TOOLSET"
+          fi
+          echo "Caching against MSVC toolset $toolset"
+          echo "FOXMES_MSVC_TOOLSET=$toolset" >> "$GITHUB_ENV"
+
+          { echo "$DEPS_DIGEST"; echo "$FOXMES_DEPS_REVISION"; echo "$toolset"; } \
+            > "$RUNNER_TEMP/cache_key.txt"
+          echo "CACHE_KEY=$(sha256sum "$RUNNER_TEMP/cache_key.txt" | cut -d' ' -f1)" >> "$GITHUB_ENV"
+      - name: Download windows-deps
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3
+        with:
+          name: intermediate-windows-deps
+          path: ${{ runner.temp }}/foxmes-transfer
+      - name: Restore prepared windows dependencies
+        id: deps-transfer
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -xzf "$(cygpath -u "$RUNNER_TEMP")/foxmes-transfer/windows-deps.tar.gz" -C "$(cygpath -u "$TBUILD")"
+          if [ "$(cat "$(cygpath -u "$TBUILD")/foxmes-deps-key.txt")" != "$CACHE_KEY" ]; then
+            echo "Prepared dependencies do not match this runner toolchain." >&2
+            exit 1
+          fi
+      - name: Download windows object shards
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3
+        with:
+          pattern: intermediate-windows-objects-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/foxmes-objects
+      - name: Budget the link step
+        id: budget
+        shell: bash
+        run: |
+          minutes=$(( 330 - ($(date +%s) - JOB_STARTED) / 60 ))
+          [ "$minutes" -ge 15 ] || minutes=15
+          echo "The compile step may run for $minutes minutes"
+          echo "minutes=$minutes" >> "$GITHUB_OUTPUT"
+      - name: Link the imported objects
+        id: compile
+        timeout-minutes: ${{ fromJSON(steps.budget.outputs.minutes) }}
+        shell: cmd
+        env:
+          FOXMES_OBJECTS_DIR: ${{ runner.temp }}/foxmes-objects
+          FOXMES_PRUNE_LIBRARIES: '1'
+        run: call Telegram\build\foxmes\build-windows.bat -OnlyCache -SkipDeps -LinkOnly
       - name: Archive the compiled windows app
         if: ${{ github.event.inputs.only_cache != 'true' }}
         shell: bash
@@ -391,6 +585,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 360
     outputs:
+      artifact_digest: ${{ steps.prepared-deps.outputs.artifact-digest }}
       developer_dir: ${{ steps.toolchain.outputs.developer_dir }}
     steps:
       - name: Record the job start
@@ -422,6 +617,7 @@ jobs:
           echo "CACHE_KEY=$(shasum -a 256 "$RUNNER_TEMP/cache_key.txt" | cut -d' ' -f1)" >> "$GITHUB_ENV"
       - name: Restore the dependency cache
         id: deps-cache
+        if: env.FOXMES_COLD_BUILD != '1'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: |
@@ -436,7 +632,7 @@ jobs:
           FOXMES_PRUNE_LIBRARIES: '1'
         run: bash Telegram/build/foxmes/build-macos.sh deps
       - name: Save the dependency cache
-        if: always() && steps.deps.outcome == 'success' && steps.deps-cache.outputs.cache-hit != 'true'
+        if: env.FOXMES_COLD_BUILD != '1' && always() && steps.deps.outcome == 'success' && steps.deps-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: |
@@ -450,6 +646,7 @@ jobs:
           printf '%s\n' "$CACHE_KEY" > "$TBUILD/foxmes-deps-key.txt"
           tar -czf macos-deps.tar.gz -C "$TBUILD" Libraries ThirdParty foxmes-deps-key.txt
       - name: Upload macos-deps
+        id: prepared-deps
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: intermediate-macos-deps
@@ -459,10 +656,19 @@ jobs:
           compression-level: 0
           overwrite: true
 
-  macos-build:
+  macos-prepare:
     needs: macos-deps
     runs-on: macos-15
     timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        shard: ['prepare']
+    env:
+      FOXMES_SHARD_INDEX: ${{ matrix.shard }}
+      FOXMES_SHARD_COUNT: '4'
+      FOXMES_DEPENDENCY_CONTEXT: ${{ needs.macos-deps.outputs.artifact_digest }}
     steps:
       - name: Record the job start
         shell: bash
@@ -511,46 +717,20 @@ jobs:
         run: |
           set -euo pipefail
           tar -xzf "$RUNNER_TEMP/foxmes-transfer/macos-deps.tar.gz" -C "$TBUILD"
-          if [ "$(cat "$TBUILD/foxmes-deps-key.txt")" = "$CACHE_KEY" ]; then
-            echo "rebuild=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "The dependency toolchain changed; rebuilding dependencies for this runner."
-            rm -rf "$TBUILD/Libraries" "$TBUILD/ThirdParty"
-            echo "rebuild=true" >> "$GITHUB_OUTPUT"
+          if [ "$(cat "$TBUILD/foxmes-deps-key.txt")" != "$CACHE_KEY" ]; then
+            echo "Prepared dependencies do not match this runner toolchain." >&2
+            exit 1
           fi
-      - name: Restore the dependency cache
-        id: deps-cache
-        if: steps.deps-transfer.outputs.rebuild == 'true'
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
-        with:
-          path: |
-            ${{ env.TBUILD }}/Libraries
-            ${{ env.TBUILD }}/ThirdParty
-          key: macOS-arm64-libs-${{ env.CACHE_KEY }}
-      - name: Rebuild dependencies for the selected toolchain
-        id: rebuild-deps
-        if: steps.deps-transfer.outputs.rebuild == 'true'
-        shell: bash
-        env:
-          FOXMES_PRUNE_LIBRARIES: '1'
-        run: bash Telegram/build/foxmes/build-macos.sh deps
-      - name: Save the dependency cache
-        if: always() && steps.rebuild-deps.outcome == 'success' && steps.deps-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
-        with:
-          path: |
-            ${{ env.TBUILD }}/Libraries
-            ${{ env.TBUILD }}/ThirdParty
-          key: macOS-arm64-libs-${{ env.CACHE_KEY }}
       - name: Restore the macOS compiler cache
+        if: env.FOXMES_COLD_BUILD != '1'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: ${{ runner.temp }}/foxmes-ccache
-          key: macOS-arm64-ccache-${{ github.run_id }}-${{ github.run_attempt }}
+          key: macOS-arm64-ccache-shard-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            macOS-arm64-ccache-${{ github.run_id }}-
-            macOS-arm64-ccache-
+            macOS-arm64-ccache-shard-${{ matrix.shard }}-
       - name: Prepare the macOS working compiler cache
+        if: env.FOXMES_COLD_BUILD != '1'
         shell: bash
         run: |
           set -euo pipefail
@@ -567,18 +747,19 @@ jobs:
           [ "$minutes" -ge 15 ] || minutes=15
           echo "The compile step may run for $minutes minutes"
           echo "minutes=$minutes" >> "$GITHUB_OUTPUT"
-      - name: Compile the app
+      - name: Prepare shared build objects
         id: compile
         timeout-minutes: ${{ fromJSON(steps.budget.outputs.minutes) }}
         shell: bash
         env:
           FOXMES_CCACHE_DIR: ${{ runner.temp }}/foxmes-ccache-work
           FOXMES_BUILD_JOBS: '2'
+          FOXMES_OBJECT_ARCHIVE: ${{ github.workspace }}/macos-objects-${{ matrix.shard }}.tar.gz
           COMPILE_TIMEOUT_MINUTES: ${{ steps.budget.outputs.minutes }}
-        run: python3 Telegram/build/foxmes/run-macos-compile.py --timeout-minutes "$((COMPILE_TIMEOUT_MINUTES - 2))"
+        run: python3 Telegram/build/foxmes/run-macos-compile.py --phase prepare --timeout-minutes "$((COMPILE_TIMEOUT_MINUTES - 2))"
       - name: Snapshot the macOS compiler cache
         id: compiler-cache-snapshot
-        if: always() && steps.compile.outcome != 'skipped'
+        if: env.FOXMES_COLD_BUILD != '1' && always() && steps.compile.outcome != 'skipped'
         shell: bash
         run: |
           set -euo pipefail
@@ -592,11 +773,240 @@ jobs:
             fi
           fi
       - name: Save the macOS compiler cache
-        if: always() && steps.compiler-cache-snapshot.outcome == 'success'
+        if: env.FOXMES_COLD_BUILD != '1' && always() && steps.compiler-cache-snapshot.outcome == 'success'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: ${{ runner.temp }}/foxmes-ccache
-          key: macOS-arm64-ccache-${{ github.run_id }}-${{ github.run_attempt }}
+          key: macOS-arm64-ccache-shard-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Upload macos prepared objects
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: intermediate-macos-objects-${{ matrix.shard }}
+          path: macos-objects-${{ matrix.shard }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          overwrite: true
+
+  macos-compile:
+    needs: [macos-deps, macos-prepare]
+    runs-on: macos-15
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        shard: [0, 1, 2, 3]
+    env:
+      FOXMES_SHARD_INDEX: ${{ matrix.shard }}
+      FOXMES_SHARD_COUNT: '4'
+      FOXMES_DEPENDENCY_CONTEXT: ${{ needs.macos-deps.outputs.artifact_digest }}
+    steps:
+      - name: Record the job start
+        shell: bash
+        run: echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          submodules: recursive
+      - name: Select the dependency toolchain
+        shell: bash
+        env:
+          PREPARED_DEVELOPER_DIR: ${{ needs.macos-deps.outputs.developer_dir }}
+        run: |
+          set -euo pipefail
+          if [ -n "$PREPARED_DEVELOPER_DIR" ] && [ -d "$PREPARED_DEVELOPER_DIR" ]; then
+            echo "DEVELOPER_DIR=$PREPARED_DEVELOPER_DIR" >> "$GITHUB_ENV"
+          else
+            echo "The dependency toolchain is not installed; checking the runner toolchain."
+          fi
+      - name: Install build prerequisites
+        shell: bash
+        run: brew install automake ccache libtool meson nasm ninja pkg-config
+      - name: Resolve the dependency root and cache key
+        shell: bash
+        env:
+          DEPS_DIGEST: "${{ hashFiles('Telegram/build/prepare/prepare.py', 'Telegram/build/qt_version.py') }}"
+        run: |
+          set -euo pipefail
+          echo "TBUILD=$(dirname "$GITHUB_WORKSPACE")" >> "$GITHUB_ENV"
+          {
+            echo "$DEPS_DIGEST"
+            echo "$FOXMES_DEPS_REVISION"
+            sysctl -n hw.ncpu
+            xcodebuild -version
+            xcrun --sdk macosx --show-sdk-version
+          } > "$RUNNER_TEMP/cache_key.txt"
+          echo "CACHE_KEY=$(shasum -a 256 "$RUNNER_TEMP/cache_key.txt" | cut -d' ' -f1)" >> "$GITHUB_ENV"
+      - name: Download macos-deps
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3
+        with:
+          name: intermediate-macos-deps
+          path: ${{ runner.temp }}/foxmes-transfer
+      - name: Restore prepared macos dependencies
+        id: deps-transfer
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -xzf "$RUNNER_TEMP/foxmes-transfer/macos-deps.tar.gz" -C "$TBUILD"
+          if [ "$(cat "$TBUILD/foxmes-deps-key.txt")" != "$CACHE_KEY" ]; then
+            echo "Prepared dependencies do not match this runner toolchain." >&2
+            exit 1
+          fi
+      - name: Download shared macos build objects
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3
+        with:
+          name: intermediate-macos-objects-prepare
+          path: ${{ runner.temp }}/foxmes-prepare
+      - name: Restore the macOS compiler cache
+        if: env.FOXMES_COLD_BUILD != '1'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ runner.temp }}/foxmes-ccache
+          key: macOS-arm64-ccache-shard-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            macOS-arm64-ccache-shard-${{ matrix.shard }}-
+      - name: Prepare the macOS working compiler cache
+        if: env.FOXMES_COLD_BUILD != '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -d "$RUNNER_TEMP/foxmes-ccache" ]; then
+            mv "$RUNNER_TEMP/foxmes-ccache" "$RUNNER_TEMP/foxmes-ccache-work"
+          else
+            mkdir -p "$RUNNER_TEMP/foxmes-ccache-work"
+          fi
+      - name: Budget the compile step
+        id: budget
+        shell: bash
+        run: |
+          minutes=$(( 330 - ($(date +%s) - JOB_STARTED) / 60 ))
+          [ "$minutes" -ge 15 ] || minutes=15
+          echo "The compile step may run for $minutes minutes"
+          echo "minutes=$minutes" >> "$GITHUB_OUTPUT"
+      - name: Compile the object shard
+        id: compile
+        timeout-minutes: ${{ fromJSON(steps.budget.outputs.minutes) }}
+        shell: bash
+        env:
+          FOXMES_CCACHE_DIR: ${{ runner.temp }}/foxmes-ccache-work
+          FOXMES_PREPARED_OBJECTS_DIR: ${{ runner.temp }}/foxmes-prepare
+          FOXMES_BUILD_JOBS: '2'
+          FOXMES_OBJECT_ARCHIVE: ${{ github.workspace }}/macos-objects-${{ matrix.shard }}.tar.gz
+          COMPILE_TIMEOUT_MINUTES: ${{ steps.budget.outputs.minutes }}
+        run: python3 Telegram/build/foxmes/run-macos-compile.py --phase shard --timeout-minutes "$((COMPILE_TIMEOUT_MINUTES - 2))"
+      - name: Snapshot the macOS compiler cache
+        id: compiler-cache-snapshot
+        if: env.FOXMES_COLD_BUILD != '1' && always() && steps.compile.outcome != 'skipped'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d "$RUNNER_TEMP/foxmes-ccache-work"
+          mkdir -p "$RUNNER_TEMP/foxmes-ccache"
+          if ! cp -cR "$RUNNER_TEMP/foxmes-ccache-work/." "$RUNNER_TEMP/foxmes-ccache/"; then
+            result=0
+            rsync -a "$RUNNER_TEMP/foxmes-ccache-work/" "$RUNNER_TEMP/foxmes-ccache/" || result=$?
+            if [ "$result" -ne 0 ] && [ "$result" -ne 24 ]; then
+              exit "$result"
+            fi
+          fi
+      - name: Save the macOS compiler cache
+        if: env.FOXMES_COLD_BUILD != '1' && always() && steps.compiler-cache-snapshot.outcome == 'success'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ runner.temp }}/foxmes-ccache
+          key: macOS-arm64-ccache-shard-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Upload macos object shard
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: intermediate-macos-objects-${{ matrix.shard }}
+          path: macos-objects-${{ matrix.shard }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          overwrite: true
+
+  macos-build:
+    needs: [macos-deps, macos-prepare, macos-compile]
+    runs-on: macos-15
+    timeout-minutes: 360
+    env:
+      FOXMES_DEPENDENCY_CONTEXT: ${{ needs.macos-deps.outputs.artifact_digest }}
+    steps:
+      - name: Record the job start
+        shell: bash
+        run: echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          submodules: recursive
+      - name: Select the dependency toolchain
+        shell: bash
+        env:
+          PREPARED_DEVELOPER_DIR: ${{ needs.macos-deps.outputs.developer_dir }}
+        run: |
+          set -euo pipefail
+          if [ -n "$PREPARED_DEVELOPER_DIR" ] && [ -d "$PREPARED_DEVELOPER_DIR" ]; then
+            echo "DEVELOPER_DIR=$PREPARED_DEVELOPER_DIR" >> "$GITHUB_ENV"
+          else
+            echo "The dependency toolchain is not installed; checking the runner toolchain."
+          fi
+      - name: Install build prerequisites
+        shell: bash
+        run: brew install automake ccache libtool meson nasm ninja pkg-config
+      - name: Resolve the dependency root and cache key
+        shell: bash
+        env:
+          DEPS_DIGEST: "${{ hashFiles('Telegram/build/prepare/prepare.py', 'Telegram/build/qt_version.py') }}"
+        run: |
+          set -euo pipefail
+          echo "TBUILD=$(dirname "$GITHUB_WORKSPACE")" >> "$GITHUB_ENV"
+          {
+            echo "$DEPS_DIGEST"
+            echo "$FOXMES_DEPS_REVISION"
+            sysctl -n hw.ncpu
+            xcodebuild -version
+            xcrun --sdk macosx --show-sdk-version
+          } > "$RUNNER_TEMP/cache_key.txt"
+          echo "CACHE_KEY=$(shasum -a 256 "$RUNNER_TEMP/cache_key.txt" | cut -d' ' -f1)" >> "$GITHUB_ENV"
+      - name: Download macos-deps
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3
+        with:
+          name: intermediate-macos-deps
+          path: ${{ runner.temp }}/foxmes-transfer
+      - name: Restore prepared macos dependencies
+        id: deps-transfer
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -xzf "$RUNNER_TEMP/foxmes-transfer/macos-deps.tar.gz" -C "$TBUILD"
+          if [ "$(cat "$TBUILD/foxmes-deps-key.txt")" != "$CACHE_KEY" ]; then
+            echo "Prepared dependencies do not match this runner toolchain." >&2
+            exit 1
+          fi
+      - name: Download macos object shards
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3
+        with:
+          pattern: intermediate-macos-objects-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/foxmes-objects
+      - name: Budget the link step
+        id: budget
+        shell: bash
+        run: |
+          minutes=$(( 330 - ($(date +%s) - JOB_STARTED) / 60 ))
+          [ "$minutes" -ge 15 ] || minutes=15
+          echo "The compile step may run for $minutes minutes"
+          echo "minutes=$minutes" >> "$GITHUB_OUTPUT"
+      - name: Link the imported objects
+        id: compile
+        timeout-minutes: ${{ fromJSON(steps.budget.outputs.minutes) }}
+        shell: bash
+        env:
+          FOXMES_OBJECTS_DIR: ${{ runner.temp }}/foxmes-objects
+          FOXMES_BUILD_JOBS: '2'
+          COMPILE_TIMEOUT_MINUTES: ${{ steps.budget.outputs.minutes }}
+        run: python3 Telegram/build/foxmes/run-macos-compile.py --phase link --timeout-minutes "$((COMPILE_TIMEOUT_MINUTES - 2))"
       - name: Archive the compiled macos app
         if: ${{ github.event.inputs.only_cache != 'true' }}
         shell: bash
@@ -707,7 +1117,9 @@ jobs:
         run: |
           set -euo pipefail
           repo="$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
-          echo "FOXMES_CENTOS_ENV_IMAGE=ghcr.io/$repo/centos_env:$CENTOS_ENV_REVISION-$DIGEST" >> "$GITHUB_ENV"
+          suffix=
+          if [ "$FOXMES_COLD_BUILD" = 1 ]; then suffix="-cold-$GITHUB_RUN_ID"; fi
+          echo "FOXMES_CENTOS_ENV_IMAGE=ghcr.io/$repo/centos_env:$CENTOS_ENV_REVISION-$DIGEST$suffix" >> "$GITHUB_ENV"
       - name: Log in to ghcr.io
         shell: bash
         run: |
@@ -724,6 +1136,7 @@ jobs:
         shell: bash
         env:
           FOXMES_REQUIRE_IMAGE_PUBLISH: '1'
+          FOXMES_REBUILD_IMAGE: ${{ env.FOXMES_COLD_BUILD }}
         run: bash Telegram/build/foxmes/build-linux.sh image
       - name: Record the prepared image digest
         id: image
@@ -734,16 +1147,24 @@ jobs:
           [[ "$image" == ghcr.io/*@sha256:* ]]
           echo "image=$image" >> "$GITHUB_OUTPUT"
 
-  linux-build:
+  linux-prepare:
     needs: linux-deps
     runs-on: ubuntu-24.04
     timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        shard: ['prepare']
     permissions:
       contents: read
       packages: write
     env:
       FOXMES_CENTOS_ENV_IMAGE: ${{ needs.linux-deps.outputs.image }}
       FOXMES_REQUIRE_PREPARED_IMAGE: '1'
+      FOXMES_SHARD_INDEX: ${{ matrix.shard }}
+      FOXMES_SHARD_COUNT: '4'
+      FOXMES_BUILD_ID: ${{ github.run_id }}-linux-${{ matrix.shard }}
     steps:
       - name: Record the job start
         shell: bash
@@ -759,13 +1180,13 @@ jobs:
           echo '${{ secrets.GITHUB_TOKEN }}' \
             | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
       - name: Restore the Linux compiler cache
+        if: env.FOXMES_COLD_BUILD != '1'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: ${{ runner.temp }}/foxmes-ccache
-          key: Linux-x64-ccache-${{ github.run_id }}-${{ github.run_attempt }}
+          key: Linux-x64-ccache-shard-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            Linux-x64-ccache-${{ github.run_id }}-
-            Linux-x64-ccache-
+            Linux-x64-ccache-shard-${{ matrix.shard }}-
       - name: Budget the compile step
         id: budget
         shell: bash
@@ -774,23 +1195,164 @@ jobs:
           [ "$minutes" -ge 15 ] || minutes=15
           echo "The compile step may run for $minutes minutes"
           echo "minutes=$minutes" >> "$GITHUB_OUTPUT"
-      - name: Compile the app
+      - name: Prepare shared build objects
         id: compile
         timeout-minutes: ${{ fromJSON(steps.budget.outputs.minutes) }}
         shell: bash
         env:
           FOXMES_CCACHE_DIR: ${{ runner.temp }}/foxmes-ccache
-        run: bash Telegram/build/foxmes/build-linux.sh compile
+        run: bash Telegram/build/foxmes/build-linux.sh prepare
       - name: Stop the build container
         if: always()
         shell: bash
-        run: docker ps -q | xargs -r docker kill
+        run: docker ps -q --filter "label=foxmes-build=$FOXMES_BUILD_ID" | xargs -r docker kill
       - name: Save the Linux compiler cache
-        if: always() && steps.compile.outcome != 'skipped'
+        if: env.FOXMES_COLD_BUILD != '1' && always() && steps.compile.outcome != 'skipped'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: ${{ runner.temp }}/foxmes-ccache
-          key: Linux-x64-ccache-${{ github.run_id }}-${{ github.run_attempt }}
+          key: Linux-x64-ccache-shard-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Upload linux prepared objects
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: intermediate-linux-objects-${{ matrix.shard }}
+          path: artifacts/transfer/linux-objects-${{ matrix.shard }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          overwrite: true
+
+  linux-compile:
+    needs: [linux-deps, linux-prepare]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        shard: [0, 1, 2, 3]
+    permissions:
+      contents: read
+      packages: write
+    env:
+      FOXMES_CENTOS_ENV_IMAGE: ${{ needs.linux-deps.outputs.image }}
+      FOXMES_REQUIRE_PREPARED_IMAGE: '1'
+      FOXMES_SHARD_INDEX: ${{ matrix.shard }}
+      FOXMES_SHARD_COUNT: '4'
+      FOXMES_BUILD_ID: ${{ github.run_id }}-linux-${{ matrix.shard }}
+    steps:
+      - name: Record the job start
+        shell: bash
+        run: echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          submodules: recursive
+      - name: Log in to ghcr.io
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '${{ secrets.GITHUB_TOKEN }}' \
+            | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
+      - name: Download shared linux build objects
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3
+        with:
+          name: intermediate-linux-objects-prepare
+          path: ${{ runner.temp }}/foxmes-prepare
+      - name: Restore the Linux compiler cache
+        if: env.FOXMES_COLD_BUILD != '1'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ runner.temp }}/foxmes-ccache
+          key: Linux-x64-ccache-shard-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            Linux-x64-ccache-shard-${{ matrix.shard }}-
+      - name: Budget the compile step
+        id: budget
+        shell: bash
+        run: |
+          minutes=$(( 330 - ($(date +%s) - JOB_STARTED) / 60 ))
+          [ "$minutes" -ge 15 ] || minutes=15
+          echo "The compile step may run for $minutes minutes"
+          echo "minutes=$minutes" >> "$GITHUB_OUTPUT"
+      - name: Compile the object shard
+        id: compile
+        timeout-minutes: ${{ fromJSON(steps.budget.outputs.minutes) }}
+        shell: bash
+        env:
+          FOXMES_CCACHE_DIR: ${{ runner.temp }}/foxmes-ccache
+          FOXMES_PREPARED_OBJECTS_DIR: ${{ runner.temp }}/foxmes-prepare
+        run: bash Telegram/build/foxmes/build-linux.sh shard
+      - name: Stop the build container
+        if: always()
+        shell: bash
+        run: docker ps -q --filter "label=foxmes-build=$FOXMES_BUILD_ID" | xargs -r docker kill
+      - name: Save the Linux compiler cache
+        if: env.FOXMES_COLD_BUILD != '1' && always() && steps.compile.outcome != 'skipped'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ runner.temp }}/foxmes-ccache
+          key: Linux-x64-ccache-shard-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Upload linux object shard
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: intermediate-linux-objects-${{ matrix.shard }}
+          path: artifacts/transfer/linux-objects-${{ matrix.shard }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          overwrite: true
+
+  linux-build:
+    needs: [linux-deps, linux-prepare, linux-compile]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    permissions:
+      contents: read
+      packages: write
+    env:
+      FOXMES_CENTOS_ENV_IMAGE: ${{ needs.linux-deps.outputs.image }}
+      FOXMES_REQUIRE_PREPARED_IMAGE: '1'
+      FOXMES_BUILD_ID: ${{ github.run_id }}-linux-link
+    steps:
+      - name: Record the job start
+        shell: bash
+        run: echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          submodules: recursive
+      - name: Log in to ghcr.io
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '${{ secrets.GITHUB_TOKEN }}' \
+            | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
+      - name: Download linux object shards
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3
+        with:
+          pattern: intermediate-linux-objects-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/foxmes-objects
+      - name: Budget the link step
+        id: budget
+        shell: bash
+        run: |
+          minutes=$(( 330 - ($(date +%s) - JOB_STARTED) / 60 ))
+          [ "$minutes" -ge 15 ] || minutes=15
+          echo "The compile step may run for $minutes minutes"
+          echo "minutes=$minutes" >> "$GITHUB_OUTPUT"
+      - name: Link the imported objects
+        id: compile
+        timeout-minutes: ${{ fromJSON(steps.budget.outputs.minutes) }}
+        shell: bash
+        env:
+          FOXMES_OBJECTS_DIR: ${{ runner.temp }}/foxmes-objects
+        run: bash Telegram/build/foxmes/build-linux.sh link
+      - name: Stop the build container
+        if: always()
+        shell: bash
+        run: docker ps -q --filter "label=foxmes-build=$FOXMES_BUILD_ID" | xargs -r docker kill
       - name: Archive the compiled linux app
         if: ${{ github.event.inputs.only_cache != 'true' }}
         shell: bash
@@ -856,7 +1418,7 @@ jobs:
   # caches the next release starts from are refreshed by a run on the default branch.
 
   refresh-caches:
-    if: ${{ !cancelled() && needs.validate.result == 'success' && github.ref_type == 'tag' }}
+    if: ${{ github.event.inputs.cold_build != 'true' && !cancelled() && needs.validate.result == 'success' && github.ref_type == 'tag' }}
     needs: [validate, windows, macos, linux]
     runs-on: ubuntu-24.04
     permissions:
@@ -874,8 +1436,8 @@ jobs:
             -f only_cache=true
 
   cleanup-caches:
-    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') }}
-    needs: [windows-deps, windows-build, macos-deps, macos-build, linux-deps, linux-build, windows, macos, linux]
+    if: ${{ github.event.inputs.cold_build != 'true' && !cancelled() && !contains(needs.*.result, 'failure') }}
+    needs: [windows-deps, windows-prepare, windows-compile, windows-build, macos-deps, macos-prepare, macos-compile, macos-build, linux-deps, linux-prepare, linux-compile, linux-build, windows, macos, linux]
     runs-on: ubuntu-24.04
     permissions:
       actions: write
@@ -900,7 +1462,10 @@ jobs:
             done)"
           elif [ "$GITHUB_REF_NAME" = "$DEFAULT_BRANCH" ]; then
             ids="$(for prefix in Windows-x64-ccache- macOS-arm64-ccache- Linux-x64-ccache-; do
-              stale --key "$prefix" --json id --jq '.[1:][].id'
+              for shard in prepare 0 1 2 3; do
+                stale --key "${prefix}shard-$shard-" --json id --jq '.[1:][].id'
+              done
+              stale --key "$prefix" --json id,key --jq '.[] | select(.key | contains("-ccache-shard-") | not) | .id'
             done; stale --key Linux-ccache- --json id --jq '.[].id')"
           else
             ids=
@@ -945,7 +1510,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    if: ${{ !cancelled() && github.ref_type == 'tag' && needs.provenance.result == 'success' }}
+    if: ${{ github.event.inputs.cold_build != 'true' && !cancelled() && github.ref_type == 'tag' && needs.provenance.result == 'success' }}
     needs: provenance
     runs-on: ubuntu-24.04
     permissions:

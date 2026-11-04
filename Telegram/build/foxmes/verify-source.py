@@ -128,6 +128,11 @@ def unguarded_release_uploads(workflow: str) -> list:
                 r"^          name: intermediate-(windows|macos)-deps$", step, re.M)
             if dependency and job_name == dependency.group(1) + "-deps":
                 continue
+            objects = re.search(
+                r"^          name: intermediate-(windows|macos|linux)-objects-\$\{\{ matrix\.shard \}\}$",
+                step, re.M)
+            if objects and job_name in (objects.group(1) + "-prepare", objects.group(1) + "-compile"):
+                continue
             failures.append(job_name)
     return failures
 

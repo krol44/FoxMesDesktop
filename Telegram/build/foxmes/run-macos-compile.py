@@ -109,7 +109,7 @@ def run_compile(command, timeout_seconds, diagnostic_interval=60):
             for signum, handler in previous_handlers.items():
                 signal.signal(signum, handler)
     cache_dir = os.environ.get("FOXMES_CCACHE_DIR")
-    if cache_dir:
+    if cache_dir and os.environ.get("FOXMES_COLD_BUILD") != "1":
         try:
             subprocess.run(
                 ["ccache", "--show-stats"],
@@ -122,11 +122,12 @@ def run_compile(command, timeout_seconds, diagnostic_interval=60):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--timeout-minutes", type=int, required=True)
+    parser.add_argument("--phase", choices=("compile", "prepare", "shard", "link"), default="compile")
     args = parser.parse_args()
     if args.timeout_minutes <= 0:
         parser.error("--timeout-minutes must be positive")
     script = Path(__file__).resolve().with_name("build-macos.sh")
-    return run_compile(["bash", str(script), "compile"], args.timeout_minutes * 60)
+    return run_compile(["bash", str(script), args.phase], args.timeout_minutes * 60)
 
 
 if __name__ == "__main__":

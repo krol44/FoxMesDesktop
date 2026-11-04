@@ -4,12 +4,19 @@ param(
     [switch]$OnlyCache,
     [switch]$DepsOnly,
     [switch]$SkipDeps,
-    [switch]$PackageOnly
+    [switch]$PackageOnly,
+    [switch]$CompileShard,
+    [switch]$LinkOnly,
+    [switch]$PrepareObjects
 )
 
 $ErrorActionPreference = "Stop"
+if ($env:FOXMES_COLD_BUILD -eq "1") { $env:CCACHE_DISABLE = "1" }
 $version = "1.13.2"
-if ($PackageOnly -and ($OnlyCache -or $DepsOnly -or $SkipDeps)) {
+if (([int]$CompileShard.IsPresent + [int]$LinkOnly.IsPresent + [int]$PrepareObjects.IsPresent) -gt 1) {
+    throw "PrepareObjects, CompileShard and LinkOnly are mutually exclusive."
+}
+if ($PackageOnly -and ($OnlyCache -or $DepsOnly -or $SkipDeps -or $CompileShard -or $LinkOnly -or $PrepareObjects)) {
     throw "PackageOnly cannot be combined with a build phase."
 }
 if ($DepsOnly -and $SkipDeps) { throw "DepsOnly cannot be combined with SkipDeps." }
@@ -137,7 +144,7 @@ if (-not $PackageOnly) {
         }
 
         $ccacheArgs = @()
-        if ($env:FOXMES_CCACHE_DIR) {
+        if ($env:FOXMES_CCACHE_DIR -and $env:FOXMES_COLD_BUILD -ne "1" -and -not $LinkOnly) {
             $ccache = (Get-Command ccache -ErrorAction Stop).Source
             New-Item -ItemType Directory -Force -Path $env:FOXMES_CCACHE_DIR | Out-Null
             $env:CCACHE_DIR = $env:FOXMES_CCACHE_DIR
@@ -153,6 +160,14 @@ if (-not $PackageOnly) {
                 "-D", "CMAKE_C_COMPILER_LAUNCHER=$ccache",
                 "-D", "CMAKE_CXX_COMPILER_LAUNCHER=$ccache",
                 "-D", "CMAKE_PROJECT_INCLUDE=$forceInclude")
+        }
+
+        if ($PrepareObjects -or $CompileShard -or $LinkOnly) {
+            $python = (Get-Command python -ErrorAction Stop).Source
+            $distributed = (Join-Path $PSScriptRoot "distributed.cmake").Replace('\', '/')
+            $ccacheArgs = @(
+                "-D", "CMAKE_PROJECT_INCLUDE=$distributed",
+                "-D", "FOXMES_DISTRIBUTED_PYTHON=$python")
         }
 
         & ".\configure.bat" "-G" "Ninja Multi-Config" "qt6" `
@@ -191,9 +206,35 @@ if (-not $PackageOnly) {
         Pop-Location
     }
 
-    cmake --build $buildRoot --config Release --parallel
+    if ($PrepareObjects -or $CompileShard -or $LinkOnly) {
+        $revision = $env:GITHUB_SHA
+        if (-not $revision) { $revision = & git -C $SourceRoot rev-parse HEAD }
+        $phase = if ($PrepareObjects) { "prepare" } elseif ($CompileShard) { "shard" } else { "link" }
+        $arguments = @(
+            (Join-Path $PSScriptRoot "distributed-build.py"), $phase,
+            "--build-dir", $buildRoot, "--revision", $revision,
+            "--count", "4", "--jobs", "2")
+        if ($PrepareObjects) {
+            if (-not $env:FOXMES_OBJECT_ARCHIVE) { throw "FOXMES_OBJECT_ARCHIVE is required." }
+            $arguments += @("--archive", $env:FOXMES_OBJECT_ARCHIVE)
+        } elseif ($CompileShard) {
+            if (-not $env:FOXMES_PREPARED_OBJECTS_DIR) { throw "FOXMES_PREPARED_OBJECTS_DIR is required." }
+            if (-not $env:FOXMES_OBJECT_ARCHIVE) { throw "FOXMES_OBJECT_ARCHIVE is required." }
+            $arguments += @("--index", $env:FOXMES_SHARD_INDEX, "--archive", $env:FOXMES_OBJECT_ARCHIVE, "--prepared-dir", $env:FOXMES_PREPARED_OBJECTS_DIR)
+        } else {
+            if (-not $env:FOXMES_OBJECTS_DIR) { throw "FOXMES_OBJECTS_DIR is required." }
+            $arguments += @("--objects-dir", $env:FOXMES_OBJECTS_DIR)
+        }
+        & $python @arguments
+    } else {
+        cmake --build $buildRoot --config Release --parallel
+    }
     $buildExit = $LASTEXITCODE
-    if ($env:FOXMES_CCACHE_DIR) { & ccache --show-stats }
+    if ($env:FOXMES_CCACHE_DIR -and $env:FOXMES_COLD_BUILD -ne "1" -and -not $LinkOnly) { & ccache --show-stats }
+    if ($PrepareObjects -or $CompileShard) {
+        if ($buildExit -ne 0) { throw "Windows object shard failed." }
+        return
+    }
     if ($buildExit -ne 0) { throw "Windows build failed." }
     if (-not (Test-Path $executable)) { throw "FoxMes.exe was not produced." }
     if ($OnlyCache) {

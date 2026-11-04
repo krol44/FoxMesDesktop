@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
+if [ "${FOXMES_COLD_BUILD:-0}" = 1 ]; then
+    export CCACHE_DISABLE=1
+fi
 
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 source_root="${FOXMES_SOURCE_ROOT:-$(cd "$script_dir/../../.." && pwd)}"
@@ -9,8 +12,8 @@ version="1.13.2"
 
 phase="${1:-all}"
 case "$phase" in
-  all|deps|compile|app|package) ;;
-  *) echo "usage: $(basename "$0") [all|deps|compile|app|package]" >&2; exit 1 ;;
+  all|deps|compile|app|package|prepare|shard|link) ;;
+  *) echo "usage: $(basename "$0") [all|deps|compile|app|package|prepare|shard|link]" >&2; exit 1 ;;
 esac
 
 prune_libraries() {
@@ -135,8 +138,32 @@ setup_ccache() {
 }
 
 compile_app() {
+	local build_phase="${1:-compile}"
+	local distributed_args=()
 	"$source_root/Telegram/patches/apply.sh"
-	setup_ccache
+	if [ "$build_phase" = prepare ] || [ "$build_phase" = shard ] || [ "$build_phase" = link ]; then
+		local no_pch_timestamp="-Xclang -fno-pch-timestamp"
+		distributed_args=(
+			-G "Ninja Multi-Config"
+			-D "CMAKE_PROJECT_INCLUDE=$script_dir/distributed.cmake"
+			-D "FOXMES_DISTRIBUTED_PYTHON=$(command -v python3)"
+			-D "CMAKE_C_FLAGS=$no_pch_timestamp"
+			-D "CMAKE_CXX_FLAGS=$no_pch_timestamp"
+			-D "CMAKE_OBJC_FLAGS=$no_pch_timestamp"
+			-D "CMAKE_OBJCXX_FLAGS=$no_pch_timestamp"
+		)
+		if [ -n "${FOXMES_CCACHE_DIR:-}" ] && [ "${FOXMES_COLD_BUILD:-0}" != 1 ] && [ "$build_phase" != link ]; then
+			export CCACHE_DIR="$FOXMES_CCACHE_DIR"
+			export CCACHE_MAXSIZE=5G
+			export CCACHE_BASEDIR="$source_root"
+			export CCACHE_COMPILERCHECK=content
+			export CCACHE_DEPEND=true
+			export CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime,clang_index_store
+			ccache --zero-stats
+		fi
+	else
+		setup_ccache
+	fi
 	cd "$source_root/Telegram"
 	./configure.sh \
 	  -D CMAKE_CONFIGURATION_TYPES=Release \
@@ -147,15 +174,34 @@ compile_app() {
 	  -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON \
 	  -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON \
 	  -D FOXMES_ALLOW_ENDPOINT_OVERRIDE=OFF \
-	  ${ccache_args[@]+"${ccache_args[@]}"}
+	  ${ccache_args[@]+"${ccache_args[@]}"} \
+	  ${distributed_args[@]+"${distributed_args[@]}"}
 	local jobs="${FOXMES_BUILD_JOBS:-$(sysctl -n hw.ncpu)}"
 	if ! [[ "$jobs" =~ ^[1-9][0-9]*$ ]]; then
 		echo "FOXMES_BUILD_JOBS must be a positive integer." >&2
 		return 1
 	fi
-	echo "Building the Telegram target with $jobs parallel tasks."
-	cmake --build "$source_root/out" --config Release --target Telegram --parallel "$jobs"
-	if [ -n "${FOXMES_CCACHE_DIR:-}" ]; then
+	if [ "$build_phase" = prepare ] || [ "$build_phase" = shard ] || [ "$build_phase" = link ]; then
+		local arguments=(
+			"$script_dir/distributed-build.py" "$build_phase"
+			--build-dir "$source_root/out"
+			--revision "${GITHUB_SHA:-$(git -C "$source_root" rev-parse HEAD)}"
+			--count "${FOXMES_SHARD_COUNT:-4}"
+			--jobs "$jobs"
+		)
+		if [ "$build_phase" = prepare ]; then
+			arguments+=(--archive "${FOXMES_OBJECT_ARCHIVE:?}")
+		elif [ "$build_phase" = shard ]; then
+			arguments+=(--index "${FOXMES_SHARD_INDEX:?}" --archive "${FOXMES_OBJECT_ARCHIVE:?}" --prepared-dir "${FOXMES_PREPARED_OBJECTS_DIR:?}")
+		else
+			arguments+=(--objects-dir "${FOXMES_OBJECTS_DIR:?}")
+		fi
+		python3 "${arguments[@]}"
+	else
+		echo "Building the Telegram target with $jobs parallel tasks."
+		cmake --build "$source_root/out" --config Release --target Telegram --parallel "$jobs"
+	fi
+	if [ -n "${FOXMES_CCACHE_DIR:-}" ] && [ "${FOXMES_COLD_BUILD:-0}" != 1 ]; then
 		ccache --show-stats
 	fi
 }
@@ -233,6 +279,7 @@ package_app() {
 case "$phase" in
   deps)    build_deps ;;
   compile) compile_app ;;
+  prepare|shard|link) compile_app "$phase" ;;
   app)     compile_app; package_app ;;
   package) package_app ;;
   all)     build_deps; compile_app; package_app ;;

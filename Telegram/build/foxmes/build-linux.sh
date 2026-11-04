@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
+if [ "${FOXMES_COLD_BUILD:-0}" = 1 ]; then
+    export CCACHE_DISABLE=1
+fi
 
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 source_root="${FOXMES_SOURCE_ROOT:-$(cd "$script_dir/../../.." && pwd)}"
@@ -11,16 +14,16 @@ tools="$source_root/out/foxmes-tools"
 
 phase="${1:-all}"
 case "$phase" in
-  all|image|compile|package) ;;
-  *) echo "usage: $(basename "$0") [all|image|compile|package]" >&2; exit 1 ;;
+  all|image|compile|package|prepare|shard|link) ;;
+  *) echo "usage: $(basename "$0") [all|image|compile|package|prepare|shard|link]" >&2; exit 1 ;;
 esac
 
 prepare_image() {
   "$source_root/Telegram/patches/apply.sh"
 
-  if docker image inspect "$image_tag" >/dev/null 2>&1; then
+  if [ "${FOXMES_REBUILD_IMAGE:-0}" != 1 ] && docker image inspect "$image_tag" >/dev/null 2>&1; then
     echo "using the $image_tag image already present here"
-  elif [ -n "${FOXMES_CENTOS_ENV_IMAGE:-}" ] && docker pull "$FOXMES_CENTOS_ENV_IMAGE"
+  elif [ "${FOXMES_REBUILD_IMAGE:-0}" != 1 ] && [ -n "${FOXMES_CENTOS_ENV_IMAGE:-}" ] && docker pull "$FOXMES_CENTOS_ENV_IMAGE"
   then
     echo "using the published image $FOXMES_CENTOS_ENV_IMAGE"
     docker tag "$FOXMES_CENTOS_ENV_IMAGE" "$image_tag"
@@ -45,7 +48,7 @@ prepare_image() {
     fi
     export DEBUG=
     export LTO=
-    "$source_root/Telegram/build/prepare/linux.sh"
+    FOXMES_DOCKER_NO_CACHE="${FOXMES_REBUILD_IMAGE:-0}" "$source_root/Telegram/build/prepare/linux.sh"
     docker tag tdesktop:centos_env "$image_tag"
 
     if [ -n "$publish_after_build" ]; then
@@ -81,15 +84,25 @@ prepare_image() {
 }
 
 compile_app() {
+  local build_phase="${1:-compile}"
+  local transfer_volumes=()
+  if [ "$build_phase" = link ]; then
+    transfer_volumes=(-v "${FOXMES_OBJECTS_DIR:?}:/var/foxmes-objects:ro")
+  elif [ "$build_phase" = shard ]; then
+    transfer_volumes=(-v "${FOXMES_PREPARED_OBJECTS_DIR:?}:/var/foxmes-prepared:ro")
+  fi
   ccache_dir="${FOXMES_CCACHE_DIR:-$HOME/.cache/foxmes-ccache}"
   mkdir -p "$ccache_dir"
   ccache_tool=(docker run --rm -u "$(id -u):$(id -g)"
     -v "$ccache_dir:/var/cache/ccache" "$image_tag" ccache)
-  "${ccache_tool[@]}" --zero-stats
+  if [ "${FOXMES_COLD_BUILD:-0}" != 1 ] && [ "$build_phase" != link ]; then
+    "${ccache_tool[@]}" --zero-stats
+  fi
 
   # The image sets CCACHE_DISABLE for its own dependency stages, and ccache
   # treats the variable as on whatever its value, so it is removed here.
   docker run --rm \
+    --label "foxmes-build=${FOXMES_BUILD_ID:-local}" \
     -u "$(id -u):$(id -g)" \
     -v "$source_root:/usr/src/tdesktop" \
     -v "$ccache_dir:/var/cache/ccache" \
@@ -97,6 +110,14 @@ compile_app() {
     -e CCACHE_COMPILERCHECK=content \
     -e CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime \
     -e CONFIG=Release \
+    -e FOXMES_COLD_BUILD="${FOXMES_COLD_BUILD:-0}" \
+    -e FOXMES_DISTRIBUTED_PHASE="$build_phase" \
+    -e FOXMES_SHARD_INDEX="${FOXMES_SHARD_INDEX:-0}" \
+    -e FOXMES_BUILD_JOBS="${FOXMES_BUILD_JOBS:-2}" \
+    -e FOXMES_CCACHE_DIR=/var/cache/ccache \
+    -e FOXMES_DEPENDENCY_CONTEXT="${FOXMES_CENTOS_ENV_IMAGE:-local}" \
+    -e FOXMES_BUILD_REVISION="${GITHUB_SHA:-$(git -C "$source_root" rev-parse HEAD)}" \
+    ${transfer_volumes[@]+"${transfer_volumes[@]}"} \
     "$image_tag" \
     env -u CCACHE_DISABLE \
     /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
@@ -106,7 +127,12 @@ compile_app() {
     -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON \
     -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON \
     -D FOXMES_ALLOW_ENDPOINT_OVERRIDE=OFF
-  "${ccache_tool[@]}" --show-stats
+  if [ "${FOXMES_COLD_BUILD:-0}" != 1 ] && [ "$build_phase" != link ]; then
+    "${ccache_tool[@]}" --show-stats
+  fi
+  if [ "$build_phase" = prepare ] || [ "$build_phase" = shard ]; then
+    return
+  fi
 
   rm -rf "$appdir"
   docker run --rm \
@@ -156,6 +182,7 @@ package_app() {
 case "$phase" in
   image)   prepare_image ;;
   compile) prepare_image; compile_app ;;
+  prepare|shard|link) prepare_image; compile_app "$phase" ;;
   package) package_app ;;
   all)     prepare_image; compile_app; package_app ;;
 esac
