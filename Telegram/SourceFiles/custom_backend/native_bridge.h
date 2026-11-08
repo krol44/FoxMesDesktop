@@ -155,7 +155,7 @@ public:
     void uploadProfilePhoto(QImage &&image, Fn<void()> done, Fn<void()> failed = nullptr);
     void applyAppearanceResult(qint64 chatId, const QJsonObject &result);
     void reloadChats();
-    void hydrateFolderChats(Fn<void(QJsonDocument, bool)> done);
+    void whenChatsLoaded(Fn<void(bool)> done);
     void loadContacts();
     struct HistoryQuery {
         MsgId offsetId = 0;
@@ -227,6 +227,7 @@ public:
         Main::Session *session,
         const QJsonObject &webPage);
     [[nodiscard]] History *historyForChat(qint64 chatId) const;
+    [[nodiscard]] qint64 chatIdFor(History *history) const;
     [[nodiscard]] bool hasChat(PeerId peerId) const;
     void resolveChatId(History *history, std::function<void(qint64)> done);
     [[nodiscard]] std::optional<MTPMessage> prepareReminder(
@@ -442,7 +443,6 @@ private:
     [[nodiscard]] QList<qint64> pinnedOrderIds(Data::Folder *folder) const;
     void applyChatLookPatch(const QJsonObject &data);
     void applyChatSettingsPatch(const QJsonObject &data);
-    void loadCachedChats();
     void finishInitialLoadIfReady();
     void resolveHistoryChat(
         not_null<History*> history,
@@ -585,7 +585,6 @@ private:
         const QJsonObject &call,
         qint64 messageId,
         qint64 senderId);
-    [[nodiscard]] qint64 chatIdFor(History *history) const;
     [[nodiscard]] qint64 historyChatIdFor(History *history) const;
     [[nodiscard]] History *historyForChatId(qint64 chatId) const;
     [[nodiscard]] PeerId peerForChatId(qint64 chatId) const;
@@ -730,6 +729,8 @@ private:
 	qint64 _lastGapResumeFrom = 0;
 	bool _contactsDone = false;
 	bool _chatsDone = false;
+	bool _chatsLoading = false;
+	bool _chatsReady = false;
 	std::vector<Fn<void(bool listLoaded)>> _afterChatsReload;
 	bool _reactionsCatalogLoading = false;
 	bool _reactionsRefreshScheduled = false;

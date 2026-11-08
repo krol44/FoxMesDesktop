@@ -12,7 +12,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 if ($env:FOXMES_COLD_BUILD -eq "1") { $env:CCACHE_DISABLE = "1" }
-$version = "1.13.2"
+$version = "1.13.4"
 if (([int]$CompileShard.IsPresent + [int]$LinkOnly.IsPresent + [int]$PrepareObjects.IsPresent) -gt 1) {
     throw "PrepareObjects, CompileShard and LinkOnly are mutually exclusive."
 }
@@ -246,7 +246,7 @@ if (-not $PackageOnly) {
 if (-not (Test-Path $executable)) { throw "FoxMes.exe was not found." }
 $versionInfo = (Get-Item $executable).VersionInfo
 if ("$($versionInfo.CompanyName)".Trim() -ne "Foxtail") { throw "Unexpected executable publisher." }
-if ($versionInfo.ProductVersion -notlike "1.13.2*") { throw "Unexpected executable version." }
+if ($versionInfo.ProductVersion -notlike "1.13.4*") { throw "Unexpected executable version." }
 
 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $ArtifactRoot
 New-Item -ItemType Directory -Force -Path $ArtifactRoot | Out-Null
@@ -291,7 +291,7 @@ if ($observedVersion -ne $version) {
     throw "Unexpected installer version: '$($observedVersion)'."
 }
 if ((Get-AuthenticodeSignature $setup).Status -ne "NotSigned") {
-    throw "The version 1.13.2 installer must be unsigned."
+    throw "The version 1.13.4 installer must be unsigned."
 }
 
 $temporaryRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { $env:TEMP }

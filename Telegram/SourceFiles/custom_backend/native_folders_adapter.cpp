@@ -52,8 +52,6 @@ struct State {
     std::vector<int> order = { 0 };
     base::flat_map<int, Folder> folders;
     base::flat_map<QByteArray, qint64> editRevisions;
-    base::flat_map<PeerId, qint64> chats;
-    base::flat_map<qint64, QJsonObject> chatData;
     std::deque<Fn<void(Fn<void()>)>> queue;
 };
 base::flat_map<Main::Session*, std::unique_ptr<State>> states;
@@ -171,17 +169,7 @@ void Load(not_null<Main::Session*> session, Fn<void(bool)> done) {
         if (!weak) return;
         if (!error.isEmpty() || status != 200 || !Parse(weak.get(), doc.object())) { done(false); return; }
         const auto bridge = BridgeFor(weak.get()); if (!bridge) { done(false); return; }
-        bridge->hydrateFolderChats([weak, done](QJsonDocument chats, bool ok) {
-            if (!weak) return;
-            if (ok) {
-                auto &state = Get(weak.get()); state.chats.clear(); state.chatData.clear();
-                for (const auto &value : chats.array()) {
-                    const auto id = value.toObject().value("id").toVariant().toLongLong();
-                    if (const auto history = BridgeFor(weak.get())->historyForChat(id)) { state.chats.emplace(history->peer->id, id); state.chatData.emplace(id, value.toObject()); }
-                }
-            }
-            done(ok);
-        });
+        bridge->whenChatsLoaded(done);
     });
 }
 PeerId InputPeerId(const MTPInputPeer &peer, not_null<Main::Session*> session) {
@@ -190,11 +178,111 @@ PeerId InputPeerId(const MTPInputPeer &peer, not_null<Main::Session*> session) {
         [&](const MTPDinputPeerChat &data) { return peerFromChat(data.vchat_id().v); },
         [&](const MTPDinputPeerSelf &) { return session->userPeerId(); }, [](const auto &) { return PeerId(); });
 }
+using PeerChats = base::flat_map<qint64, QJsonObject>;
+
+qint64 ChatId(not_null<Main::Session*> session, PeerId peerId) {
+    const auto bridge = BridgeFor(session);
+    const auto history = session->data().historyLoaded(peerId);
+    return (bridge && history) ? bridge->chatIdFor(history) : 0;
+}
+void LoadPeerChats(
+        not_null<Main::Session*> session,
+        const MTPVector<MTPInputDialogPeer> &requested,
+        Fn<void(PeerChats, bool)> done) {
+    auto ids = std::set<qint64>();
+    for (const auto &input : requested.v) {
+        if (input.type() != mtpc_inputDialogPeer) continue;
+        const auto peerId = InputPeerId(
+            input.c_inputDialogPeer().vpeer(),
+            session);
+        const auto id = ChatId(session, peerId);
+        if (id) ids.insert(id);
+    }
+    if (ids.empty()) {
+        done({}, true);
+        return;
+    }
+    struct Pending {
+        PeerChats chats;
+        size_t remaining = 0;
+        bool ok = true;
+    };
+    const auto pending = std::make_shared<Pending>();
+    pending->remaining = ids.size();
+    const auto weak = base::make_weak(session);
+    for (const auto id : ids) {
+        ClientFor(session).chat(id, [weak, id, pending, done](
+                QJsonDocument doc,
+                QString error,
+                int status) {
+            if (!weak) return;
+            if (error.isEmpty() && status == 200 && doc.isObject()) {
+                pending->chats.emplace(id, doc.object());
+            } else if (status != 403 && status != 404) {
+                pending->ok = false;
+            }
+            if (!--pending->remaining) {
+                done(std::move(pending->chats), pending->ok);
+            }
+        });
+    }
+}
+void ReplyPeerDialogs(
+        not_null<Main::Session*> session,
+        const MTPVector<MTPInputDialogPeer> &requested,
+        const PeerChats &chats,
+        const Mtp::Answer &answer) {
+    auto dialogs = QVector<MTPDialog>();
+    for (const auto &input : requested.v) {
+        if (input.type() != mtpc_inputDialogPeer) continue;
+        const auto peerId = InputPeerId(input.c_inputDialogPeer().vpeer(), session);
+        const auto id = ChatId(session, peerId);
+        const auto entry = chats.find(id);
+        if (entry == chats.end()) continue;
+        const auto dto = entry->second;
+        const auto history = BridgeFor(session)->historyForChat(id);
+        if (!history) continue;
+        const auto receipts = dto.value("receipt_state").toObject();
+        auto flags = MTPDdialog::Flags();
+        if (dto.value("archived").toBool()) flags |= MTPDdialog::Flag::f_folder_id;
+        if (dto.value("pinned").toBool()) flags |= MTPDdialog::Flag::f_pinned;
+        if (dto.value("marked_unread").toBool()) flags |= MTPDdialog::Flag::f_unread_mark;
+        dialogs.push_back(MTP_dialog(
+            MTP_flags(flags),
+            peerToMTP(history->peer->id),
+            MTP_int(dto.value("last_message").toObject().value("id").toInt()),
+            MTP_int(receipts.value("inbox").toObject()
+                .value("read_through_id").toInt()),
+            MTP_int(receipts.value("outbox").toObject()
+                .value("read_through_id").toInt()),
+            MTP_int(dto.value("unread_count").toInt()),
+            MTP_int(0),
+            MTP_int(0),
+            MTP_int(0),
+            BridgeFor(session)->communityNotifySettings(id, dto),
+            MTP_int(0),
+            MTPDraftMessage(),
+            MTP_int(1),
+            MTP_int(0)));
+    }
+    answer.done(MTP_messages_peerDialogs(
+        MTP_vector<MTPDialog>(dialogs),
+        MTP_vector<MTPMessage>(),
+        MTP_vector<MTPChat>(),
+        MTP_vector<MTPUser>(),
+        MTP_updates_state(
+            MTP_int(0),
+            MTP_int(0),
+            MTP_int(base::unixtime::now()),
+            MTP_int(0),
+            MTP_int(0))));
+}
 std::optional<QJsonArray> ChatIds(not_null<Main::Session*> session, const MTPVector<MTPInputPeer> &peers) {
-    auto result = QJsonArray(); const auto &chats = Get(session).chats;
+    auto result = QJsonArray();
     for (const auto &peer : peers.v) {
-        const auto found = chats.find(InputPeerId(peer, session)); if (found == chats.end()) return std::nullopt;
-        result.push_back(QJsonValue(found->second));
+        const auto id = ChatId(session, InputPeerId(peer, session));
+        if (!id) return std::nullopt;
+        result.push_back(QJsonValue(id));
     }
     return result;
 }
@@ -205,7 +293,7 @@ std::optional<QJsonObject> Dto(not_null<Main::Session*> session, const MTPDialog
     if (!include || !pinned || !exclude) return std::nullopt;
     if (const auto previous = Get(session).folders.find(data.vid().v); previous != Get(session).folders.end()) {
         const auto retain = [&](QJsonArray &target, const std::vector<qint64> &ids) {
-            for (const auto id : ids) if (!Get(session).chatData.contains(id) && !target.contains(QJsonValue(id))) target.push_back(QJsonValue(id));
+            for (const auto id : ids) if (!BridgeFor(session)->historyForChat(id) && !target.contains(QJsonValue(id))) target.push_back(QJsonValue(id));
         };
         retain(*include, previous->second.include); retain(*pinned, previous->second.pinned); retain(*exclude, previous->second.exclude);
     }
@@ -334,29 +422,19 @@ void Intercept(not_null<MTP::Instance*> instance, mtpRequestId requestId, const 
             Load(weak.get(), [weak, requested, answer, done](bool ok) {
                 if (!weak) return;
                 if (!ok) { answer.fail(u"FOLDER_LOAD_FAILED"_q); done(); return; }
-                auto dialogs = QVector<MTPDialog>();
-                const auto &state = Get(weak.get());
-                for (const auto &input : requested.v) {
-                    if (input.type() != mtpc_inputDialogPeer) continue;
-                    const auto peerId = InputPeerId(input.c_inputDialogPeer().vpeer(), weak.get());
-                    const auto found = state.chats.find(peerId);
-                    if (found == state.chats.end()) continue;
-                    const auto dto = state.chatData.find(found->second)->second;
-                    const auto history = BridgeFor(weak.get())->historyForChat(found->second);
-                    const auto receipts = dto.value("receipt_state").toObject();
-                    auto flags = MTPDdialog::Flags();
-                    if (dto.value("archived").toBool()) flags |= MTPDdialog::Flag::f_folder_id;
-                    if (dto.value("pinned").toBool()) flags |= MTPDdialog::Flag::f_pinned;
-                    if (dto.value("marked_unread").toBool()) flags |= MTPDdialog::Flag::f_unread_mark;
-                    dialogs.push_back(MTP_dialog(MTP_flags(flags), peerToMTP(history->peer->id),
-                        MTP_int(dto.value("last_message").toObject().value("id").toInt()),
-                        MTP_int(receipts.value("inbox").toObject().value("read_through_id").toInt()),
-                        MTP_int(receipts.value("outbox").toObject().value("read_through_id").toInt()),
-                        MTP_int(dto.value("unread_count").toInt()), MTP_int(0), MTP_int(0), MTP_int(0),
-                        BridgeFor(weak.get())->communityNotifySettings(found->second, dto), MTP_int(0), MTPDraftMessage(), MTP_int(1), MTP_int(0)));
-                }
-                answer.done(MTP_messages_peerDialogs(MTP_vector<MTPDialog>(dialogs), MTP_vector<MTPMessage>(), MTP_vector<MTPChat>(), MTP_vector<MTPUser>(), MTP_updates_state(MTP_int(0), MTP_int(0), MTP_int(base::unixtime::now()), MTP_int(0), MTP_int(0))));
-                done();
+                LoadPeerChats(
+                    weak.get(),
+                    requested,
+                    [weak, requested, answer, done](PeerChats chats, bool loaded) {
+                        if (!weak) return;
+                        if (!loaded) {
+                            answer.fail(u"FOLDER_LOAD_FAILED"_q);
+                            done();
+                            return;
+                        }
+                        ReplyPeerDialogs(weak.get(), requested, chats, answer);
+                        done();
+                    });
             });
         });
         return;

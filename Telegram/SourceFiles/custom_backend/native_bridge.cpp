@@ -1056,8 +1056,9 @@ NativeBridge::NativeBridge(Main::Session *session)
     loadContacts();
     refreshReactionsCatalog();
     QTimer::singleShot(0, this, [this] {
-        loadCachedChats();
-        reloadChats();
+        if (!_chatsRequestGeneration) {
+            reloadChats();
+        }
     });
 	_eventSeq = std::max<qint64>(0, client().eventSequence());
 	_liveUpdates = std::make_unique<LiveUpdatesConnection>(
@@ -2478,10 +2479,12 @@ void NativeBridge::loadDefaultNotifySettings() {
 }
 
 void NativeBridge::reloadChats() {
+    _chatsLoading = true;
     const auto generation = ++_chatsRequestGeneration;
     const auto weak = QPointer<NativeBridge>(this);
     client().chatsLight([weak, generation](QJsonDocument doc, QString error, int status) {
         if (!weak || generation != weak->_chatsRequestGeneration) return;
+        weak->_chatsLoading = false;
         if (status == 401) {
             const auto account = &weak->_session->account();
             ClearLogin(weak->_session);
@@ -2496,23 +2499,22 @@ void NativeBridge::reloadChats() {
             return;
         }
         weak->applyChats(doc);
-        SaveChatsCache(weak->_session, doc.toJson(QJsonDocument::Compact));
+        weak->_chatsReady = true;
         weak->_session->data().chatsListDone(nullptr);
         weak->_session->data().sendHistoryChangeNotifications();
         weak->runAfterChatsReload(true);
     });
 }
 
-void NativeBridge::hydrateFolderChats(Fn<void(QJsonDocument, bool)> done) {
-    const auto weak = QPointer<NativeBridge>(this);
-    client().chatsLight([weak, done](QJsonDocument doc, QString error, int status) {
-        if (!weak) return;
-        if (!error.isEmpty() || status != 200 || !doc.isArray()) { done({}, false); return; }
-        weak->applyChats(doc);
-        SaveChatsCache(weak->_session, doc.toJson(QJsonDocument::Compact));
-        weak->_session->data().sendHistoryChangeNotifications();
-        done(doc, true);
-    });
+void NativeBridge::whenChatsLoaded(Fn<void(bool)> done) {
+    if (!_chatsLoading && _chatsReady) {
+        done(true);
+        return;
+    }
+    _afterChatsReload.push_back(std::move(done));
+    if (!_chatsLoading) {
+        reloadChats();
+    }
 }
 
 void NativeBridge::runAfterChatsReload(bool listLoaded) {
@@ -2708,15 +2710,6 @@ void NativeBridge::applyPresence(const QJsonObject &data) {
 	}
 }
 
-void NativeBridge::loadCachedChats() {
-    const auto json = LoadChatsCache(_session);
-    if (json.isEmpty()) return;
-    const auto doc = QJsonDocument::fromJson(json);
-    if (!doc.isArray()) return;
-    applyChats(doc);
-    _session->data().sendHistoryChangeNotifications();
-}
-
 void NativeBridge::finishInitialLoadIfReady() {
     if (_contactsDone
         && _chatsDone
@@ -2756,16 +2749,6 @@ void NativeBridge::removeChat(qint64 chatId) {
     }
     if (keepPreview) {
         applyCommunityChat(previewChat, false);
-    }
-    const auto cached = QJsonDocument::fromJson(LoadChatsCache(_session));
-    if (cached.isArray()) {
-        auto remaining = QJsonArray();
-        for (const auto &entry : cached.array()) {
-            if (entry.toObject().value("id").toVariant().toLongLong() != chatId) {
-                remaining.push_back(entry);
-            }
-        }
-        SaveChatsCache(_session, QJsonDocument(remaining).toJson(QJsonDocument::Compact));
     }
 }
 

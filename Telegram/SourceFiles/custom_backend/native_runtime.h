@@ -95,8 +95,6 @@ void RememberLogin(
 	const QJsonDocument &document);
 void RememberUser(Main::Session *session, const QJsonObject &user);
 void RememberEventSequence(Main::Session *session, qint64 seq);
-[[nodiscard]] QByteArray LoadChatsCache(Main::Session *session);
-void SaveChatsCache(Main::Session *session, const QByteArray &json);
 
 [[nodiscard]] QJsonObject LoadDefaultNotifyCache(
 	Main::Session *session,

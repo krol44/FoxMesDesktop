@@ -121,6 +121,7 @@ AuthContext &EnsureContext(Main::Account *account, qint64 userId) {
     }
     if (account && !context.loaded) {
         context.loaded = true;
+        account->local().clearPref(details::kChatsCachePref);
         [[maybe_unused]] static const auto forgotten = [] {
             details::ForgetPlaintextData();
             return true;
@@ -351,16 +352,6 @@ void RememberEventSequence(Main::Session *session, qint64 seq) {
 	if (id <= 0 || seq <= 0) return;
 	EnsureContext(session).client->setEventSequence(seq);
 	SaveEventSequence(id, seq);
-}
-
-QByteArray LoadChatsCache(Main::Session *session) {
-	if (SessionUserId(session) <= 0) return {};
-	return ReadStoredData(&session->account(), details::kChatsCachePref);
-}
-
-void SaveChatsCache(Main::Session *session, const QByteArray &json) {
-	if (SessionUserId(session) <= 0 || json.isEmpty()) return;
-	WriteStoredData(&session->account(), details::kChatsCachePref, json);
 }
 
 [[nodiscard]] std::string DefaultNotifyCacheKey(const QString &scope) {
