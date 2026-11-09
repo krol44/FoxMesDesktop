@@ -10,6 +10,7 @@ This file is part of FoxMes Desktop.
 #include <optional>
 
 class DocumentData;
+class FileLoader;
 class PhotoData;
 
 struct AVFormatContext;
@@ -26,6 +27,9 @@ class Reader;
 
 namespace CustomBackend::Streaming {
 
+void SetWebDownloadTarget(
+	not_null<FileLoader*> loader,
+	const QString &path);
 
 void RememberSource(not_null<DocumentData*> document, const QString &url);
 void RememberPlaylist(

@@ -616,6 +616,10 @@ webFileLoader::webFileLoader(
 	autoLoading,
 	cacheTag)
 , _url(url) {
+	if (CustomBackend::Enabled()) {
+		CustomBackend::Streaming::SetWebDownloadTarget(this, to);
+		return;
+	}
 }
 
 webFileLoader::webFileLoader(

@@ -1012,7 +1012,6 @@ void ApiClient::deleteMessagesByDate(
     jsonRequest("DELETE", QString("/chats/%1/messages/date-range").arg(chatId), QJsonDocument(QJsonObject{
         {"min_date", minDate},
         {"max_date", maxDate},
-        {"revoke", true},
     }), std::move(done));
 }
 

@@ -1,5 +1,6 @@
 #include "custom_backend/native_delete_adapter.h"
 
+#include "custom_backend/api_client.h"
 #include "custom_backend/native_bridge.h"
 #include "custom_backend/native_runtime.h"
 #include "custom_backend/native_scheduled_adapter.h"
@@ -12,7 +13,143 @@
 #include "main/main_session.h"
 #include "ui/effects/thanos_effect.h"
 
+#include <QtCore/QPointer>
+#include <QtCore/QTimer>
+
+#include <algorithm>
+#include <memory>
+
 namespace CustomBackend {
+namespace {
+
+class DeleteRequest final : public std::enable_shared_from_this<DeleteRequest> {
+public:
+	DeleteRequest(
+		not_null<ApiClient*> client,
+		qint64 chatId,
+		QList<qint64> messageIds,
+		QString operationId,
+		std::function<void(QJsonDocument)> done);
+	void send();
+
+private:
+	void resolve();
+	void retry();
+	void complete(QJsonDocument result);
+
+	const QPointer<ApiClient> _client;
+	const qint64 _chatId = 0;
+	const QList<qint64> _messageIds;
+	const QString _operationId;
+	std::function<void(QJsonDocument)> _done;
+	int _retryDelay = 1000;
+
+};
+
+DeleteRequest::DeleteRequest(
+		not_null<ApiClient*> client,
+		qint64 chatId,
+		QList<qint64> messageIds,
+		QString operationId,
+		std::function<void(QJsonDocument)> done)
+: _client(client.get())
+, _chatId(chatId)
+, _messageIds(std::move(messageIds))
+, _operationId(std::move(operationId))
+, _done(std::move(done)) {
+}
+
+void DeleteRequest::send() {
+	if (!_client) {
+		return;
+	}
+	const auto self = shared_from_this();
+	_client->deleteMessages(
+		_chatId,
+		_messageIds,
+		_operationId,
+		[self](QJsonDocument doc, QString error, int status) {
+			if (IsTransportFailure(status)
+				|| status >= 500
+				|| status == 408
+				|| status == 429) {
+				self->retry();
+			} else if (error.isEmpty()
+				&& doc.isObject()
+				&& doc.object().value("deleted_ids").isArray()) {
+				self->complete(std::move(doc));
+			} else if (status >= 200 && status < 300) {
+				self->retry();
+			} else {
+				self->complete({});
+			}
+		});
+}
+
+void DeleteRequest::resolve() {
+	if (!_client) {
+		return;
+	}
+	const auto self = shared_from_this();
+	_client->operationResult(
+		_operationId,
+		[self](QJsonDocument doc, QString error, int status) {
+			if (IsTransportFailure(status)
+				|| status >= 500
+				|| status == 408
+				|| status == 429) {
+				self->retry();
+				return;
+			}
+			const auto object = doc.object();
+			const auto result = object.value("result").toObject();
+			if (error.isEmpty()
+				&& object.value("status").toString() == u"done"_q
+				&& result.value("deleted_ids").isArray()) {
+				self->complete(QJsonDocument(result));
+			} else if (error.isEmpty()
+				&& object.value("status").toString() == u"unknown"_q) {
+				self->send();
+			} else if (status >= 200 && status < 300) {
+				self->retry();
+			} else {
+				self->complete({});
+			}
+		});
+}
+
+void DeleteRequest::retry() {
+	if (!_client) {
+		return;
+	}
+	const auto self = shared_from_this();
+	QTimer::singleShot(_retryDelay, _client.data(), [self] {
+		self->resolve();
+	});
+	_retryDelay = std::min(_retryDelay * 2, 16'000);
+}
+
+void DeleteRequest::complete(QJsonDocument result) {
+	if (const auto done = std::move(_done)) {
+		done(std::move(result));
+	}
+}
+
+}
+
+void DeleteMessagesWithRecovery(
+		not_null<ApiClient*> client,
+		qint64 chatId,
+		const QList<qint64> &messageIds,
+		const QString &operationId,
+		std::function<void(QJsonDocument)> done) {
+	std::make_shared<DeleteRequest>(
+		client,
+		chatId,
+		messageIds,
+		operationId,
+		std::move(done))->send();
+}
 
 bool NativeDeleteEffectAvailable() {
     return Ui::ThanosEffect::Supported();

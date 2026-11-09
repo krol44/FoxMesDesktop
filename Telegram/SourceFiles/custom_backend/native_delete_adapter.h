@@ -6,6 +6,8 @@
 #include <functional>
 #include <vector>
 
+class QJsonDocument;
+
 class History;
 class HistoryItem;
 class PeerData;
@@ -15,6 +17,15 @@ class Session;
 }
 
 namespace CustomBackend {
+
+class ApiClient;
+
+void DeleteMessagesWithRecovery(
+	not_null<ApiClient*> client,
+	qint64 chatId,
+	const QList<qint64> &messageIds,
+	const QString &operationId,
+	std::function<void(QJsonDocument)> done);
 
 [[nodiscard]] bool NativeDeleteEffectAvailable();
 void DeleteMessagesWithEffect(

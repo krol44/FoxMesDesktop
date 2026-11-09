@@ -5385,6 +5385,12 @@ void NativeBridge::deleteMessages(
             return;
         }
         auto acknowledged = false;
+		if (!doc.isObject() && history) {
+			ShowSettingsToast(weak->_session, history->peer, u"Delete failed"_q);
+			weak->_bottomLoadedChats.erase(chatId);
+			history->clear(History::ClearType::Unload);
+			weak->reloadChats();
+		}
         if (doc.isObject()) {
             const auto obj = doc.object();
             const auto readIds = [&](const QString field) {
@@ -5433,26 +5439,12 @@ void NativeBridge::deleteMessages(
         }
         finish();
     };
-    client().deleteMessages(chatId, messageIds, operationId, [weak, chatId, operationId, applyResult, finish](
-            QJsonDocument doc,
-            QString error,
-            int status) mutable {
-        if (!error.isEmpty() && (status == 0 || status >= 500)) {
-            if (weak) {
-                weak->client().operationResult(operationId, [applyResult](QJsonDocument result, QString, int) {
-                    if (result.isObject() && result.object().value("status").toString() == "done") {
-                        applyResult(QJsonDocument(result.object().value("result").toObject()));
-                    } else {
-                        applyResult(QJsonDocument());
-                    }
-                });
-            } else {
-                finish();
-            }
-            return;
-        }
-        applyResult((error.isEmpty() && doc.isObject()) ? doc : QJsonDocument());
-    });
+	DeleteMessagesWithRecovery(
+		&client(),
+		chatId,
+		messageIds,
+		operationId,
+		applyResult);
 }
 
 void NativeBridge::removeHistoryThrough(
@@ -6795,10 +6787,28 @@ void NativeBridge::handleEvent(const QJsonObject &event) {
     }
     const auto type = event.value("type").toString();
     const auto data = event.value("data").toObject();
-	if (sequence > 0 && _eventSeq > 0 && sequence > (_eventSeq + 1)) {
-		resyncAfterGap(sequence, sequence);
+	if (type == u"gap.detected"_q) {
+		auto resumeFrom = data.value("next_seq").toVariant().toLongLong();
+		if (resumeFrom <= 0) {
+			resumeFrom = data.value("resume_from").toVariant().toLongLong();
+		}
+		resyncAfterGap(resumeFrom, sequence);
 		return;
 	}
+	if (sequence > 0 && _eventSeq > 0 && sequence > (_eventSeq + 1)) {
+		LOG(("FoxMes: event gap after seq %1, received %2, requesting replay"
+			).arg(_eventSeq).arg(sequence));
+		forceLiveUpdatesRestart();
+		return;
+	}
+	const auto applied = gsl::finally([&] {
+		if (sequence > _eventSeq) {
+			_eventSeq = sequence;
+			client().setEventSequence(_eventSeq);
+			RememberEventSequence(_session, _eventSeq);
+			_lastGapResumeFrom = 0;
+		}
+	});
 
     if (Conferences::HandleEvent(_session, type, data)) {
         return;
@@ -6968,13 +6978,6 @@ void NativeBridge::handleEvent(const QJsonObject &event) {
 			_draftRevisionByChat[chatId] = 0;
 		}
 	} else if (Scheduled::ApplyEvent(_session, type, data)) {
-	} else if (type == u"gap.detected"_q) {
-		auto resumeFrom = data.value("next_seq").toVariant().toLongLong();
-		if (resumeFrom <= 0) {
-			resumeFrom = data.value("resume_from").toVariant().toLongLong();
-		}
-		resyncAfterGap(resumeFrom, sequence);
-		return;
     } else if (type == u"wallpapers.updated"_q) {
         Wallpapers::RequestGallery(_session, nullptr);
         Wallpapers::RequestDefault(_session);
@@ -6994,12 +6997,6 @@ void NativeBridge::handleEvent(const QJsonObject &event) {
     } else if (type.startsWith(u"chat."_q)) {
         reloadChats();
     }
-	if (sequence > _eventSeq) {
-		_eventSeq = sequence;
-		client().setEventSequence(_eventSeq);
-		RememberEventSequence(_session, _eventSeq);
-		_lastGapResumeFrom = 0;
-	}
 }
 
 void NativeBridge::forceLiveUpdatesRestart() {

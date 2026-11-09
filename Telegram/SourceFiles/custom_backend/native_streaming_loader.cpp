@@ -18,6 +18,7 @@ This file is part of FoxMes Desktop.
 #include "main/main_session.h"
 #include "media/streaming/media_streaming_loader.h"
 #include "media/streaming/media_streaming_reader.h"
+#include "storage/file_download.h"
 #include "storage/streamed_file_downloader.h"
 #include "ui/image/image_location.h"
 
@@ -647,6 +648,13 @@ int SeekMpegTs(
 			: av_rescale_q(kMpegTsSeekStep, ms, stream->time_base);
 	}
 	return av_seek_frame(format, -1, 0, AVSEEK_FLAG_BYTE);
+}
+
+void SetWebDownloadTarget(
+		not_null<FileLoader*> loader,
+		const QString &path) {
+	const auto applied = loader->setFileName(path);
+	Expects(applied);
 }
 
 void RememberSource(not_null<DocumentData*> document, const QString &url) {
